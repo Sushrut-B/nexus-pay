@@ -104,3 +104,11 @@ Today, the complete multi-module distributed consensus system was engineered fro
 | TSK-702 | Docker Compose (5-Node) | Bridge networking topology for 5 container nodes | Completed | 100% |
 | TSK-703 | PowerShell Control Suite | `start-5node-cluster.ps1`, `stop-5node-cluster.ps1` | Completed | 100% |
 | TSK-704 | Chaos Demonstration Automation | `demo-chaos-cluster.ps1` validating failover and data persistence | Completed | 100% |
+| **TSK-800** | **Day 2: Persistent Storage & Range Scan Engine** | LSM-Tree persistent backend, range scans, SSTables, tombstones | **Completed** | 100% |
+| TSK-801 | `StateMachine.scan()` Contract | Range slicing contract across sorted keys [fromKey, toKey] | Completed | 100% |
+| TSK-802 | `KeyValueStore` SkipList Upgrade | Upgraded in-memory engine to `ConcurrentSkipListMap` for $O(\log N)$ range slices | Completed | 100% |
+| TSK-803 | Persistent LSM-Tree Engine (`LsmKeyValueStore`) | MemTable + immutable SSTables, sparse index binary search, tombstones | Completed | 100% |
+| TSK-804 | Raft Range Scans (`scanLinearizable` & `scanStale`) | Quorum heartbeat lease confirmation for linearizable range reads | Completed | 100% |
+| TSK-805 | REST Range Scan Endpoint | `GET /v1/kv/scan?from=A&to=Z&limit=100` with JSON response | Completed | 100% |
+| TSK-806 | Client SDK Range Scan | Added `client.scan(fromKey, toKey, limit)` in `QuorixClient` | Completed | 100% |
+

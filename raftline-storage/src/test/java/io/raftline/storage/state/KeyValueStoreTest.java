@@ -74,4 +74,19 @@ class KeyValueStoreTest {
         ApplyResult res = restoredStore.apply(retryK2);
         assertThat(res.isDuplicate()).isTrue();
     }
+
+    @Test
+    void testRangeScan() {
+        kvStore.apply(new LogEntry(1, 1, Command.put("a:1", "alpha".getBytes(StandardCharsets.UTF_8))));
+        kvStore.apply(new LogEntry(2, 1, Command.put("a:2", "bravo".getBytes(StandardCharsets.UTF_8))));
+        kvStore.apply(new LogEntry(3, 1, Command.put("a:3", "charlie".getBytes(StandardCharsets.UTF_8))));
+        kvStore.apply(new LogEntry(4, 1, Command.put("b:1", "delta".getBytes(StandardCharsets.UTF_8))));
+
+        java.util.Map<String, byte[]> scan = kvStore.scan("a:1", "a:3", 10);
+        assertThat(scan).containsOnlyKeys("a:1", "a:2", "a:3");
+        assertThat(new String(scan.get("a:2"), StandardCharsets.UTF_8)).isEqualTo("bravo");
+
+        java.util.Map<String, byte[]> scanLimit = kvStore.scan("a:1", "b:1", 2);
+        assertThat(scanLimit).hasSize(2);
+    }
 }

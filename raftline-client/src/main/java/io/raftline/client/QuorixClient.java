@@ -99,6 +99,39 @@ public class QuorixClient implements Closeable {
         return response.body();
     }
 
+    public java.util.Map<String, String> scan(String fromKey, String toKey, int limit) throws IOException, InterruptedException {
+        StringBuilder urlBuilder = new StringBuilder("/v1/kv/scan?");
+        if (fromKey != null && !fromKey.isEmpty()) {
+            urlBuilder.append("from=").append(java.net.URLEncoder.encode(fromKey, StandardCharsets.UTF_8)).append("&");
+        }
+        if (toKey != null && !toKey.isEmpty()) {
+            urlBuilder.append("to=").append(java.net.URLEncoder.encode(toKey, StandardCharsets.UTF_8)).append("&");
+        }
+        urlBuilder.append("limit=").append(limit > 0 ? limit : 100);
+
+        String path = urlBuilder.toString();
+        HttpResponse<byte[]> response = executeWithRetry((baseUrl) -> {
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(URI.create(baseUrl + path))
+                    .GET()
+                    .timeout(Duration.ofSeconds(5))
+                    .build();
+            return httpClient.send(request, HttpResponse.BodyHandlers.ofByteArray());
+        });
+
+        if (response.statusCode() != 200) {
+            throw new IOException("Scan failed with HTTP " + response.statusCode() + ": " + new String(response.body()));
+        }
+
+        JsonNode root = json.readTree(response.body());
+        JsonNode dataNode = root.get("data");
+        java.util.Map<String, String> result = new java.util.LinkedHashMap<>();
+        if (dataNode != null && dataNode.isObject()) {
+            dataNode.fields().forEachRemaining(entry -> result.put(entry.getKey(), entry.getValue().asText()));
+        }
+        return result;
+    }
+
     public void delete(String key) throws IOException, InterruptedException {
         long seq = sequenceGenerator.incrementAndGet();
         executeWithRetry((baseUrl) -> {

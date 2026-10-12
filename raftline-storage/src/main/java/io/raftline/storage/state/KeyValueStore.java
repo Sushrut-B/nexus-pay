@@ -10,20 +10,23 @@ import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.StandardCopyOption;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.ConcurrentNavigableMap;
+import java.util.concurrent.ConcurrentSkipListMap;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 
 /**
- * Thread-safe In-Memory Key-Value State Machine with client session deduplication
- * and point-in-time binary snapshotting.
+ * Thread-safe In-Memory Key-Value State Machine with client session deduplication,
+ * range scans, and point-in-time binary snapshotting.
  */
 public class KeyValueStore implements StateMachine {
     private static final Logger log = LoggerFactory.getLogger(KeyValueStore.class);
     private static final int SNAPSHOT_MAGIC = 0x52414654; // "RAFT"
 
-    private final ConcurrentMap<String, byte[]> data = new ConcurrentHashMap<>();
+    private final ConcurrentNavigableMap<String, byte[]> data = new ConcurrentSkipListMap<>();
     private final ConcurrentMap<String, SessionRecord> sessions = new ConcurrentHashMap<>();
     private final ReentrantReadWriteLock rwLock = new ReentrantReadWriteLock();
 
@@ -91,6 +94,42 @@ public class KeyValueStore implements StateMachine {
         try {
             byte[] value = data.get(key);
             return value != null ? value.clone() : null;
+        } finally {
+            rwLock.readLock().unlock();
+        }
+    }
+
+    @Override
+    public Map<String, byte[]> scan(String fromKey, String toKey, int limit) {
+        rwLock.readLock().lock();
+        try {
+            ConcurrentNavigableMap<String, byte[]> sub;
+            boolean hasFrom = fromKey != null && !fromKey.isEmpty();
+            boolean hasTo = toKey != null && !toKey.isEmpty();
+
+            if (hasFrom && hasTo) {
+                if (fromKey.compareTo(toKey) <= 0) {
+                    sub = data.subMap(fromKey, true, toKey, true);
+                } else {
+                    sub = data.subMap(toKey, true, fromKey, true);
+                }
+            } else if (hasFrom) {
+                sub = data.tailMap(fromKey, true);
+            } else if (hasTo) {
+                sub = data.headMap(toKey, true);
+            } else {
+                sub = data;
+            }
+
+            int maxResults = (limit > 0) ? limit : 100;
+            Map<String, byte[]> result = new LinkedHashMap<>();
+            for (Map.Entry<String, byte[]> entry : sub.entrySet()) {
+                if (result.size() >= maxResults) {
+                    break;
+                }
+                result.put(entry.getKey(), entry.getValue().clone());
+            }
+            return result;
         } finally {
             rwLock.readLock().unlock();
         }

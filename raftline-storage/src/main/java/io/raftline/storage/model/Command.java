@@ -28,8 +28,16 @@ public final class Command {
         return new Command(CommandType.PUT, key, value, clientId, sequenceNumber);
     }
 
+    public static Command put(String key, byte[] value) {
+        return new Command(CommandType.PUT, key, value, "", 0L);
+    }
+
     public static Command delete(String key, String clientId, long sequenceNumber) {
         return new Command(CommandType.DELETE, key, new byte[0], clientId, sequenceNumber);
+    }
+
+    public static Command delete(String key) {
+        return new Command(CommandType.DELETE, key, new byte[0], "", 0L);
     }
 
     public static Command noop() {

@@ -17,6 +17,7 @@ import java.io.IOException;
 import java.io.OutputStream;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.UUID;
@@ -77,11 +78,69 @@ public class RaftHttpServer implements Closeable {
         }
     }
 
+    private Map<String, String> parseQueryParams(String query) {
+        if (query == null || query.isBlank()) return Collections.emptyMap();
+        Map<String, String> map = new java.util.LinkedHashMap<>();
+        for (String param : query.split("&")) {
+            String[] pair = param.split("=", 2);
+            if (pair.length == 2) {
+                map.put(pair[0], java.net.URLDecoder.decode(pair[1], StandardCharsets.UTF_8));
+            } else if (pair.length == 1) {
+                map.put(pair[0], "");
+            }
+        }
+        return map;
+    }
+
     private class KeyValueHandler implements HttpHandler {
         @Override
         public void handle(HttpExchange exchange) throws IOException {
             String path = exchange.getRequestURI().getPath();
             String method = exchange.getRequestMethod();
+
+            if ("/v1/kv/scan".equals(path) || "/v1/kv".equals(path)) {
+                if (!"GET".equalsIgnoreCase(method)) {
+                    sendJson(exchange, 405, Map.of("error", "Range scan must use GET"));
+                    return;
+                }
+                String query = exchange.getRequestURI().getQuery();
+                Map<String, String> qMap = parseQueryParams(query);
+                String from = qMap.get("from");
+                String to = qMap.get("to");
+                int limit = qMap.containsKey("limit") ? Integer.parseInt(qMap.get("limit")) : 100;
+                boolean stale = "true".equalsIgnoreCase(qMap.get("stale"));
+
+                try {
+                    Map<String, byte[]> scanResults;
+                    if (stale) {
+                        scanResults = raftNode.scanStale(from, to, limit);
+                    } else {
+                        scanResults = raftNode.scanLinearizable(from, to, limit).get(5, TimeUnit.SECONDS);
+                    }
+
+                    Map<String, String> stringResults = new java.util.LinkedHashMap<>();
+                    for (Map.Entry<String, byte[]> e : scanResults.entrySet()) {
+                        stringResults.put(e.getKey(), new String(e.getValue(), StandardCharsets.UTF_8));
+                    }
+
+                    sendJson(exchange, 200, Map.of(
+                            "count", stringResults.size(),
+                            "from", from != null ? from : "",
+                            "to", to != null ? to : "",
+                            "data", stringResults
+                    ));
+                } catch (ExecutionException e) {
+                    Throwable cause = e.getCause();
+                    if (cause instanceof NotLeaderException nle) {
+                        handleNotLeader(exchange, nle.getLeaderHint());
+                    } else {
+                        sendJson(exchange, 500, Map.of("error", e.getMessage()));
+                    }
+                } catch (Exception e) {
+                    sendJson(exchange, 500, Map.of("error", e.getMessage()));
+                }
+                return;
+            }
 
             // Expected format: /v1/kv/{key}
             String prefix = "/v1/kv/";

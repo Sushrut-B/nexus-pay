@@ -23,6 +23,11 @@ public interface StateMachine {
     byte[] get(String key);
 
     /**
+     * Scans a range of keys [fromKey, toKey] up to limit entries in lexicographical order.
+     */
+    java.util.Map<String, byte[]> scan(String fromKey, String toKey, int limit);
+
+    /**
      * The index of the highest log entry applied to the state machine so far.
      */
     long getLastAppliedIndex();

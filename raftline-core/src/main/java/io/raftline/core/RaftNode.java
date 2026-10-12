@@ -777,6 +777,59 @@ public class RaftNode implements RaftRpcHandler, Closeable {
         }
     }
 
+    private CompletableFuture<Void> confirmLeadershipQuorum() {
+        if (role != Role.LEADER) {
+            CompletableFuture<Void> failed = new CompletableFuture<>();
+            failed.completeExceptionally(new NotLeaderException(currentLeaderId));
+            return failed;
+        }
+
+        if (config.getClusterSize() == 1) {
+            return CompletableFuture.completedFuture(null);
+        }
+
+        CompletableFuture<Void> quorumFuture = new CompletableFuture<>();
+        long currentTerm = metaStorage.getCurrentTerm();
+        final int[] acks = {1}; // self
+        final int quorum = config.getQuorum();
+
+        for (String peerId : config.getPeerIds()) {
+            long prevLogIndex = wal.getLastLogIndex();
+            long prevLogTerm = wal.getLastLogTerm();
+            AppendEntriesRequest heartbeat = new AppendEntriesRequest(
+                    currentTerm,
+                    config.getLocalNodeId(),
+                    prevLogIndex,
+                    prevLogTerm,
+                    Collections.emptyList(),
+                    commitIndex
+            );
+
+            transport.sendAppendEntries(peerId, heartbeat).whenComplete((res, err) -> {
+                if (err != null || !res.success()) return;
+
+                stateLock.lock();
+                try {
+                    if (role != Role.LEADER || metaStorage.getCurrentTerm() != currentTerm) {
+                        if (!quorumFuture.isDone()) {
+                            quorumFuture.completeExceptionally(new NotLeaderException(currentLeaderId));
+                        }
+                        return;
+                    }
+
+                    acks[0]++;
+                    if (acks[0] >= quorum && !quorumFuture.isDone()) {
+                        quorumFuture.complete(null);
+                    }
+                } finally {
+                    stateLock.unlock();
+                }
+            });
+        }
+
+        return quorumFuture;
+    }
+
     /**
      * Linearizable Read via ReadIndex:
      * Confirms current leadership with a heartbeat round before returning state.
@@ -784,61 +837,20 @@ public class RaftNode implements RaftRpcHandler, Closeable {
     public CompletableFuture<byte[]> readLinearizable(String key) {
         stateLock.lock();
         try {
-            if (role != Role.LEADER) {
-                CompletableFuture<byte[]> failed = new CompletableFuture<>();
-                failed.completeExceptionally(new NotLeaderException(currentLeaderId));
-                return failed;
-            }
+            return confirmLeadershipQuorum().thenApply(v -> stateMachine.get(key));
+        } finally {
+            stateLock.unlock();
+        }
+    }
 
-            long targetReadIndex = commitIndex;
-            CompletableFuture<byte[]> readFuture = new CompletableFuture<>();
-
-            if (config.getClusterSize() == 1) {
-                readFuture.complete(stateMachine.get(key));
-                return readFuture;
-            }
-
-            // Quorum heartbeat confirmation
-            long currentTerm = metaStorage.getCurrentTerm();
-            final int[] acks = {1}; // self
-            final int quorum = config.getQuorum();
-
-            for (String peerId : config.getPeerIds()) {
-                long prevLogIndex = wal.getLastLogIndex();
-                long prevLogTerm = wal.getLastLogTerm();
-                AppendEntriesRequest heartbeat = new AppendEntriesRequest(
-                        currentTerm,
-                        config.getLocalNodeId(),
-                        prevLogIndex,
-                        prevLogTerm,
-                        Collections.emptyList(),
-                        commitIndex
-                );
-
-                transport.sendAppendEntries(peerId, heartbeat).whenComplete((res, err) -> {
-                    if (err != null || !res.success()) return;
-
-                    stateLock.lock();
-                    try {
-                        if (role != Role.LEADER || metaStorage.getCurrentTerm() != currentTerm) {
-                            if (!readFuture.isDone()) {
-                                readFuture.completeExceptionally(new NotLeaderException(currentLeaderId));
-                            }
-                            return;
-                        }
-
-                        acks[0]++;
-                        if (acks[0] >= quorum && !readFuture.isDone()) {
-                            // Quorum confirmed leadership!
-                            readFuture.complete(stateMachine.get(key));
-                        }
-                    } finally {
-                        stateLock.unlock();
-                    }
-                });
-            }
-
-            return readFuture;
+    /**
+     * Linearizable Range Scan:
+     * Confirms current leadership before scanning the range [fromKey, toKey].
+     */
+    public CompletableFuture<Map<String, byte[]>> scanLinearizable(String fromKey, String toKey, int limit) {
+        stateLock.lock();
+        try {
+            return confirmLeadershipQuorum().thenApply(v -> stateMachine.scan(fromKey, toKey, limit));
         } finally {
             stateLock.unlock();
         }
@@ -849,6 +861,13 @@ public class RaftNode implements RaftRpcHandler, Closeable {
      */
     public byte[] readStale(String key) {
         return stateMachine.get(key);
+    }
+
+    /**
+     * Stale range scan directly from local state machine.
+     */
+    public Map<String, byte[]> scanStale(String fromKey, String toKey, int limit) {
+        return stateMachine.scan(fromKey, toKey, limit);
     }
 
     // =========================================================================
