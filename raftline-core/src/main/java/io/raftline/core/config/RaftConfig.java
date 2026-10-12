@@ -14,6 +14,8 @@ public class RaftConfig {
     private final int maxEntriesPerAppend;
     private final long snapshotThresholdCount;
     private final boolean preVoteEnabled;
+    private final boolean leaderLeaseEnabled;
+    private final long leaderLeaseDurationMs;
 
     public RaftConfig(String localNodeId, List<String> peerIds) {
         this(localNodeId, peerIds, 300, 750, 50, 500, 1000, true);
@@ -31,6 +33,16 @@ public class RaftConfig {
                       long minElectionTimeoutMs, long maxElectionTimeoutMs,
                       long heartbeatIntervalMs, int maxEntriesPerAppend,
                       long snapshotThresholdCount, boolean preVoteEnabled) {
+        this(localNodeId, peerIds, minElectionTimeoutMs, maxElectionTimeoutMs,
+                heartbeatIntervalMs, maxEntriesPerAppend, snapshotThresholdCount, preVoteEnabled,
+                true, minElectionTimeoutMs / 2);
+    }
+
+    public RaftConfig(String localNodeId, List<String> peerIds,
+                      long minElectionTimeoutMs, long maxElectionTimeoutMs,
+                      long heartbeatIntervalMs, int maxEntriesPerAppend,
+                      long snapshotThresholdCount, boolean preVoteEnabled,
+                      boolean leaderLeaseEnabled, long leaderLeaseDurationMs) {
         this.localNodeId = Objects.requireNonNull(localNodeId, "localNodeId cannot be null");
         this.peerIds = new CopyOnWriteArrayList<>(peerIds != null ? peerIds : Collections.emptyList());
         this.minElectionTimeoutMs = minElectionTimeoutMs;
@@ -39,6 +51,8 @@ public class RaftConfig {
         this.maxEntriesPerAppend = maxEntriesPerAppend;
         this.snapshotThresholdCount = snapshotThresholdCount;
         this.preVoteEnabled = preVoteEnabled;
+        this.leaderLeaseEnabled = leaderLeaseEnabled;
+        this.leaderLeaseDurationMs = leaderLeaseDurationMs;
     }
 
     public String getLocalNodeId() {
@@ -90,5 +104,13 @@ public class RaftConfig {
 
     public boolean isPreVoteEnabled() {
         return preVoteEnabled;
+    }
+
+    public boolean isLeaderLeaseEnabled() {
+        return leaderLeaseEnabled;
+    }
+
+    public long getLeaderLeaseDurationMs() {
+        return leaderLeaseDurationMs;
     }
 }

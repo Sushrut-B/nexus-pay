@@ -50,6 +50,9 @@ public class RaftNode implements RaftRpcHandler, Closeable {
     private final Map<String, Long> nextIndex = new ConcurrentHashMap<>();
     private final Map<String, Long> matchIndex = new ConcurrentHashMap<>();
 
+    // Leader lease & peer heartbeat ACK tracking (§6.4)
+    private final Map<String, Long> peerLastAckNanos = new ConcurrentHashMap<>();
+
     // Client requests waiting for log entry commitment
     private final Map<Long, CompletableFuture<ApplyResult>> pendingClientRequests = new ConcurrentHashMap<>();
 
@@ -280,6 +283,7 @@ public class RaftNode implements RaftRpcHandler, Closeable {
         }
 
         long lastLogIndex = wal.getLastLogIndex();
+        peerLastAckNanos.clear();
         for (String peerId : config.getPeerIds()) {
             nextIndex.put(peerId, lastLogIndex + 1);
             matchIndex.put(peerId, 0L);
@@ -313,6 +317,7 @@ public class RaftNode implements RaftRpcHandler, Closeable {
                 config.getLocalNodeId(), newTerm, leaderHint);
         this.role = Role.FOLLOWER;
         this.currentLeaderId = leaderHint;
+        peerLastAckNanos.clear();
 
         try {
             metaStorage.save(newTerm, null);
@@ -614,6 +619,7 @@ public class RaftNode implements RaftRpcHandler, Closeable {
                 }
 
                 if (response.success()) {
+                    peerLastAckNanos.put(peerId, System.nanoTime());
                     nextIndex.put(peerId, response.matchIndex() + 1);
                     matchIndex.put(peerId, response.matchIndex());
 
@@ -737,29 +743,59 @@ public class RaftNode implements RaftRpcHandler, Closeable {
      * Executes a state machine command across the replicated cluster.
      * Completes when the command has safely achieved quorum and applied to state machine.
      */
+    /**
+     * Executes a single state machine command across the replicated cluster.
+     * Delegates to the batch pipeline for maximum throughput.
+     */
     public CompletableFuture<ApplyResult> execute(Command command) {
+        return executeBatch(Collections.singletonList(command))
+                .thenApply(list -> list.isEmpty() ? null : list.get(0));
+    }
+
+    /**
+     * Executes a batch of state machine commands atomically across the replicated cluster.
+     * All entries are appended to the WAL in a single batch operation (amortizing disk fsync)
+     * and replicated together.
+     */
+    public CompletableFuture<List<ApplyResult>> executeBatch(List<Command> commands) {
+        if (commands == null || commands.isEmpty()) {
+            return CompletableFuture.completedFuture(Collections.emptyList());
+        }
+
         stateLock.lock();
         try {
             if (role != Role.LEADER) {
-                CompletableFuture<ApplyResult> failed = new CompletableFuture<>();
+                CompletableFuture<List<ApplyResult>> failed = new CompletableFuture<>();
                 failed.completeExceptionally(new NotLeaderException(currentLeaderId));
                 return failed;
             }
 
-            long newIndex = wal.getLastLogIndex() + 1;
+            long startIndex = wal.getLastLogIndex() + 1;
             long term = metaStorage.getCurrentTerm();
-            LogEntry entry = new LogEntry(newIndex, term, command);
+            List<LogEntry> entries = new ArrayList<>(commands.size());
+            List<CompletableFuture<ApplyResult>> individualFutures = new ArrayList<>(commands.size());
+
+            for (int i = 0; i < commands.size(); i++) {
+                long entryIndex = startIndex + i;
+                Command cmd = commands.get(i);
+                entries.add(new LogEntry(entryIndex, term, cmd));
+
+                CompletableFuture<ApplyResult> future = new CompletableFuture<>();
+                individualFutures.add(future);
+                pendingClientRequests.put(entryIndex, future);
+            }
 
             try {
-                wal.append(entry);
+                // Group commit: appends all frames together and issues a single disk force()
+                wal.append(entries);
             } catch (IOException e) {
-                CompletableFuture<ApplyResult> failed = new CompletableFuture<>();
+                for (long i = startIndex; i < startIndex + commands.size(); i++) {
+                    pendingClientRequests.remove(i);
+                }
+                CompletableFuture<List<ApplyResult>> failed = new CompletableFuture<>();
                 failed.completeExceptionally(e);
                 return failed;
             }
-
-            CompletableFuture<ApplyResult> future = new CompletableFuture<>();
-            pendingClientRequests.put(newIndex, future);
 
             // Single node cluster fast path
             if (config.getClusterSize() == 1) {
@@ -771,10 +807,44 @@ public class RaftNode implements RaftRpcHandler, Closeable {
                 }
             }
 
-            return future;
+            // Combine all individual results
+            CompletableFuture<?>[] array = individualFutures.toArray(new CompletableFuture[0]);
+            return CompletableFuture.allOf(array).thenApply(v -> {
+                List<ApplyResult> results = new ArrayList<>(individualFutures.size());
+                for (CompletableFuture<ApplyResult> f : individualFutures) {
+                    results.add(f.join());
+                }
+                return results;
+            });
         } finally {
             stateLock.unlock();
         }
+    }
+
+    /**
+     * Checks if the leader currently holds a valid leader lease (§6.4).
+     * If enabled and an active quorum of peers acknowledged heartbeats within
+     * the lease window, linearizable reads can be served locally with 0 RPC roundtrips.
+     */
+    public boolean isLeaderLeaseValid() {
+        if (!config.isLeaderLeaseEnabled() || role != Role.LEADER) {
+            return false;
+        }
+        if (config.getClusterSize() == 1) {
+            return true;
+        }
+
+        long now = System.nanoTime();
+        long leaseDurationNanos = TimeUnit.MILLISECONDS.toNanos(config.getLeaderLeaseDurationMs());
+        int activeQuorumCount = 1; // self
+
+        for (String peerId : config.getPeerIds()) {
+            Long lastAck = peerLastAckNanos.get(peerId);
+            if (lastAck != null && (now - lastAck) < leaseDurationNanos) {
+                activeQuorumCount++;
+            }
+        }
+        return activeQuorumCount >= config.getQuorum();
     }
 
     private CompletableFuture<Void> confirmLeadershipQuorum() {
@@ -808,6 +878,7 @@ public class RaftNode implements RaftRpcHandler, Closeable {
             transport.sendAppendEntries(peerId, heartbeat).whenComplete((res, err) -> {
                 if (err != null || !res.success()) return;
 
+                peerLastAckNanos.put(peerId, System.nanoTime());
                 stateLock.lock();
                 try {
                     if (role != Role.LEADER || metaStorage.getCurrentTerm() != currentTerm) {
@@ -831,12 +902,23 @@ public class RaftNode implements RaftRpcHandler, Closeable {
     }
 
     /**
-     * Linearizable Read via ReadIndex:
-     * Confirms current leadership with a heartbeat round before returning state.
+     * Linearizable Read via Leader Lease / ReadIndex (§6.4):
+     * If leader lease is active, returns immediately without network RPCs.
+     * Otherwise, falls back to a quorum heartbeat round before returning state.
      */
     public CompletableFuture<byte[]> readLinearizable(String key) {
         stateLock.lock();
         try {
+            if (role != Role.LEADER) {
+                CompletableFuture<byte[]> failed = new CompletableFuture<>();
+                failed.completeExceptionally(new NotLeaderException(currentLeaderId));
+                return failed;
+            }
+
+            if (isLeaderLeaseValid()) {
+                return CompletableFuture.completedFuture(stateMachine.get(key));
+            }
+
             return confirmLeadershipQuorum().thenApply(v -> stateMachine.get(key));
         } finally {
             stateLock.unlock();
@@ -844,12 +926,23 @@ public class RaftNode implements RaftRpcHandler, Closeable {
     }
 
     /**
-     * Linearizable Range Scan:
-     * Confirms current leadership before scanning the range [fromKey, toKey].
+     * Linearizable Range Scan via Leader Lease / ReadIndex (§6.4):
+     * If leader lease is active, scans immediately without network RPCs.
+     * Otherwise, falls back to a quorum heartbeat round before scanning.
      */
     public CompletableFuture<Map<String, byte[]>> scanLinearizable(String fromKey, String toKey, int limit) {
         stateLock.lock();
         try {
+            if (role != Role.LEADER) {
+                CompletableFuture<Map<String, byte[]>> failed = new CompletableFuture<>();
+                failed.completeExceptionally(new NotLeaderException(currentLeaderId));
+                return failed;
+            }
+
+            if (isLeaderLeaseValid()) {
+                return CompletableFuture.completedFuture(stateMachine.scan(fromKey, toKey, limit));
+            }
+
             return confirmLeadershipQuorum().thenApply(v -> stateMachine.scan(fromKey, toKey, limit));
         } finally {
             stateLock.unlock();

@@ -10,6 +10,8 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.io.File;
 import java.nio.charset.StandardCharsets;
+import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
@@ -143,6 +145,65 @@ class RaftClusterTest {
             byte[] val = cluster.getStateMachine(id).get("partition-test");
             assertThat(val).isNotNull();
             assertThat(new String(val, StandardCharsets.UTF_8)).isEqualTo("success");
+        }
+    }
+
+    @Test
+    void testLeaderLeaseLinearizableReads(@TempDir File tempDir) throws Exception {
+        cluster = new ClusterSimulator(tempDir, 5);
+        RaftNode leader = cluster.waitForLeader(3000);
+
+        // Populate key via leader
+        Command cmd = Command.put("lease-key", "lease-val".getBytes(StandardCharsets.UTF_8), "c1", 1);
+        leader.execute(cmd).get(3, TimeUnit.SECONDS);
+
+        // Wait a brief moment for heartbeats to refresh lease
+        Thread.sleep(100);
+
+        // Verify leader lease is valid
+        assertThat(leader.isLeaderLeaseValid()).isTrue();
+
+        // Linearizable read should return lease value immediately
+        byte[] readVal = leader.readLinearizable("lease-key").get(1, TimeUnit.SECONDS);
+        assertThat(readVal).isNotNull();
+        assertThat(new String(readVal, StandardCharsets.UTF_8)).isEqualTo("lease-val");
+
+        // Linearizable range scan should also return immediately
+        Map<String, byte[]> scanResult = leader.scanLinearizable("lease-", "lease-z", 10).get(1, TimeUnit.SECONDS);
+        assertThat(scanResult).containsKey("lease-key");
+        assertThat(new String(scanResult.get("lease-key"), StandardCharsets.UTF_8)).isEqualTo("lease-val");
+    }
+
+    @Test
+    void testBatchExecutionAndStateConvergence(@TempDir File tempDir) throws Exception {
+        cluster = new ClusterSimulator(tempDir, 5);
+        RaftNode leader = cluster.waitForLeader(3000);
+
+        // Prepare batch of 10 commands
+        List<Command> batch = new java.util.ArrayList<>();
+        for (int i = 1; i <= 10; i++) {
+            batch.add(Command.put("batch-k" + i, ("batch-v" + i).getBytes(StandardCharsets.UTF_8), "c1", 100 + i));
+        }
+
+        // Execute entire batch atomically
+        List<ApplyResult> results = leader.executeBatch(batch).get(5, TimeUnit.SECONDS);
+        assertThat(results).hasSize(10);
+        for (ApplyResult r : results) {
+            assertThat(r.isSuccess()).isTrue();
+        }
+
+        // Allow brief heartbeat round for followers
+        Thread.sleep(150);
+
+        // Verify all 5 nodes have converged on all 10 keys
+        for (String nodeId : cluster.getNodes().keySet()) {
+            for (int i = 1; i <= 10; i++) {
+                byte[] v = cluster.getStateMachine(nodeId).get("batch-k" + i);
+                assertThat(v)
+                        .as("Node %s must have batch-k%d", nodeId, i)
+                        .isNotNull();
+                assertThat(new String(v, StandardCharsets.UTF_8)).isEqualTo("batch-v" + i);
+            }
         }
     }
 }

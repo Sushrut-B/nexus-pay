@@ -1,5 +1,6 @@
 package io.raftline.api;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpHandler;
@@ -17,8 +18,10 @@ import java.io.IOException;
 import java.io.OutputStream;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ExecutionException;
@@ -97,6 +100,66 @@ public class RaftHttpServer implements Closeable {
         public void handle(HttpExchange exchange) throws IOException {
             String path = exchange.getRequestURI().getPath();
             String method = exchange.getRequestMethod();
+
+            if ("/v1/kv/batch".equals(path)) {
+                if (!"POST".equalsIgnoreCase(method)) {
+                    sendJson(exchange, 405, Map.of("error", "Batch operation must use POST"));
+                    return;
+                }
+
+                String clientId = exchange.getRequestHeaders().getFirst("X-Client-Id");
+                if (clientId == null || clientId.isBlank()) {
+                    clientId = UUID.randomUUID().toString();
+                }
+
+                try {
+                    byte[] body = exchange.getRequestBody().readAllBytes();
+                    JsonNode root = json.readTree(body);
+                    if (!root.isArray()) {
+                        sendJson(exchange, 400, Map.of("error", "Batch request payload must be a JSON array of operations"));
+                        return;
+                    }
+
+                    List<Command> commands = new ArrayList<>();
+                    long baseSeq = System.nanoTime();
+                    int idx = 0;
+                    for (JsonNode opNode : root) {
+                        String op = opNode.has("op") ? opNode.get("op").asText().toUpperCase() : "PUT";
+                        String opKey = opNode.has("key") ? opNode.get("key").asText() : null;
+                        if (opKey == null || opKey.isBlank()) {
+                            sendJson(exchange, 400, Map.of("error", "Each batch operation must provide a non-empty 'key'"));
+                            return;
+                        }
+
+                        if ("PUT".equals(op)) {
+                            String val = opNode.has("value") ? opNode.get("value").asText() : "";
+                            commands.add(Command.put(opKey, val.getBytes(StandardCharsets.UTF_8), clientId, baseSeq + idx));
+                        } else if ("DELETE".equals(op)) {
+                            commands.add(Command.delete(opKey, clientId, baseSeq + idx));
+                        } else {
+                            sendJson(exchange, 400, Map.of("error", "Unsupported batch operation: " + op));
+                            return;
+                        }
+                        idx++;
+                    }
+
+                    List<ApplyResult> results = raftNode.executeBatch(commands).get(15, TimeUnit.SECONDS);
+                    sendJson(exchange, 200, Map.of(
+                            "status", "COMMITTED",
+                            "count", results.size()
+                    ));
+                } catch (ExecutionException e) {
+                    Throwable cause = e.getCause();
+                    if (cause instanceof NotLeaderException nle) {
+                        handleNotLeader(exchange, nle.getLeaderHint());
+                    } else {
+                        sendJson(exchange, 500, Map.of("error", e.getMessage()));
+                    }
+                } catch (Exception e) {
+                    sendJson(exchange, 500, Map.of("error", e.getMessage()));
+                }
+                return;
+            }
 
             if ("/v1/kv/scan".equals(path) || "/v1/kv".equals(path)) {
                 if (!"GET".equalsIgnoreCase(method)) {

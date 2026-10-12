@@ -117,3 +117,10 @@ Today, the complete multi-module distributed consensus system was engineered fro
 | TSK-903 | Snapshot Boundary WAL Pruning | Safely delete sealed disk segments strictly preceding snapshot applied index | Completed | 100% |
 | TSK-904 | Concurrency Load Benchmark Tool | `RaftBenchmark` measuring throughput (ops/sec) and p50/p90/p95/p99 latency | Completed | 100% |
 | TSK-905 | Cluster Benchmark Automation Script | `scripts/run-benchmark.ps1` for multi-threaded stress verification on 5-node cluster | Completed | 100% |
+| **TSK-1000** | **Day 4: Leader Leases & High-Throughput Batch Engine** | Leader leases (§6.4), zero-RPC reads, group commit & batch writes | **Completed** | 100% |
+| TSK-1001 | Leader Lease Protocol (§6.4) | Configurable lease duration, monotonic nanosecond clock tracking, quorum ACK monitoring | Completed | 100% |
+| TSK-1002 | Zero-RPC Linearizable Reads | Serving linearizable `GET` and range `scan` in 0 network roundtrips via active lease | Completed | 100% |
+| TSK-1003 | Atomic Batch Execution (`executeBatch`) | Grouped consecutive indices with amortized single-fsync WAL append across full batch | Completed | 100% |
+| TSK-1004 | REST Batch Endpoint | `POST /v1/kv/batch` for atomic batch command submission and execution | Completed | 100% |
+| TSK-1005 | Client SDK Batch Support | Added `client.putBatch(Map<String, String>)` in `QuorixClient` | Completed | 100% |
+| TSK-1006 | Integration Test Suite Verification | Validated lease linearizability and batch convergence across 5 nodes in `RaftClusterTest` | Completed | 100% |

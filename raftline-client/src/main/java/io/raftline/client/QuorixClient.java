@@ -146,6 +146,31 @@ public class QuorixClient implements Closeable {
         });
     }
 
+    public void putBatch(Map<String, String> entries) throws IOException, InterruptedException {
+        if (entries == null || entries.isEmpty()) return;
+
+        List<Map<String, String>> ops = new ArrayList<>();
+        for (Map.Entry<String, String> entry : entries.entrySet()) {
+            ops.add(Map.of("op", "PUT", "key", entry.getKey(), "value", entry.getValue()));
+        }
+
+        String body = json.writeValueAsString(ops);
+        HttpResponse<byte[]> response = executeWithRetry((baseUrl) -> {
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(URI.create(baseUrl + "/v1/kv/batch"))
+                    .header("Content-Type", "application/json")
+                    .header("X-Client-Id", clientId)
+                    .POST(HttpRequest.BodyPublishers.ofString(body))
+                    .timeout(Duration.ofSeconds(15))
+                    .build();
+            return httpClient.send(request, HttpResponse.BodyHandlers.ofByteArray());
+        });
+
+        if (response.statusCode() != 200) {
+            throw new IOException("Batch operation failed with HTTP " + response.statusCode() + ": " + new String(response.body()));
+        }
+    }
+
     public JsonNode getClusterStatus(String targetUrl) throws IOException, InterruptedException {
         HttpRequest request = HttpRequest.newBuilder()
                 .uri(URI.create(targetUrl + "/v1/cluster/status"))
