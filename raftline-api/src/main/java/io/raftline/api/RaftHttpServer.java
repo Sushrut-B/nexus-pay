@@ -54,6 +54,7 @@ public class RaftHttpServer implements Closeable {
         server.createContext("/v1/kv", new KeyValueHandler());
         server.createContext("/v1/cluster/status", new StatusHandler());
         server.createContext("/v1/cluster/nodes", new NodesHandler());
+        server.createContext("/v1/cluster/members", new MembersHandler());
         server.createContext("/v1/metrics", new MetricsHandler());
         server.createContext("/v1/admin/snapshot", new AdminSnapshotHandler());
     }
@@ -261,6 +262,78 @@ public class RaftHttpServer implements Closeable {
                 log.error("Failed to take manual snapshot", e);
                 sendJson(exchange, 500, Map.of("error", e.getMessage()));
             }
+        }
+    }
+
+    private class MembersHandler implements HttpHandler {
+        @Override
+        public void handle(HttpExchange exchange) throws IOException {
+            String method = exchange.getRequestMethod().toUpperCase();
+            if ("GET".equals(method)) {
+                sendJson(exchange, 200, Map.of(
+                        "nodeId", raftNode.getNodeId(),
+                        "role", raftNode.getRole().name(),
+                        "leaderId", raftNode.getCurrentLeaderId() != null ? raftNode.getCurrentLeaderId() : "",
+                        "clusterSize", raftNode.getConfig().getClusterSize(),
+                        "quorum", raftNode.getConfig().getQuorum(),
+                        "peers", raftNode.getConfig().getPeerIds()
+                ));
+                return;
+            }
+
+            if ("POST".equals(method)) {
+                if (raftNode.getRole() != io.raftline.core.Role.LEADER) {
+                    Integer leaderPort = peerHttpPorts.get(raftNode.getCurrentLeaderId());
+                    String redirectUrl = (leaderPort != null)
+                            ? "http://localhost:" + leaderPort + "/v1/cluster/members"
+                            : null;
+                    if (redirectUrl != null) {
+                        exchange.getResponseHeaders().set("Location", redirectUrl);
+                    }
+                    sendJson(exchange, 307, Map.of(
+                            "error", "Node is not the leader",
+                            "leaderHint", raftNode.getCurrentLeaderId() != null ? raftNode.getCurrentLeaderId() : "unknown",
+                            "redirectUrl", redirectUrl != null ? redirectUrl : ""
+                    ));
+                    return;
+                }
+
+                try {
+                    Map<String, Object> req = json.readValue(exchange.getRequestBody(), Map.class);
+                    String memberId = (String) req.get("nodeId");
+                    String action = ((String) req.getOrDefault("action", "ADD")).toUpperCase();
+
+                    if (memberId == null || memberId.isBlank()) {
+                        sendJson(exchange, 400, Map.of("error", "nodeId is required"));
+                        return;
+                    }
+
+                    boolean ok;
+                    if ("ADD".equals(action)) {
+                        ok = raftNode.addPeer(memberId);
+                    } else if ("REMOVE".equals(action)) {
+                        ok = raftNode.removePeer(memberId);
+                    } else {
+                        sendJson(exchange, 400, Map.of("error", "action must be ADD or REMOVE"));
+                        return;
+                    }
+
+                    sendJson(exchange, 200, Map.of(
+                            "success", ok,
+                            "action", action,
+                            "nodeId", memberId,
+                            "clusterSize", raftNode.getConfig().getClusterSize(),
+                            "quorum", raftNode.getConfig().getQuorum(),
+                            "peers", raftNode.getConfig().getPeerIds()
+                    ));
+                } catch (Exception e) {
+                    log.error("Failed to update membership", e);
+                    sendJson(exchange, 500, Map.of("error", e.getMessage()));
+                }
+                return;
+            }
+
+            sendJson(exchange, 405, Map.of("error", "Method not allowed: " + method));
         }
     }
 

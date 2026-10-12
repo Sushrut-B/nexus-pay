@@ -20,6 +20,7 @@ public final class ProtoConverter {
                 .setCandidateId(req.candidateId())
                 .setLastLogIndex(req.lastLogIndex())
                 .setLastLogTerm(req.lastLogTerm())
+                .setIsPreVote(req.isPreVote())
                 .build();
     }
 
@@ -28,7 +29,8 @@ public final class ProtoConverter {
                 proto.getTerm(),
                 proto.getCandidateId(),
                 proto.getLastLogIndex(),
-                proto.getLastLogTerm()
+                proto.getLastLogTerm(),
+                proto.getIsPreVote()
         );
     }
 

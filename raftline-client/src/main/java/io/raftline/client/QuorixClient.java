@@ -122,6 +122,44 @@ public class QuorixClient implements Closeable {
         return json.readTree(res.body());
     }
 
+    public void addMember(String nodeId) throws IOException, InterruptedException {
+        String body = json.writeValueAsString(Map.of("nodeId", nodeId, "action", "ADD"));
+        executeWithRetry((baseUrl) -> {
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(URI.create(baseUrl + "/v1/cluster/members"))
+                    .header("Content-Type", "application/json")
+                    .POST(HttpRequest.BodyPublishers.ofString(body))
+                    .timeout(Duration.ofSeconds(5))
+                    .build();
+            return httpClient.send(request, HttpResponse.BodyHandlers.ofByteArray());
+        });
+    }
+
+    public void removeMember(String nodeId) throws IOException, InterruptedException {
+        String body = json.writeValueAsString(Map.of("nodeId", nodeId, "action", "REMOVE"));
+        executeWithRetry((baseUrl) -> {
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(URI.create(baseUrl + "/v1/cluster/members"))
+                    .header("Content-Type", "application/json")
+                    .POST(HttpRequest.BodyPublishers.ofString(body))
+                    .timeout(Duration.ofSeconds(5))
+                    .build();
+            return httpClient.send(request, HttpResponse.BodyHandlers.ofByteArray());
+        });
+    }
+
+    public JsonNode getMembers() throws IOException, InterruptedException {
+        HttpResponse<byte[]> response = executeWithRetry((baseUrl) -> {
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(URI.create(baseUrl + "/v1/cluster/members"))
+                    .GET()
+                    .timeout(Duration.ofSeconds(3))
+                    .build();
+            return httpClient.send(request, HttpResponse.BodyHandlers.ofByteArray());
+        });
+        return json.readTree(response.body());
+    }
+
     @FunctionalInterface
     private interface HttpAction {
         HttpResponse<byte[]> execute(String baseUrl) throws Exception;

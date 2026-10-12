@@ -130,13 +130,78 @@ public class RaftNode implements RaftRpcHandler, Closeable {
                 return;
             }
 
-            log.info("Node {} election timeout elapsed (elapsed={}ms >= timeout={}ms). Starting election for new term.",
+            log.info("Node {} election timeout elapsed (elapsed={}ms >= timeout={}ms). Starting election process.",
                     config.getLocalNodeId(), elapsed, currentElectionTimeoutMs);
-            startElection();
+            if (config.isPreVoteEnabled()) {
+                startPreVote();
+            } else {
+                startElection();
+            }
         } catch (Throwable t) {
             log.error("Exception in handleElectionTimeout for {}", config.getLocalNodeId(), t);
         } finally {
             stateLock.unlock();
+        }
+    }
+
+    private void startPreVote() {
+        this.role = Role.PRE_CANDIDATE;
+        this.currentLeaderId = null;
+        long nextTerm = metaStorage.getCurrentTerm() + 1;
+        resetElectionTimeout();
+
+        long lastLogIndex = wal.getLastLogIndex();
+        long lastLogTerm = wal.getLastLogTerm();
+        RequestVoteRequest preVoteRequest = new RequestVoteRequest(
+                nextTerm,
+                config.getLocalNodeId(),
+                lastLogIndex,
+                lastLogTerm,
+                true // isPreVote = true
+        );
+
+        final int[] preVotesGranted = {1};
+        final int quorum = config.getQuorum();
+        log.info("Node {} entered PRE_CANDIDATE for term {}. Requesting pre-votes (quorum: {}/{})...",
+                config.getLocalNodeId(), nextTerm, quorum, config.getClusterSize());
+
+        if (preVotesGranted[0] >= quorum) {
+            log.info("Node {} won single-node PRE_VOTE quorum. Starting election...", config.getLocalNodeId());
+            startElection();
+            return;
+        }
+
+        for (String peerId : config.getPeerIds()) {
+            transport.sendRequestVote(peerId, preVoteRequest).whenComplete((response, error) -> {
+                if (error != null) {
+                    log.debug("PreVote to {} failed: {}", peerId, error.getMessage());
+                    return;
+                }
+
+                stateLock.lock();
+                try {
+                    if (!running.get() || role != Role.PRE_CANDIDATE) {
+                        return;
+                    }
+
+                    if (response.term() > metaStorage.getCurrentTerm()) {
+                        stepDownToFollower(response.term(), null);
+                        return;
+                    }
+
+                    if (response.voteGranted()) {
+                        preVotesGranted[0]++;
+                        log.debug("Node {} received PRE_VOTE from {}. Total: {}/{}", config.getLocalNodeId(), peerId, preVotesGranted[0], quorum);
+                        if (preVotesGranted[0] >= quorum && role == Role.PRE_CANDIDATE) {
+                            log.info("Node {} won PRE_VOTE quorum ({}/{}). Transitioning to CANDIDATE election!",
+                                    config.getLocalNodeId(), preVotesGranted[0], quorum);
+                            startElection();
+                        }
+                    }
+                } finally {
+                    stateLock.unlock();
+                }
+            });
         }
     }
 
@@ -160,7 +225,8 @@ public class RaftNode implements RaftRpcHandler, Closeable {
                 newTerm,
                 config.getLocalNodeId(),
                 lastLogIndex,
-                lastLogTerm
+                lastLogTerm,
+                false
         );
 
         // Vote for self
@@ -282,6 +348,34 @@ public class RaftNode implements RaftRpcHandler, Closeable {
                 return new RequestVoteResponse(currentTerm, false);
             }
 
+            // Pre-Vote handling (§9.6): Non-disruptive pre-election vote
+            if (request.isPreVote()) {
+                long timeSinceLeader = System.currentTimeMillis() - lastHeartbeatTimeMs;
+                if (currentLeaderId != null && timeSinceLeader < config.getMinElectionTimeoutMs()) {
+                    log.debug("Node {} rejected PRE_VOTE from {}: active leader {} is healthy (heard {}ms ago)",
+                            config.getLocalNodeId(), request.candidateId(), currentLeaderId, timeSinceLeader);
+                    return new RequestVoteResponse(currentTerm, false);
+                }
+
+                long myLastLogTerm = wal.getLastLogTerm();
+                long myLastLogIndex = wal.getLastLogIndex();
+
+                boolean candidateUpToDate = false;
+                if (request.lastLogTerm() > myLastLogTerm) {
+                    candidateUpToDate = true;
+                } else if (request.lastLogTerm() == myLastLogTerm && request.lastLogIndex() >= myLastLogIndex) {
+                    candidateUpToDate = true;
+                }
+
+                if (candidateUpToDate) {
+                    log.info("Node {} granted PRE_VOTE to {} for hypothetical term {}",
+                            config.getLocalNodeId(), request.candidateId(), request.term());
+                    return new RequestVoteResponse(currentTerm, true);
+                } else {
+                    return new RequestVoteResponse(currentTerm, false);
+                }
+            }
+
             // If term > currentTerm, update term and convert to follower (§5.1)
             if (request.term() > currentTerm) {
                 stepDownToFollower(request.term(), null);
@@ -338,8 +432,8 @@ public class RaftNode implements RaftRpcHandler, Closeable {
                 return new AppendEntriesResponse(currentTerm, false, wal.getLastLogIndex());
             }
 
-            // If term > currentTerm or we were candidate, recognize leader
-            if (request.term() > currentTerm || role == Role.CANDIDATE) {
+            // If term > currentTerm or we were candidate/pre-candidate, recognize leader
+            if (request.term() > currentTerm || role == Role.CANDIDATE || role == Role.PRE_CANDIDATE) {
                 stepDownToFollower(request.term(), request.leaderId());
                 currentTerm = request.term();
             }
@@ -628,6 +722,11 @@ public class RaftNode implements RaftRpcHandler, Closeable {
                 future.complete(result);
             }
         }
+
+        // Automatic log compaction & snapshot trigger (§7)
+        if (config.getSnapshotThresholdCount() > 0 && (lastApplied - wal.getSnapshotIndex() >= config.getSnapshotThresholdCount())) {
+            triggerSnapshot();
+        }
     }
 
     // =========================================================================
@@ -790,6 +889,72 @@ public class RaftNode implements RaftRpcHandler, Closeable {
 
     public WriteAheadLog getWal() {
         return wal;
+    }
+
+    /**
+     * Takes an atomic snapshot of current state machine and advances WAL boundary.
+     */
+    public boolean triggerSnapshot() {
+        stateLock.lock();
+        try {
+            if (lastApplied <= wal.getSnapshotIndex()) {
+                return false;
+            }
+            long snapIndex = lastApplied;
+            long snapTerm = wal.getTermForIndex(snapIndex);
+            java.io.File snapshotDir = new java.io.File("data/" + config.getLocalNodeId() + "/snapshots");
+            if (!snapshotDir.exists()) snapshotDir.mkdirs();
+            java.io.File snapFile = new java.io.File(snapshotDir, "snapshot_" + snapIndex + ".bin");
+            stateMachine.takeSnapshot(snapFile, snapIndex, snapTerm);
+            wal.setSnapshotBoundary(snapIndex, snapTerm);
+            log.info("Node {} completed snapshot at index {}, term {}. Snapshot file: {}",
+                    config.getLocalNodeId(), snapIndex, snapTerm, snapFile.getName());
+            return true;
+        } catch (Exception e) {
+            log.error("Node {} failed to take snapshot", config.getLocalNodeId(), e);
+            return false;
+        } finally {
+            stateLock.unlock();
+        }
+    }
+
+    /**
+     * Dynamic Cluster Membership (§6): Adds a new peer to the cluster at runtime.
+     */
+    public boolean addPeer(String peerId) {
+        stateLock.lock();
+        try {
+            boolean added = config.addPeer(peerId);
+            if (added && role == Role.LEADER) {
+                nextIndex.put(peerId, wal.getLastLogIndex() + 1);
+                matchIndex.put(peerId, 0L);
+                log.info("Leader {} added new cluster peer {}. Current peers: {}",
+                        config.getLocalNodeId(), peerId, config.getPeerIds());
+                sendHeartbeatsToAll();
+            }
+            return added;
+        } finally {
+            stateLock.unlock();
+        }
+    }
+
+    /**
+     * Dynamic Cluster Membership (§6): Removes an existing peer from the cluster at runtime.
+     */
+    public boolean removePeer(String peerId) {
+        stateLock.lock();
+        try {
+            boolean removed = config.removePeer(peerId);
+            if (removed && role == Role.LEADER) {
+                nextIndex.remove(peerId);
+                matchIndex.remove(peerId);
+                log.info("Leader {} removed cluster peer {}. Remaining peers: {}",
+                        config.getLocalNodeId(), peerId, config.getPeerIds());
+            }
+            return removed;
+        } finally {
+            stateLock.unlock();
+        }
     }
 
     @Override
