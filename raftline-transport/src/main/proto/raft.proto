@@ -1,0 +1,67 @@
+syntax = "proto3";
+
+package io.raftline.transport.proto;
+
+option java_multiple_files = true;
+option java_package = "io.raftline.transport.proto";
+option java_outer_classname = "RaftProto";
+
+message RequestVoteProto {
+  int64 term = 1;
+  string candidate_id = 2;
+  int64 last_log_index = 3;
+  int64 last_log_term = 4;
+}
+
+message RequestVoteResponseProto {
+  int64 term = 1;
+  bool vote_granted = 2;
+}
+
+message CommandProto {
+  int32 type = 1; // 1: PUT, 2: DELETE, 3: NOOP
+  string key = 2;
+  bytes value = 3;
+  string client_id = 4;
+  int64 sequence_number = 5;
+}
+
+message LogEntryProto {
+  int64 index = 1;
+  int64 term = 2;
+  CommandProto command = 3;
+}
+
+message AppendEntriesProto {
+  int64 term = 1;
+  string leader_id = 2;
+  int64 prev_log_index = 3;
+  int64 prev_log_term = 4;
+  repeated LogEntryProto entries = 5;
+  int64 leader_commit = 6;
+}
+
+message AppendEntriesResponseProto {
+  int64 term = 1;
+  bool success = 2;
+  int64 match_index = 3;
+}
+
+message InstallSnapshotProto {
+  int64 term = 1;
+  string leader_id = 2;
+  int64 last_included_index = 3;
+  int64 last_included_term = 4;
+  bytes data = 5;
+  bool done = 6;
+}
+
+message InstallSnapshotResponseProto {
+  int64 term = 1;
+}
+
+service RaftInternalService {
+  rpc RequestVote (RequestVoteProto) returns (RequestVoteResponseProto);
+  rpc AppendEntries (AppendEntriesProto) returns (AppendEntriesResponseProto);
+  rpc InstallSnapshot (InstallSnapshotProto) returns (InstallSnapshotResponseProto);
+}

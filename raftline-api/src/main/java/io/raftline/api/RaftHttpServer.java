@@ -1,0 +1,271 @@
+package io.raftline.api;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.sun.net.httpserver.HttpExchange;
+import com.sun.net.httpserver.HttpHandler;
+import com.sun.net.httpserver.HttpServer;
+import io.raftline.core.NotLeaderException;
+import io.raftline.core.RaftNode;
+import io.raftline.storage.model.Command;
+import io.raftline.storage.state.ApplyResult;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import java.io.Closeable;
+import java.io.File;
+import java.io.IOException;
+import java.io.OutputStream;
+import java.net.InetSocketAddress;
+import java.nio.charset.StandardCharsets;
+import java.util.LinkedHashMap;
+import java.util.Map;
+import java.util.UUID;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
+
+public class RaftHttpServer implements Closeable {
+    private static final Logger log = LoggerFactory.getLogger(RaftHttpServer.class);
+    private static final ObjectMapper json = new ObjectMapper();
+
+    private final int port;
+    private final RaftNode raftNode;
+    private final Map<String, Integer> peerHttpPorts;
+    private final HttpServer server;
+
+    public RaftHttpServer(int port, RaftNode raftNode, Map<String, Integer> peerHttpPorts) throws IOException {
+        this.port = port;
+        this.raftNode = raftNode;
+        this.peerHttpPorts = peerHttpPorts != null ? peerHttpPorts : Map.of();
+
+        this.server = HttpServer.create(new InetSocketAddress(port), 0);
+        this.server.setExecutor(Executors.newVirtualThreadPerTaskExecutor());
+
+        setupRoutes();
+    }
+
+    public void start() {
+        server.start();
+        log.info("Raft REST API Server listening on port {}", port);
+    }
+
+    private void setupRoutes() {
+        server.createContext("/v1/kv", new KeyValueHandler());
+        server.createContext("/v1/cluster/status", new StatusHandler());
+        server.createContext("/v1/cluster/nodes", new NodesHandler());
+        server.createContext("/v1/metrics", new MetricsHandler());
+        server.createContext("/v1/admin/snapshot", new AdminSnapshotHandler());
+    }
+
+    private void sendJson(HttpExchange exchange, int statusCode, Object data) throws IOException {
+        byte[] bytes = json.writeValueAsBytes(data);
+        exchange.getResponseHeaders().set("Content-Type", "application/json");
+        exchange.sendResponseHeaders(statusCode, bytes.length);
+        try (OutputStream os = exchange.getResponseBody()) {
+            os.write(bytes);
+        }
+    }
+
+    private void sendPlainText(HttpExchange exchange, int statusCode, String text) throws IOException {
+        byte[] bytes = text.getBytes(StandardCharsets.UTF_8);
+        exchange.getResponseHeaders().set("Content-Type", "text/plain; charset=utf-8");
+        exchange.sendResponseHeaders(statusCode, bytes.length);
+        try (OutputStream os = exchange.getResponseBody()) {
+            os.write(bytes);
+        }
+    }
+
+    private class KeyValueHandler implements HttpHandler {
+        @Override
+        public void handle(HttpExchange exchange) throws IOException {
+            String path = exchange.getRequestURI().getPath();
+            String method = exchange.getRequestMethod();
+
+            // Expected format: /v1/kv/{key}
+            String prefix = "/v1/kv/";
+            if (!path.startsWith(prefix) || path.length() <= prefix.length()) {
+                sendJson(exchange, 400, Map.of("error", "Key path missing in URL: /v1/kv/{key}"));
+                return;
+            }
+
+            String key = path.substring(prefix.length());
+
+            String clientId = exchange.getRequestHeaders().getFirst("X-Client-Id");
+            if (clientId == null || clientId.isBlank()) {
+                clientId = UUID.randomUUID().toString();
+            }
+
+            String seqHeader = exchange.getRequestHeaders().getFirst("X-Sequence-Number");
+            long seqNum = (seqHeader != null) ? Long.parseLong(seqHeader) : System.nanoTime();
+
+            try {
+                if ("PUT".equalsIgnoreCase(method)) {
+                    byte[] valueBytes = exchange.getRequestBody().readAllBytes();
+                    Command cmd = Command.put(key, valueBytes, clientId, seqNum);
+
+                    ApplyResult result = raftNode.execute(cmd).get(10, TimeUnit.SECONDS);
+                    sendJson(exchange, 200, Map.of(
+                            "status", "COMMITTED",
+                            "key", key,
+                            "duplicate", result.isDuplicate()
+                    ));
+                } else if ("DELETE".equalsIgnoreCase(method)) {
+                    Command cmd = Command.delete(key, clientId, seqNum);
+                    ApplyResult result = raftNode.execute(cmd).get(10, TimeUnit.SECONDS);
+                    sendJson(exchange, 200, Map.of(
+                            "status", "COMMITTED",
+                            "key", key,
+                            "deleted", true
+                    ));
+                } else if ("GET".equalsIgnoreCase(method)) {
+                    String query = exchange.getRequestURI().getQuery();
+                    boolean stale = query != null && query.contains("stale=true");
+
+                    byte[] valueBytes;
+                    if (stale) {
+                        valueBytes = raftNode.readStale(key);
+                    } else {
+                        valueBytes = raftNode.readLinearizable(key).get(5, TimeUnit.SECONDS);
+                    }
+
+                    if (valueBytes == null) {
+                        sendJson(exchange, 404, Map.of("error", "Key not found: " + key));
+                    } else {
+                        exchange.getResponseHeaders().set("Content-Type", "application/octet-stream");
+                        exchange.sendResponseHeaders(200, valueBytes.length);
+                        try (OutputStream os = exchange.getResponseBody()) {
+                            os.write(valueBytes);
+                        }
+                    }
+                } else {
+                    sendJson(exchange, 405, Map.of("error", "Method not allowed: " + method));
+                }
+            } catch (ExecutionException e) {
+                Throwable cause = e.getCause();
+                if (cause instanceof NotLeaderException nle) {
+                    handleNotLeader(exchange, nle.getLeaderHint());
+                } else {
+                    log.error("Error executing command", e);
+                    sendJson(exchange, 500, Map.of("error", cause != null ? cause.getMessage() : e.getMessage()));
+                }
+            } catch (TimeoutException e) {
+                sendJson(exchange, 504, Map.of("error", "Request timed out waiting for consensus commitment"));
+            } catch (Exception e) {
+                log.error("Internal server error", e);
+                sendJson(exchange, 500, Map.of("error", e.getMessage()));
+            }
+        }
+
+        private void handleNotLeader(HttpExchange exchange, String leaderHint) throws IOException {
+            Integer leaderPort = peerHttpPorts.get(leaderHint);
+            String redirectUrl = (leaderPort != null)
+                    ? "http://localhost:" + leaderPort + exchange.getRequestURI().toString()
+                    : null;
+
+            if (redirectUrl != null) {
+                exchange.getResponseHeaders().set("Location", redirectUrl);
+            }
+            sendJson(exchange, 307, Map.of(
+                    "error", "Node is not the leader",
+                    "leaderHint", leaderHint != null ? leaderHint : "unknown",
+                    "redirectUrl", redirectUrl != null ? redirectUrl : ""
+            ));
+        }
+    }
+
+    private class StatusHandler implements HttpHandler {
+        @Override
+        public void handle(HttpExchange exchange) throws IOException {
+            Map<String, Object> status = new LinkedHashMap<>();
+            status.put("nodeId", raftNode.getNodeId());
+            status.put("role", raftNode.getRole().name());
+            status.put("term", raftNode.getCurrentTerm());
+            status.put("leaderId", raftNode.getCurrentLeaderId());
+            status.put("commitIndex", raftNode.getCommitIndex());
+            status.put("lastApplied", raftNode.getLastApplied());
+            status.put("lastLogIndex", raftNode.getWal().getLastLogIndex());
+            status.put("lastLogTerm", raftNode.getWal().getLastLogTerm());
+
+            sendJson(exchange, 200, status);
+        }
+    }
+
+    private class NodesHandler implements HttpHandler {
+        @Override
+        public void handle(HttpExchange exchange) throws IOException {
+            Map<String, Object> nodes = new LinkedHashMap<>();
+            nodes.put("localNodeId", raftNode.getNodeId());
+            nodes.put("peers", raftNode.getConfig().getPeerIds());
+            nodes.put("clusterSize", raftNode.getConfig().getClusterSize());
+            nodes.put("quorum", raftNode.getConfig().getQuorum());
+
+            sendJson(exchange, 200, nodes);
+        }
+    }
+
+    private class MetricsHandler implements HttpHandler {
+        @Override
+        public void handle(HttpExchange exchange) throws IOException {
+            StringBuilder sb = new StringBuilder();
+            sb.append("# HELP raft_current_term The current Raft election term\n");
+            sb.append("# TYPE raft_current_term gauge\n");
+            sb.append("raft_current_term{node=\"").append(raftNode.getNodeId()).append("\"} ")
+                    .append(raftNode.getCurrentTerm()).append("\n");
+
+            sb.append("# HELP raft_commit_index The highest committed log index\n");
+            sb.append("# TYPE raft_commit_index gauge\n");
+            sb.append("raft_commit_index{node=\"").append(raftNode.getNodeId()).append("\"} ")
+                    .append(raftNode.getCommitIndex()).append("\n");
+
+            sb.append("# HELP raft_last_applied The highest applied log index\n");
+            sb.append("# TYPE raft_last_applied gauge\n");
+            sb.append("raft_last_applied{node=\"").append(raftNode.getNodeId()).append("\"} ")
+                    .append(raftNode.getLastApplied()).append("\n");
+
+            sb.append("# HELP raft_is_leader Whether the node is currently leader\n");
+            sb.append("# TYPE raft_is_leader gauge\n");
+            sb.append("raft_is_leader{node=\"").append(raftNode.getNodeId()).append("\"} ")
+                    .append(raftNode.getRole() == io.raftline.core.Role.LEADER ? 1 : 0).append("\n");
+
+            sendPlainText(exchange, 200, sb.toString());
+        }
+    }
+
+    private class AdminSnapshotHandler implements HttpHandler {
+        @Override
+        public void handle(HttpExchange exchange) throws IOException {
+            if (!"POST".equalsIgnoreCase(exchange.getRequestMethod())) {
+                sendJson(exchange, 405, Map.of("error", "Method must be POST"));
+                return;
+            }
+
+            try {
+                long lastApplied = raftNode.getLastApplied();
+                long lastTerm = raftNode.getWal().getTermForIndex(lastApplied);
+
+                File snapshotDir = new File(raftNode.getWal().getSnapshotIndex() > 0 ? "snapshots" : "data/snapshots");
+                if (!snapshotDir.exists()) snapshotDir.mkdirs();
+                File snapshotFile = new File(snapshotDir, "snapshot_" + lastApplied + ".bin");
+
+                raftNode.getStateMachine().takeSnapshot(snapshotFile, lastApplied, lastTerm);
+                raftNode.getWal().setSnapshotBoundary(lastApplied, lastTerm);
+
+                sendJson(exchange, 200, Map.of(
+                        "status", "SNAPSHOT_TAKEN",
+                        "snapshotIndex", lastApplied,
+                        "snapshotTerm", lastTerm,
+                        "file", snapshotFile.getAbsolutePath()
+                ));
+            } catch (Exception e) {
+                log.error("Failed to take manual snapshot", e);
+                sendJson(exchange, 500, Map.of("error", e.getMessage()));
+            }
+        }
+    }
+
+    @Override
+    public void close() {
+        server.stop(0);
+    }
+}

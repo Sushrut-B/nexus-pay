@@ -1,0 +1,24 @@
+# Build artifacts
+target/
+**/target/
+*.class
+
+# Runtime & cluster data
+data/
+**/data/
+*.log
+*.pid
+
+# IDE & Editor files
+.idea/
+*.iml
+.vscode/
+.settings/
+.project/
+.classpath
+
+# OS files
+Thumbs.db
+.DS_Store
+*.swp
+*~
