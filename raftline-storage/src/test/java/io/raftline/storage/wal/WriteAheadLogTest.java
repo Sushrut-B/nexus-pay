@@ -69,8 +69,10 @@ class WriteAheadLogTest {
 
         wal.close();
 
-        // Simulate crash with partial / torn write at end of WAL
-        File walFile = new File(tempDir, "raft.wal");
+        // Simulate crash with partial / torn write at end of active WAL
+        File[] walFiles = tempDir.listFiles((dir, name) -> name.endsWith(".wal"));
+        assertThat(walFiles).isNotEmpty();
+        File walFile = walFiles[0];
         try (RandomAccessFile raf = new RandomAccessFile(walFile, "rw")) {
             raf.seek(raf.length());
             // Write 5 garbage bytes simulating an incomplete frame header
@@ -113,5 +115,33 @@ class WriteAheadLogTest {
         assertThat(wal.getLastLogIndex()).isEqualTo(2);
         assertThat(wal.getEntry(2).getTerm()).isEqualTo(2);
         assertThat(wal.getEntry(2).getCommand().getKey()).isEqualTo("k2_new");
+    }
+
+    @Test
+    void testMultiSegmentRollingAndGarbageCollection(@TempDir File segDir) throws Exception {
+        // Very small maxSegmentBytes (80 bytes) to force multi-segment rolling
+        try (WriteAheadLog segWal = new WriteAheadLog(segDir, true, 80)) {
+            for (int i = 1; i <= 10; i++) {
+                segWal.append(new LogEntry(i, 1, Command.put("key" + i, ("val" + i).getBytes(StandardCharsets.UTF_8))));
+            }
+
+            // Should have created multiple segments
+            assertThat(segWal.getSegmentCount()).isGreaterThan(1);
+            assertThat(segWal.getLastLogIndex()).isEqualTo(10);
+
+            // Read entries across multiple segments
+            for (int i = 1; i <= 10; i++) {
+                assertThat(segWal.getEntry(i)).isNotNull();
+                assertThat(segWal.getEntry(i).getIndex()).isEqualTo(i);
+            }
+
+            int countBeforeGc = segWal.getSegmentCount();
+
+            // Snapshot up to index 6: sealed segments before index 6 should be garbage collected
+            segWal.setSnapshotBoundary(6, 1);
+
+            // Verified garbage collection pruned older sealed segments
+            assertThat(segWal.getSegmentCount()).isLessThan(countBeforeGc);
+        }
     }
 }

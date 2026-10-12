@@ -111,4 +111,9 @@ Today, the complete multi-module distributed consensus system was engineered fro
 | TSK-804 | Raft Range Scans (`scanLinearizable` & `scanStale`) | Quorum heartbeat lease confirmation for linearizable range reads | Completed | 100% |
 | TSK-805 | REST Range Scan Endpoint | `GET /v1/kv/scan?from=A&to=Z&limit=100` with JSON response | Completed | 100% |
 | TSK-806 | Client SDK Range Scan | Added `client.scan(fromKey, toKey, limit)` in `QuorixClient` | Completed | 100% |
-
+| **TSK-900** | **Day 3: Segmented WAL Rolling, Snapshot GC & Cluster Benchmark** | Multi-segment rolling WAL, disk GC on snapshot, concurrency load benchmark | **Completed** | 100% |
+| TSK-901 | Multi-Segment WAL Rolling | Auto-roll active log to `segment-%020d.wal` when reaching byte threshold (default 16MB) | Completed | 100% |
+| TSK-902 | Cross-Segment Indexing & Truncation | Suffix truncation (§5.3) across multiple rolling files without data corruption | Completed | 100% |
+| TSK-903 | Snapshot Boundary WAL Pruning | Safely delete sealed disk segments strictly preceding snapshot applied index | Completed | 100% |
+| TSK-904 | Concurrency Load Benchmark Tool | `RaftBenchmark` measuring throughput (ops/sec) and p50/p90/p95/p99 latency | Completed | 100% |
+| TSK-905 | Cluster Benchmark Automation Script | `scripts/run-benchmark.ps1` for multi-threaded stress verification on 5-node cluster | Completed | 100% |
