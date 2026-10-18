@@ -206,4 +206,34 @@ class RaftClusterTest {
             }
         }
     }
+
+    @Test
+    void testPipelinedReplicationCatchup(@TempDir File tempDir) throws Exception {
+        cluster = new ClusterSimulator(tempDir, 5);
+        RaftNode leader = cluster.waitForLeader(3000);
+
+        // Disconnect node-5 temporarily
+        cluster.killNode("node-5");
+
+        // Write 30 entries while node-5 is down
+        for (int i = 1; i <= 30; i++) {
+            Command cmd = Command.put("pipe-k" + i, ("pipe-v" + i).getBytes(StandardCharsets.UTF_8), "c1", 200 + i);
+            leader.execute(cmd).get(3, TimeUnit.SECONDS);
+        }
+
+        // Restart node-5
+        cluster.restartNode("node-5");
+
+        // Allow pipelined fast catch-up to stream entries
+        Thread.sleep(300);
+
+        // Verify node-5 quickly caught up with all 30 entries
+        for (int i = 1; i <= 30; i++) {
+            byte[] v = cluster.getStateMachine("node-5").get("pipe-k" + i);
+            assertThat(v)
+                    .as("node-5 must catch up pipe-k%d", i)
+                    .isNotNull();
+            assertThat(new String(v, StandardCharsets.UTF_8)).isEqualTo("pipe-v" + i);
+        }
+    }
 }

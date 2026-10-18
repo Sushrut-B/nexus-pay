@@ -625,6 +625,11 @@ public class RaftNode implements RaftRpcHandler, Closeable {
 
                     // Check if commitIndex can advance
                     checkAndUpdateCommitIndex();
+
+                    // Pipelined fast catch-up: if leader has more entries ahead of this follower, immediately dispatch next batch
+                    if (wal.getLastLogIndex() >= nextIndex.get(peerId)) {
+                        replicateToPeer(peerId);
+                    }
                 } else {
                     // Decrement nextIndex and retry
                     long currentNext = nextIndex.getOrDefault(peerId, 2L);
