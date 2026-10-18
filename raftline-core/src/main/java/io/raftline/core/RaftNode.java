@@ -56,6 +56,10 @@ public class RaftNode implements RaftRpcHandler, Closeable {
     // Client requests waiting for log entry commitment
     private final Map<Long, CompletableFuture<ApplyResult>> pendingClientRequests = new ConcurrentHashMap<>();
 
+    // Operational metrics counters
+    private final java.util.concurrent.atomic.AtomicLong electionCount = new java.util.concurrent.atomic.AtomicLong(0);
+    private final java.util.concurrent.atomic.AtomicLong termChangeCount = new java.util.concurrent.atomic.AtomicLong(0);
+
     // Timers
     private ScheduledFuture<?> electionTimeoutTask;
     private ScheduledFuture<?> heartbeatTask;
@@ -212,6 +216,8 @@ public class RaftNode implements RaftRpcHandler, Closeable {
         this.role = Role.CANDIDATE;
         long newTerm = metaStorage.getCurrentTerm() + 1;
         this.currentLeaderId = null;
+        electionCount.incrementAndGet();
+        termChangeCount.incrementAndGet();
 
         try {
             metaStorage.save(newTerm, config.getLocalNodeId());
@@ -318,6 +324,10 @@ public class RaftNode implements RaftRpcHandler, Closeable {
         this.role = Role.FOLLOWER;
         this.currentLeaderId = leaderHint;
         peerLastAckNanos.clear();
+
+        if (newTerm > metaStorage.getCurrentTerm()) {
+            termChangeCount.incrementAndGet();
+        }
 
         try {
             metaStorage.save(newTerm, null);
@@ -998,6 +1008,14 @@ public class RaftNode implements RaftRpcHandler, Closeable {
 
     public RaftConfig getConfig() {
         return config;
+    }
+
+    public long getElectionCount() {
+        return electionCount.get();
+    }
+
+    public long getTermChangeCount() {
+        return termChangeCount.get();
     }
 
     public StateMachine getStateMachine() {

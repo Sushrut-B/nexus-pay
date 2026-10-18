@@ -375,6 +375,41 @@ public class RaftHttpServer implements Closeable {
             sb.append("raft_is_leader{node=\"").append(raftNode.getNodeId()).append("\"} ")
                     .append(raftNode.getRole() == io.raftline.core.Role.LEADER ? 1 : 0).append("\n");
 
+            sb.append("# HELP raft_leader_lease_valid Whether the node holds an active zero-RPC leader lease\n");
+            sb.append("# TYPE raft_leader_lease_valid gauge\n");
+            sb.append("raft_leader_lease_valid{node=\"").append(raftNode.getNodeId()).append("\"} ")
+                    .append(raftNode.isLeaderLeaseValid() ? 1 : 0).append("\n");
+
+            sb.append("# HELP raft_election_total Total count of elections initiated by this node\n");
+            sb.append("# TYPE raft_election_total counter\n");
+            sb.append("raft_election_total{node=\"").append(raftNode.getNodeId()).append("\"} ")
+                    .append(raftNode.getElectionCount()).append("\n");
+
+            sb.append("# HELP raft_term_changes_total Total count of term transitions witnessed by this node\n");
+            sb.append("# TYPE raft_term_changes_total counter\n");
+            sb.append("raft_term_changes_total{node=\"").append(raftNode.getNodeId()).append("\"} ")
+                    .append(raftNode.getTermChangeCount()).append("\n");
+
+            sb.append("# HELP raft_wal_last_log_index The highest log entry index appended to disk WAL\n");
+            sb.append("# TYPE raft_wal_last_log_index gauge\n");
+            sb.append("raft_wal_last_log_index{node=\"").append(raftNode.getNodeId()).append("\"} ")
+                    .append(raftNode.getWal().getLastLogIndex()).append("\n");
+
+            sb.append("# HELP raft_wal_snapshot_index The highest log index covered by snapshot boundary\n");
+            sb.append("# TYPE raft_wal_snapshot_index gauge\n");
+            sb.append("raft_wal_snapshot_index{node=\"").append(raftNode.getNodeId()).append("\"} ")
+                    .append(raftNode.getWal().getSnapshotIndex()).append("\n");
+
+            sb.append("# HELP raft_cluster_size The total configured cluster size\n");
+            sb.append("# TYPE raft_cluster_size gauge\n");
+            sb.append("raft_cluster_size{node=\"").append(raftNode.getNodeId()).append("\"} ")
+                    .append(raftNode.getConfig().getClusterSize()).append("\n");
+
+            sb.append("# HELP raft_cluster_quorum Majority quorum threshold required for commits\n");
+            sb.append("# TYPE raft_cluster_quorum gauge\n");
+            sb.append("raft_cluster_quorum{node=\"").append(raftNode.getNodeId()).append("\"} ")
+                    .append(raftNode.getConfig().getQuorum()).append("\n");
+
             sendPlainText(exchange, 200, sb.toString());
         }
     }

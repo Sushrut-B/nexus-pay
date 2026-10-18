@@ -192,6 +192,14 @@ public class QuorixClient implements Closeable {
         return json.readTree(res.body());
     }
 
+    public String getMetrics(String targetUrl) throws IOException, InterruptedException {
+        HttpRequest request = newRequestBuilder(URI.create(targetUrl + "/v1/metrics"))
+                .GET()
+                .build();
+        HttpResponse<String> res = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+        return res.body();
+    }
+
     public void addMember(String nodeId) throws IOException, InterruptedException {
         String body = json.writeValueAsString(Map.of("nodeId", nodeId, "action", "ADD"));
         executeWithRetry((baseUrl) -> {

@@ -134,3 +134,9 @@ Today, the complete multi-module distributed consensus system was engineered fro
 | TSK-1203 | REST API Token Authentication | HTTP Bearer token and `X-API-Key` enforcement across KV, admin, and membership APIs | Completed | 100% |
 | TSK-1204 | Client SDK API Key Support | `QuorixClient.createWithApiKey(...)` with automated auth headers and fast 401 handling | Completed | 100% |
 | TSK-1205 | Security Integration Test Suite | Tested authorized and unauthorized client requests in `RaftHttpServerIntegrationTest` | Completed | 100% |
+| **TSK-1300** | **Days 8 – 9: Production Observability & Prometheus Metrics** | Native Prometheus metrics export (`/v1/metrics`), scraping config & SDK observability | **Completed** | 100% |
+| TSK-1301 | Raft Consensus Metrics Exporter | Native text format Prometheus metrics for term, commit index, applied index, lease, WAL & snapshot | Completed | 100% |
+| TSK-1302 | Node Operational Counters | Atomic counters for `election_total` and `term_changes_total` tracking election stability | Completed | 100% |
+| TSK-1303 | Prometheus Scrape Configuration | Multi-target scraping configuration (`deployment/prometheus/prometheus.yml`) for 5-node cluster | Completed | 100% |
+| TSK-1304 | Client SDK Metrics Retrieval | `QuorixClient.getMetrics(targetUrl)` for automated cluster observability and health inspection | Completed | 100% |
+| TSK-1305 | Metrics Integration Test Suite | Automated end-to-end Prometheus format verification in `RaftHttpServerIntegrationTest` | Completed | 100% |

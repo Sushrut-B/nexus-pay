@@ -144,4 +144,35 @@ class RaftHttpServerIntegrationTest {
             authClient.close();
         }
     }
+
+    @Test
+    void testPrometheusMetricsEndpoint(@TempDir File tempDir) throws Exception {
+        File nDir = new File(tempDir, "metrics-node");
+        nDir.mkdirs();
+
+        RaftConfig config = new RaftConfig("metrics-node", Collections.emptyList(), 80, 160, 25, 100, 1000);
+        WriteAheadLog wal = new WriteAheadLog(nDir, false);
+        RaftMetaStorage meta = new RaftMetaStorage(nDir);
+        KeyValueStore kv = new KeyValueStore();
+        GrpcRaftTransport transport = new GrpcRaftTransport("metrics-node", 9922, Collections.emptyMap());
+
+        RaftNode node = new RaftNode(config, wal, meta, kv, transport);
+        nodes.add(node);
+        node.start();
+
+        RaftHttpServer server = new RaftHttpServer(8922, node, Collections.emptyMap());
+        server.start();
+        httpServers.add(server);
+
+        client = new QuorixClient(List.of("http://127.0.0.1:8922"));
+        client.put("k1", "v1");
+
+        String metricsText = client.getMetrics("http://127.0.0.1:8922");
+        assertThat(metricsText).contains("raft_current_term{node=\"metrics-node\"}");
+        assertThat(metricsText).contains("raft_commit_index{node=\"metrics-node\"}");
+        assertThat(metricsText).contains("raft_last_applied{node=\"metrics-node\"}");
+        assertThat(metricsText).contains("raft_is_leader{node=\"metrics-node\"} 1");
+        assertThat(metricsText).contains("raft_wal_last_log_index{node=\"metrics-node\"}");
+        assertThat(metricsText).contains("raft_cluster_quorum{node=\"metrics-node\"} 1");
+    }
 }
