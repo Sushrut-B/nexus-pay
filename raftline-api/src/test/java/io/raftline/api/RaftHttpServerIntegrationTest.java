@@ -102,4 +102,46 @@ class RaftHttpServerIntegrationTest {
         assertThat(status.has("term")).isTrue();
         assertThat(status.has("commitIndex")).isTrue();
     }
+
+    @Test
+    void testApiKeyAuthentication(@TempDir File tempDir) throws Exception {
+        String testKey = "secret-token-123";
+        File nDir = new File(tempDir, "auth-node");
+        nDir.mkdirs();
+
+        RaftConfig config = new RaftConfig("auth-node", Collections.emptyList(), 80, 160, 25, 100, 1000);
+        WriteAheadLog wal = new WriteAheadLog(nDir, false);
+        RaftMetaStorage meta = new RaftMetaStorage(nDir);
+        KeyValueStore kv = new KeyValueStore();
+        GrpcRaftTransport transport = new GrpcRaftTransport("auth-node", 9921, Collections.emptyMap());
+
+        RaftNode node = new RaftNode(config, wal, meta, kv, transport);
+        nodes.add(node);
+        node.start();
+
+        RaftHttpServer server = new RaftHttpServer(8921, node, Collections.emptyMap(), testKey);
+        server.start();
+        httpServers.add(server);
+
+        // 1. Client without API key -> Unauthorized
+        QuorixClient unauthClient = new QuorixClient(List.of("http://127.0.0.1:8921"));
+        try {
+            unauthClient.put("authKey", "val");
+            org.junit.jupiter.api.Assertions.fail("Should have failed with 401 Unauthorized");
+        } catch (Exception e) {
+            assertThat(e.getMessage()).contains("401");
+        } finally {
+            unauthClient.close();
+        }
+
+        // 2. Client with valid API key -> Successfully commits and reads
+        QuorixClient authClient = QuorixClient.createWithApiKey(testKey, "http://127.0.0.1:8921");
+        try {
+            authClient.put("authKey", "val");
+            String readBack = authClient.getString("authKey");
+            assertThat(readBack).isEqualTo("val");
+        } finally {
+            authClient.close();
+        }
+    }
 }

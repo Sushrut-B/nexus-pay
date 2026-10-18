@@ -128,3 +128,9 @@ Today, the complete multi-module distributed consensus system was engineered fro
 | TSK-1101 | Pipelined Replication Pipeline | Asynchronous continuous log dispatch streaming unacknowledged entries to lagging followers | Completed | 100% |
 | TSK-1102 | Rapid Lag Convergence Test | Validated in `RaftClusterTest.testPipelinedReplicationCatchup` with 30-entry streaming catch-up | Completed | 100% |
 | TSK-1103 | Automated Chaos Engineering Suite | `scripts/run-chaos-suite.ps1` injecting random process termination, leader failovers & recovery | Completed | 100% |
+| **TSK-1200** | **Days 6 – 7: Production Security & Mutual TLS (mTLS)** | End-to-end transport encryption, certificate auth, API token security | **Completed** | 100% |
+| TSK-1201 | Transport TLS Security (`TlsConfig`) | Configurable server/client certificates, trust anchors, and `requireClientAuth` toggle | Completed | 100% |
+| TSK-1202 | gRPC mTLS Server & Channels | `GrpcRaftServer` and `GrpcRaftTransport` TLS integration via `GrpcSslContexts` | Completed | 100% |
+| TSK-1203 | REST API Token Authentication | HTTP Bearer token and `X-API-Key` enforcement across KV, admin, and membership APIs | Completed | 100% |
+| TSK-1204 | Client SDK API Key Support | `QuorixClient.createWithApiKey(...)` with automated auth headers and fast 401 handling | Completed | 100% |
+| TSK-1205 | Security Integration Test Suite | Tested authorized and unauthorized client requests in `RaftHttpServerIntegrationTest` | Completed | 100% |

@@ -31,15 +31,21 @@ public class QuorixClient implements Closeable {
     private final List<String> seedUrls;
     private final HttpClient httpClient;
     private final String clientId;
+    private final String apiKey;
     private final AtomicLong sequenceGenerator = new AtomicLong(0);
 
     private volatile String cachedLeaderUrl = null;
 
     public QuorixClient(List<String> seedUrls) {
+        this(seedUrls, null);
+    }
+
+    public QuorixClient(List<String> seedUrls, String apiKey) {
         if (seedUrls == null || seedUrls.isEmpty()) {
             throw new IllegalArgumentException("At least one seed URL must be provided");
         }
         this.seedUrls = new ArrayList<>(seedUrls);
+        this.apiKey = (apiKey != null && !apiKey.isBlank()) ? apiKey.trim() : null;
         this.clientId = "client-" + UUID.randomUUID();
         this.httpClient = HttpClient.newBuilder()
                 .connectTimeout(Duration.ofSeconds(3))
@@ -51,6 +57,18 @@ public class QuorixClient implements Closeable {
         return new QuorixClient(List.of(seedUrls));
     }
 
+    public static QuorixClient createWithApiKey(String apiKey, String... seedUrls) {
+        return new QuorixClient(List.of(seedUrls), apiKey);
+    }
+
+    private HttpRequest.Builder newRequestBuilder(URI uri) {
+        HttpRequest.Builder builder = HttpRequest.newBuilder().uri(uri);
+        if (apiKey != null) {
+            builder.header("Authorization", "Bearer " + apiKey);
+        }
+        return builder;
+    }
+
     public void put(String key, String value) throws IOException, InterruptedException {
         put(key, value.getBytes(StandardCharsets.UTF_8));
     }
@@ -58,8 +76,7 @@ public class QuorixClient implements Closeable {
     public void put(String key, byte[] value) throws IOException, InterruptedException {
         long seq = sequenceGenerator.incrementAndGet();
         executeWithRetry((baseUrl) -> {
-            HttpRequest request = HttpRequest.newBuilder()
-                    .uri(URI.create(baseUrl + "/v1/kv/" + key))
+            HttpRequest request = newRequestBuilder(URI.create(baseUrl + "/v1/kv/" + key))
                     .header("Content-Type", "application/octet-stream")
                     .header("X-Client-Id", clientId)
                     .header("X-Sequence-Number", String.valueOf(seq))
@@ -82,8 +99,7 @@ public class QuorixClient implements Closeable {
     public byte[] get(String key, boolean stale) throws IOException, InterruptedException {
         HttpResponse<byte[]> response = executeWithRetry((baseUrl) -> {
             String uriStr = baseUrl + "/v1/kv/" + key + (stale ? "?stale=true" : "");
-            HttpRequest request = HttpRequest.newBuilder()
-                    .uri(URI.create(uriStr))
+            HttpRequest request = newRequestBuilder(URI.create(uriStr))
                     .GET()
                     .timeout(Duration.ofSeconds(5))
                     .build();
@@ -111,8 +127,7 @@ public class QuorixClient implements Closeable {
 
         String path = urlBuilder.toString();
         HttpResponse<byte[]> response = executeWithRetry((baseUrl) -> {
-            HttpRequest request = HttpRequest.newBuilder()
-                    .uri(URI.create(baseUrl + path))
+            HttpRequest request = newRequestBuilder(URI.create(baseUrl + path))
                     .GET()
                     .timeout(Duration.ofSeconds(5))
                     .build();
@@ -135,8 +150,7 @@ public class QuorixClient implements Closeable {
     public void delete(String key) throws IOException, InterruptedException {
         long seq = sequenceGenerator.incrementAndGet();
         executeWithRetry((baseUrl) -> {
-            HttpRequest request = HttpRequest.newBuilder()
-                    .uri(URI.create(baseUrl + "/v1/kv/" + key))
+            HttpRequest request = newRequestBuilder(URI.create(baseUrl + "/v1/kv/" + key))
                     .header("X-Client-Id", clientId)
                     .header("X-Sequence-Number", String.valueOf(seq))
                     .DELETE()
@@ -156,8 +170,7 @@ public class QuorixClient implements Closeable {
 
         String body = json.writeValueAsString(ops);
         HttpResponse<byte[]> response = executeWithRetry((baseUrl) -> {
-            HttpRequest request = HttpRequest.newBuilder()
-                    .uri(URI.create(baseUrl + "/v1/kv/batch"))
+            HttpRequest request = newRequestBuilder(URI.create(baseUrl + "/v1/kv/batch"))
                     .header("Content-Type", "application/json")
                     .header("X-Client-Id", clientId)
                     .POST(HttpRequest.BodyPublishers.ofString(body))
@@ -172,8 +185,7 @@ public class QuorixClient implements Closeable {
     }
 
     public JsonNode getClusterStatus(String targetUrl) throws IOException, InterruptedException {
-        HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(targetUrl + "/v1/cluster/status"))
+        HttpRequest request = newRequestBuilder(URI.create(targetUrl + "/v1/cluster/status"))
                 .GET()
                 .build();
         HttpResponse<String> res = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
@@ -183,8 +195,7 @@ public class QuorixClient implements Closeable {
     public void addMember(String nodeId) throws IOException, InterruptedException {
         String body = json.writeValueAsString(Map.of("nodeId", nodeId, "action", "ADD"));
         executeWithRetry((baseUrl) -> {
-            HttpRequest request = HttpRequest.newBuilder()
-                    .uri(URI.create(baseUrl + "/v1/cluster/members"))
+            HttpRequest request = newRequestBuilder(URI.create(baseUrl + "/v1/cluster/members"))
                     .header("Content-Type", "application/json")
                     .POST(HttpRequest.BodyPublishers.ofString(body))
                     .timeout(Duration.ofSeconds(5))
@@ -196,8 +207,7 @@ public class QuorixClient implements Closeable {
     public void removeMember(String nodeId) throws IOException, InterruptedException {
         String body = json.writeValueAsString(Map.of("nodeId", nodeId, "action", "REMOVE"));
         executeWithRetry((baseUrl) -> {
-            HttpRequest request = HttpRequest.newBuilder()
-                    .uri(URI.create(baseUrl + "/v1/cluster/members"))
+            HttpRequest request = newRequestBuilder(URI.create(baseUrl + "/v1/cluster/members"))
                     .header("Content-Type", "application/json")
                     .POST(HttpRequest.BodyPublishers.ofString(body))
                     .timeout(Duration.ofSeconds(5))
@@ -208,8 +218,7 @@ public class QuorixClient implements Closeable {
 
     public JsonNode getMembers() throws IOException, InterruptedException {
         HttpResponse<byte[]> response = executeWithRetry((baseUrl) -> {
-            HttpRequest request = HttpRequest.newBuilder()
-                    .uri(URI.create(baseUrl + "/v1/cluster/members"))
+            HttpRequest request = newRequestBuilder(URI.create(baseUrl + "/v1/cluster/members"))
                     .GET()
                     .timeout(Duration.ofSeconds(3))
                     .build();
@@ -246,7 +255,12 @@ public class QuorixClient implements Closeable {
                         return response;
                     }
 
-                    // 3. Not leader redirect (307)
+                    // 3. 401 Unauthorized is fatal - do not retry
+                    if (response.statusCode() == 401) {
+                        throw new IOException("HTTP 401 Unauthorized: Valid API key required for cluster access");
+                    }
+
+                    // 4. Not leader redirect (307)
                     if (response.statusCode() == 307) {
                         String location = response.headers().firstValue("Location").orElse(null);
                         if (location != null && !location.isBlank()) {
@@ -258,6 +272,11 @@ public class QuorixClient implements Closeable {
                     }
 
                     log.warn("Node {} returned HTTP {}. Trying next...", baseUrl, response.statusCode());
+                } catch (IOException e) {
+                    if (e.getMessage() != null && e.getMessage().contains("401 Unauthorized")) {
+                        throw e;
+                    }
+                    log.debug("Failed contacting {}: {}", baseUrl, e.getMessage());
                 } catch (Exception e) {
                     log.debug("Failed contacting {}: {}", baseUrl, e.getMessage());
                 }

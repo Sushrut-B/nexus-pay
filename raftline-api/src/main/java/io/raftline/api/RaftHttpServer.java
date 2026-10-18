@@ -36,12 +36,18 @@ public class RaftHttpServer implements Closeable {
     private final int port;
     private final RaftNode raftNode;
     private final Map<String, Integer> peerHttpPorts;
+    private final String apiKey;
     private final HttpServer server;
 
     public RaftHttpServer(int port, RaftNode raftNode, Map<String, Integer> peerHttpPorts) throws IOException {
+        this(port, raftNode, peerHttpPorts, null);
+    }
+
+    public RaftHttpServer(int port, RaftNode raftNode, Map<String, Integer> peerHttpPorts, String apiKey) throws IOException {
         this.port = port;
         this.raftNode = raftNode;
         this.peerHttpPorts = peerHttpPorts != null ? peerHttpPorts : Map.of();
+        this.apiKey = (apiKey != null && !apiKey.isBlank()) ? apiKey.trim() : null;
 
         this.server = HttpServer.create(new InetSocketAddress(port), 0);
         this.server.setExecutor(Executors.newVirtualThreadPerTaskExecutor());
@@ -51,7 +57,20 @@ public class RaftHttpServer implements Closeable {
 
     public void start() {
         server.start();
-        log.info("Raft REST API Server listening on port {}", port);
+        log.info("Raft REST API Server listening on port {} (Auth={})", port, (apiKey != null ? "ENABLED" : "DISABLED"));
+    }
+
+    private boolean isAuthorized(HttpExchange exchange) {
+        if (apiKey == null) {
+            return true;
+        }
+        String authHeader = exchange.getRequestHeaders().getFirst("Authorization");
+        if (authHeader != null && authHeader.startsWith("Bearer ")) {
+            String token = authHeader.substring("Bearer ".length()).trim();
+            return apiKey.equals(token);
+        }
+        String customKey = exchange.getRequestHeaders().getFirst("X-API-Key");
+        return apiKey.equals(customKey);
     }
 
     private void setupRoutes() {
@@ -98,6 +117,11 @@ public class RaftHttpServer implements Closeable {
     private class KeyValueHandler implements HttpHandler {
         @Override
         public void handle(HttpExchange exchange) throws IOException {
+            if (!isAuthorized(exchange)) {
+                sendJson(exchange, 401, Map.of("error", "Unauthorized: Valid API Key required"));
+                return;
+            }
+
             String path = exchange.getRequestURI().getPath();
             String method = exchange.getRequestMethod();
 
@@ -358,6 +382,11 @@ public class RaftHttpServer implements Closeable {
     private class AdminSnapshotHandler implements HttpHandler {
         @Override
         public void handle(HttpExchange exchange) throws IOException {
+            if (!isAuthorized(exchange)) {
+                sendJson(exchange, 401, Map.of("error", "Unauthorized: Valid API Key required"));
+                return;
+            }
+
             if (!"POST".equalsIgnoreCase(exchange.getRequestMethod())) {
                 sendJson(exchange, 405, Map.of("error", "Method must be POST"));
                 return;
@@ -404,6 +433,10 @@ public class RaftHttpServer implements Closeable {
             }
 
             if ("POST".equals(method)) {
+                if (!isAuthorized(exchange)) {
+                    sendJson(exchange, 401, Map.of("error", "Unauthorized: Valid API Key required"));
+                    return;
+                }
                 if (raftNode.getRole() != io.raftline.core.Role.LEADER) {
                     Integer leaderPort = peerHttpPorts.get(raftNode.getCurrentLeaderId());
                     String redirectUrl = (leaderPort != null)

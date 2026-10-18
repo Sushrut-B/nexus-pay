@@ -10,6 +10,7 @@ import io.raftline.core.rpc.*;
 import io.raftline.core.transport.RaftRpcHandler;
 import io.raftline.core.transport.RaftTransport;
 import io.raftline.transport.proto.*;
+import io.raftline.transport.security.TlsConfig;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -26,6 +27,7 @@ public class GrpcRaftTransport implements RaftTransport {
     private final String localNodeId;
     private final int localPort;
     private final Map<String, String> peerAddresses;
+    private final TlsConfig tlsConfig;
     private final Map<String, ManagedChannel> channels = new ConcurrentHashMap<>();
     private final Map<String, RaftInternalServiceGrpc.RaftInternalServiceFutureStub> stubs = new ConcurrentHashMap<>();
 
@@ -33,16 +35,21 @@ public class GrpcRaftTransport implements RaftTransport {
     private RaftRpcHandler handler;
 
     public GrpcRaftTransport(String localNodeId, int localPort, Map<String, String> peerAddresses) {
+        this(localNodeId, localPort, peerAddresses, TlsConfig.disabled());
+    }
+
+    public GrpcRaftTransport(String localNodeId, int localPort, Map<String, String> peerAddresses, TlsConfig tlsConfig) {
         this.localNodeId = Objects.requireNonNull(localNodeId, "localNodeId");
         this.localPort = localPort;
         this.peerAddresses = Objects.requireNonNull(peerAddresses, "peerAddresses");
+        this.tlsConfig = tlsConfig != null ? tlsConfig : TlsConfig.disabled();
     }
 
     @Override
     public void registerHandler(RaftRpcHandler handler) {
         this.handler = handler;
         try {
-            this.server = new GrpcRaftServer(localPort, handler);
+            this.server = new GrpcRaftServer(localPort, handler, tlsConfig);
             this.server.start();
         } catch (IOException e) {
             throw new RuntimeException("Failed to bind gRPC server on port " + localPort, e);
@@ -59,10 +66,28 @@ public class GrpcRaftTransport implements RaftTransport {
             String host = parts[0];
             int port = Integer.parseInt(parts[1]);
 
-            ManagedChannel channel = io.grpc.netty.shaded.io.grpc.netty.NettyChannelBuilder
-                    .forAddress(new java.net.InetSocketAddress(host, port))
-                    .usePlaintext()
-                    .build();
+            var builder = io.grpc.netty.shaded.io.grpc.netty.NettyChannelBuilder
+                    .forAddress(new java.net.InetSocketAddress(host, port));
+
+            if (tlsConfig.isEnabled()) {
+                try {
+                    var sslBuilder = io.grpc.netty.shaded.io.grpc.netty.GrpcSslContexts.forClient();
+                    if (tlsConfig.getTrustCertCollectionFile() != null) {
+                        sslBuilder.trustManager(tlsConfig.getTrustCertCollectionFile());
+                    }
+                    if (tlsConfig.getCertificateChainFile() != null && tlsConfig.getPrivateKeyFile() != null) {
+                        sslBuilder.keyManager(tlsConfig.getCertificateChainFile(), tlsConfig.getPrivateKeyFile());
+                    }
+                    builder.sslContext(sslBuilder.build());
+                    log.info("Configured TLS channel to peer {} at {}:{}", id, host, port);
+                } catch (javax.net.ssl.SSLException e) {
+                    throw new RuntimeException("Failed to initialize SSL context for channel to " + id, e);
+                }
+            } else {
+                builder.usePlaintext();
+            }
+
+            ManagedChannel channel = builder.build();
             channels.put(id, channel);
             return RaftInternalServiceGrpc.newFutureStub(channel);
         });

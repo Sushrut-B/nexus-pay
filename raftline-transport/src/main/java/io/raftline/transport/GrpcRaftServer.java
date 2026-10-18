@@ -6,6 +6,7 @@ import io.grpc.stub.StreamObserver;
 import io.raftline.core.rpc.*;
 import io.raftline.core.transport.RaftRpcHandler;
 import io.raftline.transport.proto.*;
+import io.raftline.transport.security.TlsConfig;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -17,20 +18,40 @@ public class GrpcRaftServer implements Closeable {
 
     private final int port;
     private final RaftRpcHandler handler;
+    private final TlsConfig tlsConfig;
     private Server server;
 
     public GrpcRaftServer(int port, RaftRpcHandler handler) {
+        this(port, handler, TlsConfig.disabled());
+    }
+
+    public GrpcRaftServer(int port, RaftRpcHandler handler, TlsConfig tlsConfig) {
         this.port = port;
         this.handler = handler;
+        this.tlsConfig = tlsConfig != null ? tlsConfig : TlsConfig.disabled();
     }
 
     public void start() throws IOException {
-        this.server = io.grpc.netty.shaded.io.grpc.netty.NettyServerBuilder
+        var builder = io.grpc.netty.shaded.io.grpc.netty.NettyServerBuilder
                 .forAddress(new java.net.InetSocketAddress("0.0.0.0", port))
-                .addService(new RaftInternalServiceImpl())
-                .build()
-                .start();
+                .addService(new RaftInternalServiceImpl());
 
+        if (tlsConfig.isEnabled()) {
+            var sslBuilder = io.grpc.netty.shaded.io.grpc.netty.GrpcSslContexts.forServer(
+                    tlsConfig.getCertificateChainFile(),
+                    tlsConfig.getPrivateKeyFile()
+            );
+            if (tlsConfig.getTrustCertCollectionFile() != null) {
+                sslBuilder.trustManager(tlsConfig.getTrustCertCollectionFile());
+            }
+            if (tlsConfig.isRequireClientAuth()) {
+                sslBuilder.clientAuth(io.grpc.netty.shaded.io.netty.handler.ssl.ClientAuth.REQUIRE);
+            }
+            builder.sslContext(sslBuilder.build());
+            log.info("gRPC Raft Server configured with mTLS (requireClientAuth={})", tlsConfig.isRequireClientAuth());
+        }
+
+        this.server = builder.build().start();
         log.info("gRPC Raft Server started listening on port {}", port);
     }
 
