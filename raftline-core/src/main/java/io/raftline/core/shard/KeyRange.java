@@ -27,4 +27,23 @@ public record KeyRange(String startKey, String endKey) {
         }
         return true;
     }
+
+    /**
+     * Splits this range at the given splitKey into two contiguous sub-ranges:
+     * left: [startKey, splitKey)
+     * right: [splitKey, endKey)
+     */
+    public KeyRange[] split(String splitKey) {
+        Objects.requireNonNull(splitKey, "splitKey");
+        if (!contains(splitKey)) {
+            throw new IllegalArgumentException("Split key '" + splitKey + "' is not inside range [" + startKey + ", " + endKey + ")");
+        }
+        if (splitKey.equals(startKey)) {
+            throw new IllegalArgumentException("Split key cannot be equal to startKey");
+        }
+        return new KeyRange[] {
+                new KeyRange(this.startKey, splitKey),
+                new KeyRange(splitKey, this.endKey)
+        };
+    }
 }

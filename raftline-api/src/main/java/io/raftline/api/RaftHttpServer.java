@@ -101,29 +101,94 @@ public class RaftHttpServer implements Closeable {
                 return;
             }
 
-            var shards = multiRaftManager.getRouter().getAllShards();
-            List<Map<String, Object>> shardList = new ArrayList<>();
-            for (var s : shards) {
-                Map<String, Object> map = new LinkedHashMap<>();
-                map.put("shardId", s.shardId());
-                map.put("startKey", s.range().startKey());
-                map.put("endKey", s.range().endKey());
-                map.put("replicas", s.replicaNodeIds());
-                var groupOpt = multiRaftManager.getGroup(s.shardId());
-                if (groupOpt.isPresent()) {
-                    var group = groupOpt.get();
-                    map.put("role", group.getRole().name());
-                    map.put("term", group.getCurrentTerm());
-                    map.put("leaderId", group.getCurrentLeaderId());
+            String method = exchange.getRequestMethod().toUpperCase();
+            if ("GET".equals(method)) {
+                var shards = multiRaftManager.getRouter().getAllShards();
+                List<Map<String, Object>> shardList = new ArrayList<>();
+                for (var s : shards) {
+                    Map<String, Object> map = new LinkedHashMap<>();
+                    map.put("shardId", s.shardId());
+                    map.put("startKey", s.range().startKey());
+                    map.put("endKey", s.range().endKey());
+                    map.put("replicas", s.replicaNodeIds());
+                    var groupOpt = multiRaftManager.getGroup(s.shardId());
+                    if (groupOpt.isPresent()) {
+                        var group = groupOpt.get();
+                        map.put("role", group.getRole().name());
+                        map.put("term", group.getCurrentTerm());
+                        map.put("leaderId", group.getCurrentLeaderId());
+                    }
+                    shardList.add(map);
                 }
-                shardList.add(map);
+
+                sendJson(exchange, 200, Map.of(
+                        "sharding", "ENABLED",
+                        "totalShards", shardList.size(),
+                        "shards", shardList
+                ));
+                return;
             }
 
-            sendJson(exchange, 200, Map.of(
-                    "sharding", "ENABLED",
-                    "totalShards", shardList.size(),
-                    "shards", shardList
-            ));
+            if ("POST".equals(method)) {
+                if (!isAuthorized(exchange)) {
+                    sendJson(exchange, 401, Map.of("error", "Unauthorized: Valid API Key required"));
+                    return;
+                }
+
+                try {
+                    Map<String, Object> body = json.readValue(exchange.getRequestBody(), Map.class);
+                    String action = ((String) body.getOrDefault("action", "SPLIT")).toUpperCase();
+
+                    if ("SPLIT".equals(action)) {
+                        String originalShardId = (String) body.get("originalShardId");
+                        String splitKey = (String) body.get("splitKey");
+                        String newLeftShardId = (String) body.get("newLeftShardId");
+                        String newRightShardId = (String) body.get("newRightShardId");
+                        List<String> leftReplicas = (List<String>) body.get("leftReplicas");
+                        List<String> rightReplicas = (List<String>) body.get("rightReplicas");
+
+                        if (originalShardId == null || splitKey == null || newLeftShardId == null || newRightShardId == null) {
+                            sendJson(exchange, 400, Map.of("error", "originalShardId, splitKey, newLeftShardId, and newRightShardId are required"));
+                            return;
+                        }
+
+                        var result = multiRaftManager.getRouter().splitShard(
+                                originalShardId, splitKey, newLeftShardId, newRightShardId, leftReplicas, rightReplicas);
+
+                        sendJson(exchange, 200, Map.of(
+                                "status", "SPLIT_SUCCESS",
+                                "originalShardId", originalShardId,
+                                "leftShard", Map.of("id", result[0].shardId(), "startKey", result[0].range().startKey(), "endKey", result[0].range().endKey()),
+                                "rightShard", Map.of("id", result[1].shardId(), "startKey", result[1].range().startKey(), "endKey", result[1].range().endKey())
+                        ));
+                        return;
+                    } else if ("REBALANCE".equals(action)) {
+                        String shardId = (String) body.get("shardId");
+                        List<String> replicas = (List<String>) body.get("replicas");
+                        if (shardId == null || replicas == null) {
+                            sendJson(exchange, 400, Map.of("error", "shardId and replicas are required"));
+                            return;
+                        }
+
+                        var updated = multiRaftManager.getRouter().rebalanceShard(shardId, replicas);
+                        sendJson(exchange, 200, Map.of(
+                                "status", "REBALANCE_SUCCESS",
+                                "shardId", updated.shardId(),
+                                "replicas", updated.replicaNodeIds()
+                        ));
+                        return;
+                    } else {
+                        sendJson(exchange, 400, Map.of("error", "action must be SPLIT or REBALANCE"));
+                        return;
+                    }
+                } catch (Exception e) {
+                    log.error("Failed to process shard mutation", e);
+                    sendJson(exchange, 500, Map.of("error", e.getMessage()));
+                }
+                return;
+            }
+
+            sendJson(exchange, 405, Map.of("error", "Method not allowed: " + method));
         }
     }
 

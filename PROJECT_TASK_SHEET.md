@@ -153,3 +153,10 @@ Today, the complete multi-module distributed consensus system was engineered fro
 | TSK-1504 | REST Shard Discovery Endpoint | `/v1/cluster/shards` exposing cluster-wide range allocations, replica nodes, and shard leader states | Completed | 100% |
 | TSK-1505 | Client SDK Shard Inspection | `QuorixClient.getShards(targetUrl)` for programmatic shard topology discovery | Completed | 100% |
 | TSK-1506 | Multi-Raft End-to-End Test Suite | `MultiRaftShardingTest` validating concurrent independent shard operations & data isolation | Completed | 100% |
+| **TSK-1600** | **Days 16 – 18: Dynamic Shard Splits & Replica Rebalancing** | Online range partition splitting, replica re-allocation, REST mutation API & SDK integration | **Completed** | 100% |
+| TSK-1601 | Key Range Split Algorithm (`KeyRange.split`) | Splits parent `[startKey, endKey)` into contiguous sub-ranges `[startKey, splitKey)` and `[splitKey, endKey)` | Completed | 100% |
+| TSK-1602 | Online Dynamic Shard Split (`ShardRouter.splitShard`) | Atomically replaces parent shard with two child shards and maintains cluster consistency | Completed | 100% |
+| TSK-1603 | Replica Placement Rebalancing (`ShardRouter.rebalanceShard`) | Dynamically migrates shard assignments to new replica sets across physical cluster nodes | Completed | 100% |
+| TSK-1604 | REST Shard Mutation API (`POST /v1/cluster/shards`) | Endpoints supporting `SPLIT` and `REBALANCE` actions guarded with API token authentication | Completed | 100% |
+| TSK-1605 | Client SDK Split & Rebalance API | `QuorixClient.splitShard(...)` and `QuorixClient.rebalanceShard(...)` methods | Completed | 100% |
+| TSK-1606 | Shard Split & Rebalance Integration Test | `MultiRaftShardingTest.testDynamicShardSplitAndRebalancing` verifying dynamic boundary transitions | Completed | 100% |

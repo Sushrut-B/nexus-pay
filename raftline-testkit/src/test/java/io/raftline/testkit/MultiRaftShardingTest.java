@@ -129,6 +129,48 @@ class MultiRaftShardingTest {
         }
     }
 
+    @Test
+    void testDynamicShardSplitAndRebalancing() {
+        // Setup initial single shard covering entire keyspace: ["", "")
+        ShardInfo initialShard = new ShardInfo("shard-root", KeyRange.UNBOUNDED, List.of("node-1", "node-2", "node-3"));
+        ShardRouter router = new ShardRouter(List.of(initialShard));
+
+        // Initial lookup routes any key to root shard
+        assertThat(router.findShardForKey("user:100").orElseThrow().shardId()).isEqualTo("shard-root");
+        assertThat(router.findShardForKey("order:500").orElseThrow().shardId()).isEqualTo("shard-root");
+
+        // Dynamically split "shard-root" at boundary "m" -> ["", "m") and ["m", "")
+        ShardInfo[] splitResult = router.splitShard(
+                "shard-root", "m",
+                "shard-low", "shard-high",
+                List.of("node-1", "node-2", "node-3"),
+                List.of("node-2", "node-3", "node-4")
+        );
+
+        assertThat(splitResult).hasSize(2);
+        assertThat(splitResult[0].shardId()).isEqualTo("shard-low");
+        assertThat(splitResult[0].range().startKey()).isEqualTo("");
+        assertThat(splitResult[0].range().endKey()).isEqualTo("m");
+
+        assertThat(splitResult[1].shardId()).isEqualTo("shard-high");
+        assertThat(splitResult[1].range().startKey()).isEqualTo("m");
+        assertThat(splitResult[1].range().endKey()).isEqualTo("");
+
+        // Original root shard is removed
+        assertThat(router.getShard("shard-root")).isEmpty();
+
+        // Key routing now routes precisely across the split boundary
+        assertThat(router.findShardForKey("apple").orElseThrow().shardId()).isEqualTo("shard-low");
+        assertThat(router.findShardForKey("customer:1").orElseThrow().shardId()).isEqualTo("shard-low");
+        assertThat(router.findShardForKey("music").orElseThrow().shardId()).isEqualTo("shard-high");
+        assertThat(router.findShardForKey("zebra").orElseThrow().shardId()).isEqualTo("shard-high");
+
+        // Rebalance shard-low to new replica set: [node-3, node-4, node-5]
+        ShardInfo rebalanced = router.rebalanceShard("shard-low", List.of("node-3", "node-4", "node-5"));
+        assertThat(rebalanced.replicaNodeIds()).containsExactly("node-3", "node-4", "node-5");
+        assertThat(router.getShard("shard-low").orElseThrow().replicaNodeIds()).containsExactly("node-3", "node-4", "node-5");
+    }
+
     private RaftNode createGroupNode(File baseDir, String nodeId, List<String> peers,
                                      Map<String, RaftRpcHandler> clusterHandlers,
                                      Set<String> disconnectedPairs) throws Exception {

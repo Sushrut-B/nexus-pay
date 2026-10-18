@@ -320,6 +320,42 @@ public class QuorixClient implements Closeable {
         return response.body();
     }
 
+    public String splitShard(String targetUrl, String originalShardId, String splitKey, String newLeftShardId, String newRightShardId) throws IOException, InterruptedException {
+        String base = (targetUrl != null && !targetUrl.isBlank()) ? targetUrl : (cachedLeaderUrl != null ? cachedLeaderUrl : seedUrls.get(0));
+        Map<String, Object> body = Map.of(
+                "action", "SPLIT",
+                "originalShardId", originalShardId,
+                "splitKey", splitKey,
+                "newLeftShardId", newLeftShardId,
+                "newRightShardId", newRightShardId
+        );
+        byte[] payload = json.writeValueAsBytes(body);
+        HttpRequest request = newRequestBuilder(URI.create(base + "/v1/cluster/shards"))
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofByteArray(payload))
+                .timeout(Duration.ofSeconds(5))
+                .build();
+        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+        return response.body();
+    }
+
+    public String rebalanceShard(String targetUrl, String shardId, List<String> newReplicas) throws IOException, InterruptedException {
+        String base = (targetUrl != null && !targetUrl.isBlank()) ? targetUrl : (cachedLeaderUrl != null ? cachedLeaderUrl : seedUrls.get(0));
+        Map<String, Object> body = Map.of(
+                "action", "REBALANCE",
+                "shardId", shardId,
+                "replicas", newReplicas
+        );
+        byte[] payload = json.writeValueAsBytes(body);
+        HttpRequest request = newRequestBuilder(URI.create(base + "/v1/cluster/shards"))
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofByteArray(payload))
+                .timeout(Duration.ofSeconds(5))
+                .build();
+        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+        return response.body();
+    }
+
     public String getClientId() {
         return clientId;
     }
