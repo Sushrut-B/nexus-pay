@@ -65,11 +65,29 @@ public class RaftServerMain {
         RaftNode raftNode = new RaftNode(config, wal, metaStorage, stateMachine, transport);
         raftNode.start();
 
+        int redisPort = Integer.parseInt(params.getOrDefault("redis-port", "6379"));
+        String redisAuth = params.get("redis-auth");
+
         RaftHttpServer httpServer = new RaftHttpServer(httpPort, raftNode, httpPeerPorts);
         httpServer.start();
 
+        io.raftline.api.redis.RaftRedisServer redisServer = null;
+        if (redisPort > 0) {
+            try {
+                redisServer = new io.raftline.api.redis.RaftRedisServer(redisPort, raftNode, null, redisAuth);
+                redisServer.start();
+                log.info("Redis RESP wire protocol enabled on port {}", redisServer.getPort());
+            } catch (Exception e) {
+                log.warn("Could not bind Redis RESP server to port {}: {}", redisPort, e.getMessage());
+            }
+        }
+
+        final io.raftline.api.redis.RaftRedisServer finalRedisServer = redisServer;
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
             log.info("Gracefully shutting down Raftline node '{}'...", nodeId);
+            if (finalRedisServer != null) {
+                try { finalRedisServer.close(); } catch (Exception ignored) {}
+            }
             httpServer.close();
             try {
                 raftNode.close();
@@ -80,7 +98,7 @@ public class RaftServerMain {
 
         long currentPid = ProcessHandle.current().pid();
         java.nio.file.Files.writeString(new File(dataDir, "node.pid").toPath(), String.valueOf(currentPid));
-        log.info("Raftline node '{}' (PID: {}) initialized successfully.", nodeId, currentPid);
+        log.info("Raftline node '{}' (PID: {}, Redis: {}) initialized successfully.", nodeId, currentPid, redisPort);
     }
 
     private static Map<String, String> parseArgs(String[] args) {
