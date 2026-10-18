@@ -10,13 +10,17 @@ import java.util.concurrent.*;
 
 /**
  * In-memory simulated network transport for ultra-fast, deterministic cluster testing.
- * Supports simulating partitions, packet drops, and artificial latency without sockets.
+ * Supports simulating bidirectional partitions, unidirectional drops, message delay, and packet drop rates.
  */
 public class InProcessRaftTransport implements RaftTransport {
     private final String localNodeId;
     private final Map<String, RaftRpcHandler> clusterHandlers;
     private final Set<String> disconnectedPairs;
     private final ExecutorService networkExecutor;
+
+    // Fault injection configurations
+    private final Map<String, Long> peerDelaysMs = new ConcurrentHashMap<>();
+    private final Map<String, Double> peerDropRates = new ConcurrentHashMap<>();
 
     private RaftRpcHandler localHandler;
 
@@ -36,10 +40,43 @@ public class InProcessRaftTransport implements RaftTransport {
         this.clusterHandlers.put(localNodeId, handler);
     }
 
+    public void setPeerDelay(String peerId, long delayMs) {
+        if (delayMs <= 0) {
+            peerDelaysMs.remove(peerId);
+        } else {
+            peerDelaysMs.put(peerId, delayMs);
+        }
+    }
+
+    public void setPeerDropRate(String peerId, double dropRate) {
+        if (dropRate <= 0.0) {
+            peerDropRates.remove(peerId);
+        } else {
+            peerDropRates.put(peerId, dropRate);
+        }
+    }
+
     private boolean isPartitioned(String targetPeerId) {
-        String pair1 = localNodeId + "->" + targetPeerId;
-        String pair2 = targetPeerId + "->" + localNodeId;
-        return disconnectedPairs.contains(pair1) || disconnectedPairs.contains(pair2);
+        String directed = localNodeId + "->" + targetPeerId;
+        if (disconnectedPairs.contains(directed)) {
+            return true;
+        }
+        Double dropRate = peerDropRates.get(targetPeerId);
+        if (dropRate != null && ThreadLocalRandom.current().nextDouble() < dropRate) {
+            return true;
+        }
+        return false;
+    }
+
+    private void applyDelayIfConfigured(String peerId) {
+        Long delay = peerDelaysMs.get(peerId);
+        if (delay != null && delay > 0) {
+            try {
+                Thread.sleep(delay);
+            } catch (InterruptedException ignored) {
+                Thread.currentThread().interrupt();
+            }
+        }
     }
 
     @Override
@@ -58,6 +95,7 @@ public class InProcessRaftTransport implements RaftTransport {
 
         networkExecutor.execute(() -> {
             try {
+                applyDelayIfConfigured(peerId);
                 if (isPartitioned(peerId)) {
                     future.completeExceptionally(new TimeoutException("Network partitioned from " + peerId));
                 } else {
@@ -88,6 +126,7 @@ public class InProcessRaftTransport implements RaftTransport {
 
         networkExecutor.execute(() -> {
             try {
+                applyDelayIfConfigured(peerId);
                 if (isPartitioned(peerId)) {
                     future.completeExceptionally(new TimeoutException("Network partitioned from " + peerId));
                 } else {
@@ -118,6 +157,7 @@ public class InProcessRaftTransport implements RaftTransport {
 
         networkExecutor.execute(() -> {
             try {
+                applyDelayIfConfigured(peerId);
                 if (isPartitioned(peerId)) {
                     future.completeExceptionally(new TimeoutException("Network partitioned from " + peerId));
                 } else {
@@ -135,5 +175,7 @@ public class InProcessRaftTransport implements RaftTransport {
     @Override
     public void close() {
         clusterHandlers.remove(localNodeId);
+        peerDelaysMs.clear();
+        peerDropRates.clear();
     }
 }

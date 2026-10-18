@@ -15,6 +15,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -236,4 +237,91 @@ class RaftClusterTest {
             assertThat(new String(v, StandardCharsets.UTF_8)).isEqualTo("pipe-v" + i);
         }
     }
+
+    @Test
+    void testAsymmetricalNetworkPartitionResiliency(@TempDir File tempDir) throws Exception {
+        cluster = new ClusterSimulator(tempDir, 5);
+        RaftNode leader = cluster.waitForLeader(3000);
+        String leaderId = leader.getNodeId();
+
+        // Pick one follower
+        String followerId = cluster.getNodes().keySet().stream()
+                .filter(id -> !id.equals(leaderId))
+                .findFirst()
+                .orElseThrow();
+
+        // Create asymmetric partition: leader cannot send to followerId, but followerId CAN send to leader
+        cluster.isolateDirection(leaderId, followerId);
+
+        // Leader writes command - should still succeed because quorum (3 out of 5) is met with other 3 followers!
+        Command cmd = Command.put("asym-key", "asym-val".getBytes(StandardCharsets.UTF_8), "c1", 301);
+        ApplyResult result = leader.execute(cmd).get(3, TimeUnit.SECONDS);
+        assertThat(result.isSuccess()).isTrue();
+
+        // Heal directed partition
+        cluster.healDirection(leaderId, followerId);
+        Thread.sleep(250);
+
+        // The follower should now receive heartbeats/appends and converge
+        byte[] val = cluster.getStateMachine(followerId).get("asym-key");
+        assertThat(val).isNotNull();
+        assertThat(new String(val, StandardCharsets.UTF_8)).isEqualTo("asym-val");
+    }
+
+    @Test
+    void testMinorityPartitionSplitBrainProtection(@TempDir File tempDir) throws Exception {
+        cluster = new ClusterSimulator(tempDir, 5);
+        RaftNode initialLeader = cluster.waitForLeader(3000);
+        String oldLeaderId = initialLeader.getNodeId();
+
+        // Partition the old leader + 1 follower into minority {node-A, node-B}
+        // vs majority {node-C, node-D, node-E}
+        List<String> allNodes = new java.util.ArrayList<>(cluster.getNodes().keySet());
+        allNodes.remove(oldLeaderId);
+        String minorityFollower = allNodes.remove(0);
+
+        Set<String> minority = Set.of(oldLeaderId, minorityFollower);
+        Set<String> majority = new java.util.HashSet<>(allNodes);
+
+        cluster.partition(minority, majority);
+
+        // Allow election in majority
+        Thread.sleep(400);
+
+        // A write attempted on the minority partition cannot achieve quorum
+        Command failedCmd = Command.put("isolated-key", "should-fail".getBytes(StandardCharsets.UTF_8), "c1", 401);
+        CompletableFuture<ApplyResult> minorityFuture = initialLeader.execute(failedCmd);
+
+        // Verify that the minority cannot commit within 800ms
+        org.junit.jupiter.api.Assertions.assertThrows(TimeoutException.class, () -> {
+            minorityFuture.get(800, TimeUnit.MILLISECONDS);
+        });
+
+        // The majority partition must elect a leader and successfully commit writes
+        RaftNode majorityLeader = null;
+        for (String id : majority) {
+            RaftNode n = cluster.getNodes().get(id);
+            if (n != null && n.getRole() == Role.LEADER) {
+                majorityLeader = n;
+                break;
+            }
+        }
+        assertThat(majorityLeader).isNotNull();
+
+        Command successCmd = Command.put("isolated-key", "committed-in-majority".getBytes(StandardCharsets.UTF_8), "c1", 402);
+        ApplyResult majorityResult = majorityLeader.execute(successCmd).get(3, TimeUnit.SECONDS);
+        assertThat(majorityResult.isSuccess()).isTrue();
+
+        // Heal partition
+        cluster.healPartition();
+        Thread.sleep(350);
+
+        // Verify all 5 nodes have converged on the majority's committed value, NOT the abandoned minority write
+        for (String nodeId : cluster.getNodes().keySet()) {
+            byte[] v = cluster.getStateMachine(nodeId).get("isolated-key");
+            assertThat(v).isNotNull();
+            assertThat(new String(v, StandardCharsets.UTF_8)).isEqualTo("committed-in-majority");
+        }
+    }
 }
+

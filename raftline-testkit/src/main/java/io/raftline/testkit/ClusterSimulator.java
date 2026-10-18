@@ -19,8 +19,9 @@ import java.util.*;
 import java.util.concurrent.*;
 
 /**
- * High-level Raft Cluster Simulator for deterministic failure and consensus testing.
- * Manages N independent nodes, file persistence, partitions, and recovery.
+ * High-level Raft Cluster Simulator for deterministic failure, partition, and consensus testing.
+ * Manages N independent nodes, file persistence, partitions (bidirectional, asymmetrical),
+ * latency injection, and recovery.
  */
 public class ClusterSimulator implements Closeable {
     private static final Logger log = LoggerFactory.getLogger(ClusterSimulator.class);
@@ -29,6 +30,7 @@ public class ClusterSimulator implements Closeable {
     private final int clusterSize;
     private final List<String> nodeIds = new ArrayList<>();
     private final Map<String, RaftNode> nodes = new ConcurrentHashMap<>();
+    private final Map<String, InProcessRaftTransport> transports = new ConcurrentHashMap<>();
     private final Map<String, KeyValueStore> stateMachines = new ConcurrentHashMap<>();
     private final Map<String, RaftRpcHandler> clusterHandlers = new ConcurrentHashMap<>();
     private final Set<String> disconnectedPairs = ConcurrentHashMap.newKeySet();
@@ -67,6 +69,7 @@ public class ClusterSimulator implements Closeable {
         stateMachines.put(nodeId, kv);
 
         InProcessRaftTransport transport = new InProcessRaftTransport(nodeId, clusterHandlers, disconnectedPairs, networkExecutor);
+        transports.put(nodeId, transport);
         RaftNode node = new RaftNode(config, wal, meta, kv, transport);
         nodes.put(nodeId, node);
         node.start();
@@ -76,10 +79,14 @@ public class ClusterSimulator implements Closeable {
 
     public synchronized void killNode(String nodeId) throws IOException {
         RaftNode node = nodes.remove(nodeId);
+        InProcessRaftTransport transport = transports.remove(nodeId);
         if (node != null) {
             log.info("Killing node {}", nodeId);
             node.close();
             clusterHandlers.remove(nodeId);
+        }
+        if (transport != null) {
+            transport.close();
         }
     }
 
@@ -101,8 +108,11 @@ public class ClusterSimulator implements Closeable {
         throw new TimeoutException("No leader elected within " + timeoutMs + "ms");
     }
 
+    /**
+     * Bidirectional network partition between two sets of nodes.
+     */
     public void partition(Set<String> groupA, Set<String> groupB) {
-        log.info("Creating network partition between {} and {}", groupA, groupB);
+        log.info("Creating bidirectional network partition between {} and {}", groupA, groupB);
         for (String a : groupA) {
             for (String b : groupB) {
                 disconnectedPairs.add(a + "->" + b);
@@ -111,9 +121,51 @@ public class ClusterSimulator implements Closeable {
         }
     }
 
+    /**
+     * Asymmetrical (directed) network partition: nodeFrom cannot send to nodeTo,
+     * but nodeTo can still send to nodeFrom.
+     */
+    public void isolateDirection(String nodeFrom, String nodeTo) {
+        log.info("Creating directed partition {} -> {}", nodeFrom, nodeTo);
+        disconnectedPairs.add(nodeFrom + "->" + nodeTo);
+    }
+
+    /**
+     * Heals a directed partition.
+     */
+    public void healDirection(String nodeFrom, String nodeTo) {
+        disconnectedPairs.remove(nodeFrom + "->" + nodeTo);
+    }
+
+    /**
+     * Injects synthetic delay (in milliseconds) on communications from nodeFrom to nodeTo.
+     */
+    public void injectDelay(String nodeFrom, String nodeTo, long delayMs) {
+        InProcessRaftTransport transport = transports.get(nodeFrom);
+        if (transport != null) {
+            transport.setPeerDelay(nodeTo, delayMs);
+        }
+    }
+
+    /**
+     * Injects random packet loss rate [0.0 - 1.0] from nodeFrom to nodeTo.
+     */
+    public void injectDropRate(String nodeFrom, String nodeTo, double dropRate) {
+        InProcessRaftTransport transport = transports.get(nodeFrom);
+        if (transport != null) {
+            transport.setPeerDropRate(nodeTo, dropRate);
+        }
+    }
+
     public void healPartition() {
-        log.info("Healing all network partitions");
+        log.info("Healing all network partitions and fault configs");
         disconnectedPairs.clear();
+        for (InProcessRaftTransport transport : transports.values()) {
+            for (String peerId : nodeIds) {
+                transport.setPeerDelay(peerId, 0);
+                transport.setPeerDropRate(peerId, 0.0);
+            }
+        }
     }
 
     public CompletableFuture<ApplyResult> executeOnLeader(Command command) {
@@ -146,6 +198,7 @@ public class ClusterSimulator implements Closeable {
             node.close();
         }
         nodes.clear();
+        transports.clear();
         networkExecutor.shutdownNow();
     }
 }

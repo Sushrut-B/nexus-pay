@@ -140,3 +140,9 @@ Today, the complete multi-module distributed consensus system was engineered fro
 | TSK-1303 | Prometheus Scrape Configuration | Multi-target scraping configuration (`deployment/prometheus/prometheus.yml`) for 5-node cluster | Completed | 100% |
 | TSK-1304 | Client SDK Metrics Retrieval | `QuorixClient.getMetrics(targetUrl)` for automated cluster observability and health inspection | Completed | 100% |
 | TSK-1305 | Metrics Integration Test Suite | Automated end-to-end Prometheus format verification in `RaftHttpServerIntegrationTest` | Completed | 100% |
+| **TSK-1400** | **Days 10 – 12: Jepsen-Style Chaos Suite & Extended Resiliency** | Asymmetrical network partitions, split-brain protection, delay injection & Nemesis suite | **Completed** | 100% |
+| TSK-1401 | Asymmetrical & Directed Partition Simulation | `InProcessRaftTransport.isolateDirection()` and `healDirection()` for directional drop modeling | Completed | 100% |
+| TSK-1402 | Synthetic Delay & Packet Drop Injection | Peer-level millisecond latency and randomized packet loss rates in in-process network harness | Completed | 100% |
+| TSK-1403 | Minority Split-Brain Isolation Protection | Test verification ensuring uncommitted minority writes are rejected and overridden by majority | Completed | 100% |
+| TSK-1404 | Asymmetrical Network Partition Resiliency Test | Validated majority quorum preservation despite asymmetric peer blindness in `RaftClusterTest` | Completed | 100% |
+| TSK-1405 | Jepsen Nemesis Automation Script | `scripts/run-jepsen-chaos.ps1` driving randomized crashes, concurrent operations, and linearizability checking | Completed | 100% |
