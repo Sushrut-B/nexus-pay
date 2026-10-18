@@ -1,0 +1,17 @@
+apiVersion: v2
+name: raftline
+description: Highly available distributed consensus database Helm chart powered by Raftline
+type: application
+version: 1.0.0
+appVersion: "1.0.0"
+keywords:
+  - raft
+  - distributed-systems
+  - consensus
+  - database
+  - high-availability
+home: https://github.com/Sushrut-B/Raftline
+sources:
+  - https://github.com/Sushrut-B/Raftline
+maintainers:
+  - name: Sushrut

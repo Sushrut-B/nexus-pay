@@ -86,8 +86,34 @@ public class RaftHttpServer implements Closeable {
         server.createContext("/v1/cluster/nodes", new NodesHandler());
         server.createContext("/v1/cluster/members", new MembersHandler());
         server.createContext("/v1/cluster/shards", new ShardsHandler());
+        server.createContext("/v1/health/live", new LivenessHandler());
+        server.createContext("/v1/health/ready", new ReadinessHandler());
         server.createContext("/v1/metrics", new MetricsHandler());
         server.createContext("/v1/admin/snapshot", new AdminSnapshotHandler());
+    }
+
+    private class LivenessHandler implements HttpHandler {
+        @Override
+        public void handle(HttpExchange exchange) throws IOException {
+            sendJson(exchange, 200, Map.of(
+                    "status", "UP",
+                    "nodeId", raftNode.getNodeId()
+            ));
+        }
+    }
+
+    private class ReadinessHandler implements HttpHandler {
+        @Override
+        public void handle(HttpExchange exchange) throws IOException {
+            boolean hasLeader = raftNode.getCurrentLeaderId() != null;
+            int code = hasLeader ? 200 : 503;
+            sendJson(exchange, code, Map.of(
+                    "ready", hasLeader,
+                    "nodeId", raftNode.getNodeId(),
+                    "role", raftNode.getRole().name(),
+                    "currentLeaderId", hasLeader ? raftNode.getCurrentLeaderId() : "none"
+            ));
+        }
     }
 
     private class ShardsHandler implements HttpHandler {

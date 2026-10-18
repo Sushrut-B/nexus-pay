@@ -18,6 +18,12 @@ services:
       - node1-data:/data
     networks:
       - raft-net
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1:8000/v1/health/live || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+      start_period: 3s
 
   node2:
     build:
@@ -36,6 +42,12 @@ services:
       - node2-data:/data
     networks:
       - raft-net
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1:8000/v1/health/live || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+      start_period: 3s
 
   node3:
     build:
@@ -54,6 +66,12 @@ services:
       - node3-data:/data
     networks:
       - raft-net
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1:8000/v1/health/live || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+      start_period: 3s
 
   node4:
     build:
@@ -72,6 +90,12 @@ services:
       - node4-data:/data
     networks:
       - raft-net
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1:8000/v1/health/live || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+      start_period: 3s
 
   node5:
     build:
@@ -90,6 +114,12 @@ services:
       - node5-data:/data
     networks:
       - raft-net
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1:8000/v1/health/live || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+      start_period: 3s
 
 volumes:
   node1-data:

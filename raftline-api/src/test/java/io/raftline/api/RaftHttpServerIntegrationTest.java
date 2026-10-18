@@ -175,4 +175,42 @@ class RaftHttpServerIntegrationTest {
         assertThat(metricsText).contains("raft_wal_last_log_index{node=\"metrics-node\"}");
         assertThat(metricsText).contains("raft_cluster_quorum{node=\"metrics-node\"} 1");
     }
+
+    @Test
+    void testHealthProbesLivenessAndReadiness(@TempDir File tempDir) throws Exception {
+        File nDir = new File(tempDir, "probe-node");
+        nDir.mkdirs();
+
+        RaftConfig config = new RaftConfig("probe-node", Collections.emptyList(), 80, 160, 25, 100, 1000);
+        WriteAheadLog wal = new WriteAheadLog(nDir, false);
+        RaftMetaStorage meta = new RaftMetaStorage(nDir);
+        KeyValueStore kv = new KeyValueStore();
+        GrpcRaftTransport transport = new GrpcRaftTransport("probe-node", 9923, Collections.emptyMap());
+
+        RaftNode node = new RaftNode(config, wal, meta, kv, transport);
+        nodes.add(node);
+        node.start();
+
+        RaftHttpServer server = new RaftHttpServer(8923, node, Collections.emptyMap());
+        server.start();
+        httpServers.add(server);
+
+        java.net.http.HttpClient httpClient = java.net.http.HttpClient.newHttpClient();
+
+        // 1. Check Liveness Probe (always 200 UP)
+        var liveReq = java.net.http.HttpRequest.newBuilder(java.net.URI.create("http://127.0.0.1:8923/v1/health/live")).GET().build();
+        var liveRes = httpClient.send(liveReq, java.net.http.HttpResponse.BodyHandlers.ofString());
+        assertThat(liveRes.statusCode()).isEqualTo(200);
+        assertThat(liveRes.body()).contains("\"status\":\"UP\"");
+
+        // Wait brief moment for election timeout to elect self as leader in single-node cluster
+        Thread.sleep(200);
+
+        // 2. Check Readiness Probe
+        var readyReq = java.net.http.HttpRequest.newBuilder(java.net.URI.create("http://127.0.0.1:8923/v1/health/ready")).GET().build();
+        var readyRes = httpClient.send(readyReq, java.net.http.HttpResponse.BodyHandlers.ofString());
+        assertThat(readyRes.statusCode()).isEqualTo(200);
+        assertThat(readyRes.body()).contains("\"ready\":true");
+    }
 }
+

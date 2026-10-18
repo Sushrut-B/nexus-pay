@@ -160,3 +160,10 @@ Today, the complete multi-module distributed consensus system was engineered fro
 | TSK-1604 | REST Shard Mutation API (`POST /v1/cluster/shards`) | Endpoints supporting `SPLIT` and `REBALANCE` actions guarded with API token authentication | Completed | 100% |
 | TSK-1605 | Client SDK Split & Rebalance API | `QuorixClient.splitShard(...)` and `QuorixClient.rebalanceShard(...)` methods | Completed | 100% |
 | TSK-1606 | Shard Split & Rebalance Integration Test | `MultiRaftShardingTest.testDynamicShardSplitAndRebalancing` verifying dynamic boundary transitions | Completed | 100% |
+| **TSK-1700** | **Days 19 – 21: Production Containerization & Kubernetes Helm Orchestration** | Alpine container packaging, compose healthchecks, Kubernetes StatefulSet & Helm chart | **Completed** | 100% |
+| TSK-1701 | Multi-Stage JRE Alpine Containerization | Lightweight Eclipse Temurin 21 JRE packaging with ZGC tuning in `deployment/docker/Dockerfile` | Completed | 100% |
+| TSK-1702 | Docker Compose Healthchecks | Automatic liveness verification across 5 containerized cluster nodes in `docker-compose.yml` | Completed | 100% |
+| TSK-1703 | Kubernetes Liveness & Readiness Probes | `/v1/health/live` and `/v1/health/ready` endpoints integrated into `RaftHttpServer` | Completed | 100% |
+| TSK-1704 | Kubernetes StatefulSet & Headless Service | Production StatefulSet with volumeClaimTemplates, persistent NVMe storage and headless networking | Completed | 100% |
+| TSK-1705 | Helm Production Chart Packaging | Complete Helm chart in `deployment/helm/raftline/` with values customization and Prometheus scraping | Completed | 100% |
+| TSK-1706 | Container Health Probe Verification Test | `RaftHttpServerIntegrationTest.testHealthProbesLivenessAndReadiness` verifying probe contracts | Completed | 100% |
