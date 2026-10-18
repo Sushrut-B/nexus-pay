@@ -35,6 +35,7 @@ public class RaftHttpServer implements Closeable {
 
     private final int port;
     private final RaftNode raftNode;
+    private final io.raftline.core.shard.MultiRaftManager multiRaftManager;
     private final Map<String, Integer> peerHttpPorts;
     private final String apiKey;
     private final HttpServer server;
@@ -44,8 +45,13 @@ public class RaftHttpServer implements Closeable {
     }
 
     public RaftHttpServer(int port, RaftNode raftNode, Map<String, Integer> peerHttpPorts, String apiKey) throws IOException {
+        this(port, raftNode, null, peerHttpPorts, apiKey);
+    }
+
+    public RaftHttpServer(int port, RaftNode raftNode, io.raftline.core.shard.MultiRaftManager multiRaftManager, Map<String, Integer> peerHttpPorts, String apiKey) throws IOException {
         this.port = port;
         this.raftNode = raftNode;
+        this.multiRaftManager = multiRaftManager;
         this.peerHttpPorts = peerHttpPorts != null ? peerHttpPorts : Map.of();
         this.apiKey = (apiKey != null && !apiKey.isBlank()) ? apiKey.trim() : null;
 
@@ -57,7 +63,8 @@ public class RaftHttpServer implements Closeable {
 
     public void start() {
         server.start();
-        log.info("Raft REST API Server listening on port {} (Auth={})", port, (apiKey != null ? "ENABLED" : "DISABLED"));
+        log.info("Raft REST API Server listening on port {} (Auth={}, MultiRaft={})",
+                port, (apiKey != null ? "ENABLED" : "DISABLED"), (multiRaftManager != null ? "ENABLED" : "DISABLED"));
     }
 
     private boolean isAuthorized(HttpExchange exchange) {
@@ -78,8 +85,46 @@ public class RaftHttpServer implements Closeable {
         server.createContext("/v1/cluster/status", new StatusHandler());
         server.createContext("/v1/cluster/nodes", new NodesHandler());
         server.createContext("/v1/cluster/members", new MembersHandler());
+        server.createContext("/v1/cluster/shards", new ShardsHandler());
         server.createContext("/v1/metrics", new MetricsHandler());
         server.createContext("/v1/admin/snapshot", new AdminSnapshotHandler());
+    }
+
+    private class ShardsHandler implements HttpHandler {
+        @Override
+        public void handle(HttpExchange exchange) throws IOException {
+            if (multiRaftManager == null) {
+                sendJson(exchange, 200, Map.of(
+                        "sharding", "DISABLED",
+                        "shards", List.of()
+                ));
+                return;
+            }
+
+            var shards = multiRaftManager.getRouter().getAllShards();
+            List<Map<String, Object>> shardList = new ArrayList<>();
+            for (var s : shards) {
+                Map<String, Object> map = new LinkedHashMap<>();
+                map.put("shardId", s.shardId());
+                map.put("startKey", s.range().startKey());
+                map.put("endKey", s.range().endKey());
+                map.put("replicas", s.replicaNodeIds());
+                var groupOpt = multiRaftManager.getGroup(s.shardId());
+                if (groupOpt.isPresent()) {
+                    var group = groupOpt.get();
+                    map.put("role", group.getRole().name());
+                    map.put("term", group.getCurrentTerm());
+                    map.put("leaderId", group.getCurrentLeaderId());
+                }
+                shardList.add(map);
+            }
+
+            sendJson(exchange, 200, Map.of(
+                    "sharding", "ENABLED",
+                    "totalShards", shardList.size(),
+                    "shards", shardList
+            ));
+        }
     }
 
     private void sendJson(HttpExchange exchange, int statusCode, Object data) throws IOException {
