@@ -356,6 +356,18 @@ public class QuorixClient implements Closeable {
         return response.body();
     }
 
+    public String executeTransaction(String targetUrl, Map<String, String> writes) throws IOException, InterruptedException {
+        String base = (targetUrl != null && !targetUrl.isBlank()) ? targetUrl : (cachedLeaderUrl != null ? cachedLeaderUrl : seedUrls.get(0));
+        byte[] payload = json.writeValueAsBytes(writes);
+        HttpRequest request = newRequestBuilder(URI.create(base + "/v1/txn"))
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofByteArray(payload))
+                .timeout(Duration.ofSeconds(5))
+                .build();
+        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+        return response.body();
+    }
+
     public String getClientId() {
         return clientId;
     }

@@ -171,6 +171,56 @@ class MultiRaftShardingTest {
         assertThat(router.getShard("shard-low").orElseThrow().replicaNodeIds()).containsExactly("node-3", "node-4", "node-5");
     }
 
+    @Test
+    void testTwoPhaseCommitCrossShardAtomicTransaction(@TempDir File tempDir) throws Exception {
+        networkExecutor = Executors.newFixedThreadPool(8);
+        Map<String, RaftRpcHandler> clusterHandlers = new ConcurrentHashMap<>();
+        Set<String> disconnectedPairs = ConcurrentHashMap.newKeySet();
+
+        ShardInfo shardA = new ShardInfo("shard-a", new KeyRange("a", "m"), List.of("node-1", "node-2", "node-3"));
+        ShardInfo shardB = new ShardInfo("shard-b", new KeyRange("m", "z"), List.of("node-1", "node-2", "node-3"));
+        ShardRouter router = new ShardRouter(List.of(shardA, shardB));
+
+        MultiRaftManager mgr1 = new MultiRaftManager("node-1", router);
+        managers.add(mgr1);
+
+        // Group A on node-1
+        RaftNode groupA = createGroupNode(tempDir, "node-1-shard-a", Collections.emptyList(), clusterHandlers, disconnectedPairs);
+        mgr1.registerGroup("shard-a", groupA);
+
+        // Group B on node-1
+        RaftNode groupB = createGroupNode(tempDir, "node-1-shard-b", Collections.emptyList(), clusterHandlers, disconnectedPairs);
+        mgr1.registerGroup("shard-b", groupB);
+
+        // Wait for elections
+        waitForLeader(List.of("node-1-shard-a"));
+        waitForLeader(List.of("node-1-shard-b"));
+
+        io.raftline.core.shard.txn.TwoPhaseCommitCoordinator coordinator =
+                new io.raftline.core.shard.txn.TwoPhaseCommitCoordinator(mgr1);
+
+        // Multi-shard transaction updating key in shard-a ("account:alice") and key in shard-b ("user:bob")
+        Map<String, byte[]> writes = Map.of(
+                "account:alice", "balance=1000".getBytes(StandardCharsets.UTF_8),
+                "user:bob", "balance=500".getBytes(StandardCharsets.UTF_8)
+        );
+
+        boolean committed = coordinator.executeTransaction(writes).get(3, TimeUnit.SECONDS);
+        assertThat(committed).isTrue();
+
+        Thread.sleep(100);
+
+        // Assert both state machines applied writes atomically
+        byte[] aliceVal = groupA.getStateMachine().get("account:alice");
+        byte[] bobVal = groupB.getStateMachine().get("user:bob");
+
+        assertThat(aliceVal).isNotNull();
+        assertThat(new String(aliceVal, StandardCharsets.UTF_8)).isEqualTo("balance=1000");
+
+        assertThat(bobVal).isNotNull();
+        assertThat(new String(bobVal, StandardCharsets.UTF_8)).isEqualTo("balance=500");
+    }
+
     private RaftNode createGroupNode(File baseDir, String nodeId, List<String> peers,
                                      Map<String, RaftRpcHandler> clusterHandlers,
                                      Set<String> disconnectedPairs) throws Exception {

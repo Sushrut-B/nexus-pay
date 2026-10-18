@@ -20,6 +20,7 @@ import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -36,6 +37,7 @@ public class RaftHttpServer implements Closeable {
     private final int port;
     private final RaftNode raftNode;
     private final io.raftline.core.shard.MultiRaftManager multiRaftManager;
+    private final io.raftline.core.shard.txn.TwoPhaseCommitCoordinator txnCoordinator;
     private final Map<String, Integer> peerHttpPorts;
     private final String apiKey;
     private final HttpServer server;
@@ -52,6 +54,7 @@ public class RaftHttpServer implements Closeable {
         this.port = port;
         this.raftNode = raftNode;
         this.multiRaftManager = multiRaftManager;
+        this.txnCoordinator = (multiRaftManager != null) ? new io.raftline.core.shard.txn.TwoPhaseCommitCoordinator(multiRaftManager) : null;
         this.peerHttpPorts = peerHttpPorts != null ? peerHttpPorts : Map.of();
         this.apiKey = (apiKey != null && !apiKey.isBlank()) ? apiKey.trim() : null;
 
@@ -86,10 +89,55 @@ public class RaftHttpServer implements Closeable {
         server.createContext("/v1/cluster/nodes", new NodesHandler());
         server.createContext("/v1/cluster/members", new MembersHandler());
         server.createContext("/v1/cluster/shards", new ShardsHandler());
+        server.createContext("/v1/txn", new TxnHandler());
         server.createContext("/v1/health/live", new LivenessHandler());
         server.createContext("/v1/health/ready", new ReadinessHandler());
         server.createContext("/v1/metrics", new MetricsHandler());
         server.createContext("/v1/admin/snapshot", new AdminSnapshotHandler());
+    }
+
+    private class TxnHandler implements HttpHandler {
+        @Override
+        public void handle(HttpExchange exchange) throws IOException {
+            if (!isAuthorized(exchange)) {
+                sendJson(exchange, 401, Map.of("error", "Unauthorized: Valid API Key required"));
+                return;
+            }
+
+            if (!"POST".equalsIgnoreCase(exchange.getRequestMethod())) {
+                sendJson(exchange, 405, Map.of("error", "Transactions must use POST"));
+                return;
+            }
+
+            if (txnCoordinator == null) {
+                sendJson(exchange, 501, Map.of("error", "Multi-Raft 2PC transaction coordinator is not enabled on this node"));
+                return;
+            }
+
+            try {
+                Map<String, String> writesRaw = json.readValue(exchange.getRequestBody(), Map.class);
+                Map<String, byte[]> writes = new HashMap<>();
+                for (var e : writesRaw.entrySet()) {
+                    writes.put(e.getKey(), e.getValue().getBytes(StandardCharsets.UTF_8));
+                }
+
+                boolean success = txnCoordinator.executeTransaction(writes).get(5, TimeUnit.SECONDS);
+                if (success) {
+                    sendJson(exchange, 200, Map.of(
+                            "status", "COMMITTED",
+                            "totalOperations", writes.size()
+                    ));
+                } else {
+                    sendJson(exchange, 409, Map.of(
+                            "status", "ABORTED",
+                            "error", "2PC transaction could not achieve consensus across all shards"
+                    ));
+                }
+            } catch (Exception e) {
+                log.error("Failed to execute 2PC transaction", e);
+                sendJson(exchange, 500, Map.of("error", e.getMessage()));
+            }
+        }
     }
 
     private class LivenessHandler implements HttpHandler {
