@@ -63,6 +63,9 @@ public class RaftNode implements RaftRpcHandler, Closeable {
     // Reactive Watch Stream Engine for agent pub/sub
     private final io.raftline.core.agent.AgentWatchEngine watchEngine = new io.raftline.core.agent.AgentWatchEngine();
 
+    // Embedded Change Data Capture (CDC) and Transactional Outbox Engine
+    private final io.raftline.core.cdc.CdcLogEngine cdcEngine = new io.raftline.core.cdc.CdcLogEngine();
+
     // Timers
     private ScheduledFuture<?> electionTimeoutTask;
     private ScheduledFuture<?> heartbeatTask;
@@ -746,7 +749,7 @@ public class RaftNode implements RaftRpcHandler, Closeable {
                 future.complete(result);
             }
 
-            // Publish reactive watch event to subscribed agents
+            // Publish reactive watch event and record CDC outbox event
             if (entry.getCommand() != null) {
                 io.raftline.storage.model.Command cmd = entry.getCommand();
                 if (cmd.getKey() != null && !cmd.getKey().isEmpty()) {
@@ -757,6 +760,19 @@ public class RaftNode implements RaftRpcHandler, Closeable {
                     };
                     if (eventType != null && result.isSuccess()) {
                         watchEngine.publishEvent(eventType, cmd.getKey(), result.getValue(), result.getVersion(), indexToApply);
+                    }
+
+                    // Record in CDC log engine if successful mutation
+                    if (result.isSuccess()) {
+                        io.raftline.core.cdc.CdcEvent.OperationType opType = switch (cmd.getType()) {
+                            case PUT -> cmd.getKey().startsWith("__sys:outbox:") ? io.raftline.core.cdc.CdcEvent.OperationType.OUTBOX : io.raftline.core.cdc.CdcEvent.OperationType.PUT;
+                            case CAS -> io.raftline.core.cdc.CdcEvent.OperationType.CAS;
+                            case DELETE -> io.raftline.core.cdc.CdcEvent.OperationType.DELETE;
+                            default -> null;
+                        };
+                        if (opType != null) {
+                            cdcEngine.recordEvent(indexToApply, entry.getTerm(), opType, cmd.getKey(), result.getValue(), result.getVersion());
+                        }
                     }
                 }
             }
@@ -1151,6 +1167,10 @@ public class RaftNode implements RaftRpcHandler, Closeable {
         return watchEngine;
     }
 
+    public io.raftline.core.cdc.CdcLogEngine getCdcEngine() {
+        return cdcEngine;
+    }
+
     @Override
     public void close() throws IOException {
         if (running.compareAndSet(true, false)) {
@@ -1165,6 +1185,7 @@ public class RaftNode implements RaftRpcHandler, Closeable {
             pendingClientRequests.clear();
 
             watchEngine.close();
+            cdcEngine.close();
             wal.close();
             transport.close();
         }

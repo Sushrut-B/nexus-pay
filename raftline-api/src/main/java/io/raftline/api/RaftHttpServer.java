@@ -102,6 +102,8 @@ public class RaftHttpServer implements Closeable {
         server.createContext("/v1/agent/cas", new AgentCasHandler());
         server.createContext("/v1/agent/state", new AgentStateHandler());
         server.createContext("/v1/agent/watch", new AgentWatchHandler());
+        server.createContext("/v1/cdc/events", new CdcEventsHandler());
+        server.createContext("/v1/cdc/ack", new CdcAckHandler());
     }
 
     private class TxnHandler implements HttpHandler {
@@ -542,6 +544,113 @@ public class RaftHttpServer implements Closeable {
                 try {
                     out.close();
                 } catch (Exception ignored) {}
+            }
+        }
+    }
+
+    private class CdcEventsHandler implements HttpHandler {
+        @Override
+        public void handle(HttpExchange exchange) throws IOException {
+            if (!isAuthorized(exchange)) {
+                sendJson(exchange, 401, Map.of("error", "Unauthorized: Valid API Key required"));
+                return;
+            }
+
+            if (!"GET".equalsIgnoreCase(exchange.getRequestMethod())) {
+                sendJson(exchange, 405, Map.of("error", "CDC events polling must use GET"));
+                return;
+            }
+
+            if (raftNode == null) {
+                sendJson(exchange, 501, Map.of("error", "RaftNode is not initialized on this instance"));
+                return;
+            }
+
+            Map<String, String> query = parseQueryParams(exchange.getRequestURI().getQuery());
+            long sinceLogIndex = 0;
+            if (query.containsKey("sinceLogIndex")) {
+                try {
+                    sinceLogIndex = Long.parseLong(query.get("sinceLogIndex"));
+                } catch (NumberFormatException ignored) {}
+            }
+
+            int limit = 100;
+            if (query.containsKey("limit")) {
+                try {
+                    limit = Integer.parseInt(query.get("limit"));
+                } catch (NumberFormatException ignored) {}
+            }
+
+            List<io.raftline.core.cdc.CdcEvent> rawEvents = raftNode.getCdcEngine().pollEvents(sinceLogIndex, limit);
+            List<Map<String, Object>> events = new ArrayList<>(rawEvents.size());
+            for (io.raftline.core.cdc.CdcEvent ev : rawEvents) {
+                String valStr = (ev.payload() != null && ev.payload().length > 0)
+                        ? new String(ev.payload(), StandardCharsets.UTF_8)
+                        : "";
+                events.add(Map.of(
+                        "eventId", ev.eventId(),
+                        "logIndex", ev.logIndex(),
+                        "logTerm", ev.logTerm(),
+                        "operation", ev.operation().name(),
+                        "key", ev.key(),
+                        "payload", valStr,
+                        "version", ev.version(),
+                        "timestamp", ev.timestampEpochMs()
+                ));
+            }
+
+            long highestIndex = rawEvents.isEmpty() ? sinceLogIndex : rawEvents.get(rawEvents.size() - 1).logIndex();
+            sendJson(exchange, 200, Map.of(
+                    "status", "OK",
+                    "sinceLogIndex", sinceLogIndex,
+                    "highestLogIndex", highestIndex,
+                    "count", events.size(),
+                    "events", events
+            ));
+        }
+    }
+
+    private class CdcAckHandler implements HttpHandler {
+        @Override
+        public void handle(HttpExchange exchange) throws IOException {
+            if (!isAuthorized(exchange)) {
+                sendJson(exchange, 401, Map.of("error", "Unauthorized: Valid API Key required"));
+                return;
+            }
+
+            if (!"POST".equalsIgnoreCase(exchange.getRequestMethod())) {
+                sendJson(exchange, 405, Map.of("error", "Watermark acknowledgment must use POST"));
+                return;
+            }
+
+            if (raftNode == null) {
+                sendJson(exchange, 501, Map.of("error", "RaftNode is not initialized on this instance"));
+                return;
+            }
+
+            try {
+                Map<String, Object> body = json.readValue(exchange.getRequestBody(), Map.class);
+                String consumerId = (String) body.get("consumerId");
+                if (consumerId == null || consumerId.isBlank()) {
+                    sendJson(exchange, 400, Map.of("error", "consumerId is required"));
+                    return;
+                }
+
+                if (!body.containsKey("logIndex")) {
+                    sendJson(exchange, 400, Map.of("error", "logIndex is required"));
+                    return;
+                }
+                long logIndex = ((Number) body.get("logIndex")).longValue();
+
+                long updated = raftNode.getCdcEngine().acknowledgeWatermark(consumerId, logIndex);
+                sendJson(exchange, 200, Map.of(
+                        "status", "ACKNOWLEDGED",
+                        "consumerId", consumerId,
+                        "watermark", updated
+                ));
+            } catch (Exception e) {
+                log.error("Failed to acknowledge CDC watermark", e);
+                sendJson(exchange, 500, Map.of("error", e.getMessage()));
             }
         }
     }

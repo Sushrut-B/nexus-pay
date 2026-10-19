@@ -684,6 +684,112 @@ public class QuorixClient implements Closeable {
         };
     }
 
+    public static record ClientCdcEvent(
+            long eventId,
+            long logIndex,
+            long logTerm,
+            String operation,
+            String key,
+            String payload,
+            long version,
+            long timestamp
+    ) {}
+
+    public static record CdcPollResult(long sinceLogIndex, long highestLogIndex, int count, List<ClientCdcEvent> events) {}
+
+    /**
+     * Polls committed Change Data Capture (CDC) events strictly after sinceLogIndex.
+     */
+    public CdcPollResult pollCdcEvents(String targetUrl, long sinceLogIndex, int limit) throws IOException, InterruptedException {
+        String base = (targetUrl != null && !targetUrl.isBlank()) ? targetUrl : (cachedLeaderUrl != null ? cachedLeaderUrl : seedUrls.get(0));
+        String url = base + "/v1/cdc/events?sinceLogIndex=" + sinceLogIndex + "&limit=" + limit;
+
+        HttpRequest request = newRequestBuilder(URI.create(url))
+                .GET()
+                .timeout(Duration.ofSeconds(5))
+                .build();
+        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+        if (response.statusCode() == 307) {
+            String redirectUrl = response.headers().firstValue("Location").orElse(null);
+            if (redirectUrl != null) {
+                request = newRequestBuilder(URI.create(redirectUrl))
+                        .GET()
+                        .timeout(Duration.ofSeconds(5))
+                        .build();
+                response = httpClient.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+            }
+        }
+
+        if (response.statusCode() == 200) {
+            JsonNode root = json.readTree(response.body());
+            long since = root.get("sinceLogIndex").asLong();
+            long highest = root.get("highestLogIndex").asLong();
+            int count = root.get("count").asInt();
+
+            List<ClientCdcEvent> evts = new ArrayList<>();
+            if (root.has("events")) {
+                for (JsonNode n : root.get("events")) {
+                    evts.add(new ClientCdcEvent(
+                            n.get("eventId").asLong(),
+                            n.get("logIndex").asLong(),
+                            n.get("logTerm").asLong(),
+                            n.get("operation").asText(),
+                            n.get("key").asText(),
+                            n.get("payload").asText(),
+                            n.get("version").asLong(),
+                            n.get("timestamp").asLong()
+                    ));
+                }
+            }
+            return new CdcPollResult(since, highest, count, evts);
+        }
+        throw new IOException("Failed to poll CDC events: status=" + response.statusCode() + ", body=" + response.body());
+    }
+
+    /**
+     * Acknowledges consumer progress watermark for CDC log truncation/compaction.
+     */
+    public long ackCdcWatermark(String targetUrl, String consumerId, long logIndex) throws IOException, InterruptedException {
+        String base = (targetUrl != null && !targetUrl.isBlank()) ? targetUrl : (cachedLeaderUrl != null ? cachedLeaderUrl : seedUrls.get(0));
+        Map<String, Object> body = Map.of(
+                "consumerId", consumerId,
+                "logIndex", logIndex
+        );
+        byte[] payload = json.writeValueAsBytes(body);
+        HttpRequest request = newRequestBuilder(URI.create(base + "/v1/cdc/ack"))
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofByteArray(payload))
+                .timeout(Duration.ofSeconds(5))
+                .build();
+        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+        if (response.statusCode() == 307) {
+            String redirectUrl = response.headers().firstValue("Location").orElse(null);
+            if (redirectUrl != null) {
+                request = newRequestBuilder(URI.create(redirectUrl))
+                        .header("Content-Type", "application/json")
+                        .POST(HttpRequest.BodyPublishers.ofByteArray(payload))
+                        .timeout(Duration.ofSeconds(5))
+                        .build();
+                response = httpClient.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+            }
+        }
+
+        if (response.statusCode() == 200) {
+            JsonNode root = json.readTree(response.body());
+            return root.get("watermark").asLong();
+        }
+        throw new IOException("Failed to ack CDC watermark: status=" + response.statusCode() + ", body=" + response.body());
+    }
+
+    /**
+     * Atomically sends a Transactional Outbox record through consensus.
+     */
+    public boolean sendOutboxEvent(String targetUrl, String aggregateType, String aggregateId, String eventPayload) throws IOException, InterruptedException {
+        String outboxKey = "__sys:outbox:" + aggregateType + ":" + aggregateId + ":" + System.nanoTime();
+        put(outboxKey, eventPayload);
+        return true;
+    }
+
     public String getClientId() {
         return clientId;
     }
