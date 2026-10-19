@@ -662,6 +662,10 @@
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
                 Webhooks & DLQ Hub
             </button>
+            <button class="tab-btn" onclick="switchTab('chaos')">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+                Disaster Simulator & Chaos
+            </button>
         </nav>
 
         <!-- Tab 1: Topology Inspector -->
@@ -865,6 +869,146 @@
             </div>
         </div>
 
+        <!-- Tab 6: Disaster Simulator & Chaos Engineering Suite -->
+        <div id="tab-chaos" class="tab-pane">
+            <div class="glass-panel">
+                <div class="panel-header">
+                    <div class="panel-title">
+                        <span>1-Click Interactive Disaster Scenarios</span>
+                        <span style="font-size:12px;font-weight:400;color:var(--text-muted);">Simulate real-world production outages and verify zero-loss recovery</span>
+                    </div>
+                    <button class="btn-action" style="color:var(--accent-emerald);border-color:rgba(16,185,129,0.3);background:rgba(16,185,129,0.08);" onclick="healAllChaos()">💚 1-Click HEAL ALL & Restore</button>
+                </div>
+                <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(240px, 1fr));gap:16px;margin-top:8px;">
+                    <div class="stat-card" style="cursor:pointer;border-color:rgba(244,63,94,0.35);" onclick="injectPresetChaos('KILL_LEADER')">
+                        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+                            <span style="font-size:20px;">⚡</span>
+                            <span class="pill-badge" style="color:var(--accent-rose);background:rgba(244,63,94,0.08);font-size:10px;">CONSENSUS ELECTION</span>
+                        </div>
+                        <div style="font-family:var(--font-display);font-size:16px;font-weight:700;margin-bottom:4px;">Kill / Abdicate Leader</div>
+                        <div style="font-size:12px;color:var(--text-muted);line-height:1.4;">Forces active leader to abdicate; verifies swift automated re-election.</div>
+                    </div>
+
+                    <div class="stat-card" style="cursor:pointer;border-color:rgba(234,179,8,0.35);" onclick="injectPresetChaos('PARTITION_MINORITY')">
+                        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+                            <span style="font-size:20px;">🛡️</span>
+                            <span class="pill-badge" style="color:var(--accent-amber);background:rgba(234,179,8,0.08);font-size:10px;">QUORUM SURVIVABILITY</span>
+                        </div>
+                        <div style="font-family:var(--font-display);font-size:16px;font-weight:700;margin-bottom:4px;">Isolate Minority Partition</div>
+                        <div style="font-size:12px;color:var(--text-muted);line-height:1.4;">Partitions minority nodes away; verifies majority continues zero-loss writes.</div>
+                    </div>
+
+                    <div class="stat-card" style="cursor:pointer;border-color:rgba(168,85,247,0.35);" onclick="injectPresetChaos('PARTITION_MAJORITY')">
+                        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+                            <span style="font-size:20px;">⚠️</span>
+                            <span class="pill-badge" style="color:#c084fc;background:rgba(168,85,247,0.08);font-size:10px;">SPLIT-BRAIN SHIELD</span>
+                        </div>
+                        <div style="font-family:var(--font-display);font-size:16px;font-weight:700;margin-bottom:4px;">Split-Brain Stressor</div>
+                        <div style="font-size:12px;color:var(--text-muted);line-height:1.4;">Isolates majority of nodes to verify uncommitted minority writes are rejected.</div>
+                    </div>
+
+                    <div class="stat-card" style="cursor:pointer;border-color:rgba(6,182,212,0.35);" onclick="injectPresetChaos('PACKET_JITTER_STORM')">
+                        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+                            <span style="font-size:20px;">🌊</span>
+                            <span class="pill-badge" style="color:var(--accent-cyan);background:rgba(6,182,212,0.08);font-size:10px;">NETWORK CHAOS</span>
+                        </div>
+                        <div style="font-family:var(--font-display);font-size:16px;font-weight:700;margin-bottom:4px;">Packet Jitter Storm</div>
+                        <div style="font-size:12px;color:var(--text-muted);line-height:1.4;">Injects 40% packet drops + 250ms synthetic latency across inter-node links.</div>
+                    </div>
+
+                    <div class="stat-card" style="cursor:pointer;border-color:rgba(56,189,248,0.35);" onclick="injectPresetChaos('FREEZE_NODE')">
+                        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+                            <span style="font-size:20px;">❄️</span>
+                            <span class="pill-badge" style="color:#38bdf8;background:rgba(56,189,248,0.08);font-size:10px;">JVM GC FREEZE</span>
+                        </div>
+                        <div style="font-family:var(--font-display);font-size:16px;font-weight:700;margin-bottom:4px;">Simulate GC Pause</div>
+                        <div style="font-size:12px;color:var(--text-muted);line-height:1.4;">Freezes local node RPC processing for 3 seconds simulating JVM GC pause.</div>
+                    </div>
+                </div>
+            </div>
+
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:20px;">
+                <div class="glass-panel">
+                    <div class="panel-header">
+                        <div class="panel-title">Fine-Grained Network Fault Slider</div>
+                    </div>
+                    <div style="display:flex;flex-direction:column;gap:14px;">
+                        <div class="form-group">
+                            <label class="form-label">Target Peer</label>
+                            <select id="chaosPeerSelect" class="input-select">
+                                <option value="">(Select peer...)</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <div style="display:flex;justify-content:space-between;">
+                                <label class="form-label">Synthetic Latency Delay</label>
+                                <span id="delayLabel" style="font-family:var(--font-mono);font-size:12px;color:var(--accent-cyan);">0 ms</span>
+                            </div>
+                            <input type="range" id="delaySlider" min="0" max="1500" step="25" value="0" style="width:100%;accent-color:var(--accent-cyan);" oninput="document.getElementById('delayLabel').textContent = this.value + ' ms'">
+                        </div>
+                        <div class="form-group">
+                            <div style="display:flex;justify-content:space-between;">
+                                <label class="form-label">Packet Drop Rate</label>
+                                <span id="dropLabel" style="font-family:var(--font-mono);font-size:12px;color:var(--accent-rose);">0 %</span>
+                            </div>
+                            <input type="range" id="dropSlider" min="0" max="100" step="5" value="0" style="width:100%;accent-color:var(--accent-rose);" oninput="document.getElementById('dropLabel').textContent = this.value + ' %'">
+                        </div>
+                        <div style="display:flex;align-items:center;gap:8px;">
+                            <input type="checkbox" id="isolateCheckbox" style="accent-color:var(--accent-rose);width:16px;height:16px;">
+                            <label for="isolateCheckbox" style="font-size:13px;color:var(--text-secondary);cursor:pointer;">Fully Isolate Connection (Partition)</label>
+                        </div>
+                        <div style="display:flex;gap:10px;margin-top:10px;">
+                            <button class="btn-action btn-primary" style="flex:1;" onclick="injectCustomFault()">Apply Fault</button>
+                            <button class="btn-action" style="color:var(--accent-emerald);border-color:rgba(16,185,129,0.3);" onclick="healPeerFault()">Heal Peer</button>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="glass-panel">
+                    <div class="panel-header">
+                        <div class="panel-title">Automated Consensus Invariant Validator</div>
+                        <button class="btn-action btn-primary" onclick="runChaosValidation()">Run Health Check</button>
+                    </div>
+                    <div id="validationResultBox" style="background:var(--bg-surface-elevated);border:1px solid var(--border-subtle);border-radius:var(--radius-md);padding:18px;">
+                        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
+                            <div style="font-size:13px;font-weight:600;color:var(--text-secondary);">CLUSTER INVARIANT STATUS:</div>
+                            <span id="validationStatusBadge" class="pill-badge leader" style="font-size:12px;">HEALTHY</span>
+                        </div>
+                        <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px;">
+                            Consensus Write Probe Latency: <strong id="validationLatencyVal" style="font-family:var(--font-mono);color:var(--accent-emerald);">- ms</strong>
+                        </div>
+                        <div id="validationChecksList" style="display:flex;flex-direction:column;gap:6px;font-size:12px;font-family:var(--font-mono);color:var(--text-secondary);max-height:140px;overflow-y:auto;">
+                            <div>Click "Run Health Check" to execute probe writes and verify invariants.</div>
+                        </div>
+                        <div id="validationSummaryText" style="font-size:12px;margin-top:12px;padding-top:10px;border-top:1px solid var(--border-subtle);color:var(--text-muted);font-style:italic;">
+                            Continuous quorum monitoring active.
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="glass-panel">
+                <div class="panel-header">
+                    <div class="panel-title">Chaos Activity & Audit Log</div>
+                </div>
+                <table class="custom-table">
+                    <thead>
+                        <tr>
+                            <th>Event ID</th>
+                            <th>Timestamp</th>
+                            <th>Scenario</th>
+                            <th>Target</th>
+                            <th>Details</th>
+                            <th>State</th>
+                        </tr>
+                    </thead>
+                    <tbody id="chaosEventsTableBody">
+                        <tr><td colspan="6" style="text-align:center;">No chaos events recorded yet.</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
     </main>
 
     <!-- Modal: Fast Mutate -->
@@ -1002,12 +1146,22 @@
 
             document.getElementById('localNodeIdLabel').textContent = node.nodeId;
 
+            // Populate peer select for chaos
+            const peerSelect = document.getElementById('chaosPeerSelect');
+            if (peerSelect && data.peers) {
+                const currentVal = peerSelect.value;
+                peerSelect.innerHTML = '<option value="">(Select peer...)</option>' + 
+                    data.peers.map(p => `<option value="${p.id}">${p.id}</option>`).join('');
+                if (currentVal) peerSelect.value = currentVal;
+            }
+
             // Render tables
             renderNodesTable(node, data.peers || []);
             renderIndexesTable(indexes);
             renderCdcTable(data.recentEvents || []);
             renderLocksTable(locks);
             renderWebhooksTable(webhooks);
+            renderChaosTab(data.chaos || {});
             renderTopology();
         }
 
@@ -1074,21 +1228,59 @@
             }
 
             // Draw interconnect replication lines
+            const chaos = currentOverview.chaos || {};
+            const isolatedPeers = chaos.isolatedPeers || [];
+            const peerDelays = chaos.peerDelaysMs || {};
+
             for (let i = 0; i < coords.length; i++) {
                 for (let j = i + 1; j < coords.length; j++) {
                     const n1 = coords[i];
                     const n2 = coords[j];
+                    const isIsolated = (n1.isLocal && isolatedPeers.includes(n2.id)) || (n2.isLocal && isolatedPeers.includes(n1.id));
+                    const delay = (n1.isLocal ? peerDelays[n2.id] : (n2.isLocal ? peerDelays[n1.id] : 0)) || 0;
                     const isLeaderLink = n1.isLeader || n2.isLeader;
-                    svgContent += `<line x1="${n1.x}" y1="${n1.y}" x2="${n2.x}" y2="${n2.y}" class="replication-line" style="stroke:${isLeaderLink ? 'rgba(16,185,129,0.5)' : 'rgba(255,255,255,0.1)'}; stroke-width:${isLeaderLink ? 2.5 : 1.5};" />`;
+
+                    let strokeColor = isLeaderLink ? 'rgba(16,185,129,0.5)' : 'rgba(255,255,255,0.1)';
+                    let strokeWidth = isLeaderLink ? 2.5 : 1.5;
+                    let strokeDash = 'none';
+
+                    if (isIsolated) {
+                        strokeColor = '#f43f5e';
+                        strokeWidth = 3;
+                        strokeDash = '6 4';
+                    } else if (delay > 0) {
+                        strokeColor = '#eab308';
+                        strokeWidth = 2.5;
+                        strokeDash = '4 2';
+                    }
+
+                    svgContent += `<line x1="${n1.x}" y1="${n1.y}" x2="${n2.x}" y2="${n2.y}" class="replication-line" style="stroke:${strokeColor}; stroke-width:${strokeWidth}; stroke-dasharray:${strokeDash};" />`;
+
+                    if (isIsolated) {
+                        const midX = (n1.x + n2.x) / 2;
+                        const midY = (n1.y + n2.y) / 2;
+                        svgContent += `<text x="${midX}" y="${midY}" text-anchor="middle" fill="#f43f5e" font-size="9" font-family="JetBrains Mono" font-weight="700">⚡ ISOLATED</text>`;
+                    } else if (delay > 0) {
+                        const midX = (n1.x + n2.x) / 2;
+                        const midY = (n1.y + n2.y) / 2;
+                        svgContent += `<text x="${midX}" y="${midY}" text-anchor="middle" fill="#eab308" font-size="9" font-family="JetBrains Mono" font-weight="700">+${delay}ms</text>`;
+                    }
                 }
             }
 
             // Draw Node Circles
             for (const n of coords) {
-                const color = n.isLeader ? '#10b981' : '#06b6d4';
-                const glow = n.isLeader ? 'rgba(16,185,129,0.4)' : 'rgba(6,182,212,0.25)';
+                let color = n.isLeader ? '#10b981' : '#06b6d4';
+                let glow = n.isLeader ? 'rgba(16,185,129,0.4)' : 'rgba(6,182,212,0.25)';
+                let roleLabel = n.isLeader ? 'LEADER' : 'FOLLOWER';
 
-                if (n.isLeader) {
+                if (n.isLocal && chaos.isPaused) {
+                    color = '#38bdf8';
+                    glow = 'rgba(56,189,248,0.5)';
+                    roleLabel = '❄️ FROZEN';
+                }
+
+                if (n.isLeader && !chaos.isPaused) {
                     svgContent += `<circle cx="${n.x}" cy="${n.y}" r="38" fill="none" stroke="${color}" stroke-width="1.5" opacity="0.4">
                         <animate attributeName="r" values="32;44;32" dur="3s" repeatCount="indefinite" />
                         <animate attributeName="opacity" values="0.6;0.1;0.6" dur="3s" repeatCount="indefinite" />
@@ -1096,10 +1288,10 @@
                 }
 
                 svgContent += `
-                    <g class="node-circle" onclick="showToast('Inspecting ${n.id} (${n.isLeader ? 'LEADER' : 'FOLLOWER'})')">
+                    <g class="node-circle" onclick="showToast('Node ${n.id}: ${roleLabel}')">
                         <circle cx="${n.x}" cy="${n.y}" r="28" fill="#0f172a" stroke="${color}" stroke-width="3" filter="drop-shadow(0 0 12px ${glow})" />
                         <text x="${n.x}" y="${n.y - 4}" text-anchor="middle" fill="#f8fafc" font-size="12" font-family="Outfit" font-weight="700">${n.id}</text>
-                        <text x="${n.x}" y="${n.y + 11}" text-anchor="middle" fill="${color}" font-size="9" font-family="JetBrains Mono" font-weight="600">${n.isLeader ? 'LEADER' : 'FOLLOWER'}</text>
+                        <text x="${n.x}" y="${n.y + 11}" text-anchor="middle" fill="${color}" font-size="9" font-family="JetBrains Mono" font-weight="600">${roleLabel}</text>
                     </g>
                 `;
             }
@@ -1343,6 +1535,145 @@
         function escapeHtml(text) {
             if (!text) return '';
             return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+        }
+        function renderChaosTab(chaos) {
+            const tbody = document.getElementById('chaosEventsTableBody');
+            const events = chaos.recentEvents || [];
+            if (!tbody) return;
+            if (events.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;">No chaos events recorded yet.</td></tr>';
+                return;
+            }
+            let html = '';
+            for (const ev of events) {
+                const time = ev.timestamp ? new Date(ev.timestamp).toLocaleTimeString() : '-';
+                html += `<tr>
+                    <td>#${ev.id}</td>
+                    <td style="font-size:11px;">${time}</td>
+                    <td><span class="pill-badge" style="font-size:10px;padding:2px 8px;">${ev.scenario}</span></td>
+                    <td><span class="code-pill">${ev.target}</span></td>
+                    <td style="font-size:12px;color:var(--text-secondary);">${escapeHtml(ev.details)}</td>
+                    <td><span class="pill-badge ${ev.active ? 'follower' : 'leader'}" style="font-size:10px;padding:2px 8px;">${ev.active ? 'ACTIVE' : 'RESOLVED'}</span></td>
+                </tr>`;
+            }
+            tbody.innerHTML = html;
+        }
+
+        async function injectPresetChaos(scenario) {
+            try {
+                let body = { scenario };
+                if (scenario === 'FREEZE_NODE') body.durationMs = 3000;
+                if (scenario === 'PACKET_JITTER_STORM') { body.delayMs = 250; body.dropRate = 0.4; }
+                const res = await fetch('/v1/chaos/inject', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body)
+                });
+                const data = await res.json();
+                if (res.ok) {
+                    showToast(`⚡ Injected: ${data.scenario}`);
+                    fetchOverview();
+                } else {
+                    showToast('Chaos failed: ' + (data.error || res.status), true);
+                }
+            } catch (e) {
+                showToast('Error: ' + e.message, true);
+            }
+        }
+
+        async function injectCustomFault() {
+            const peer = document.getElementById('chaosPeerSelect').value;
+            if (!peer) {
+                alert('Please select a target peer');
+                return;
+            }
+            const delayMs = parseInt(document.getElementById('delaySlider').value);
+            const dropRate = parseInt(document.getElementById('dropSlider').value) / 100.0;
+            const isolate = document.getElementById('isolateCheckbox').checked;
+
+            try {
+                const res = await fetch('/v1/chaos/inject', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        scenario: 'CUSTOM',
+                        peer,
+                        delayMs,
+                        dropRate,
+                        isolate
+                    })
+                });
+                const data = await res.json();
+                if (res.ok) {
+                    showToast(`Custom fault applied to peer ${peer}`);
+                    fetchOverview();
+                } else {
+                    showToast('Fault failed: ' + (data.error || res.status), true);
+                }
+            } catch (e) {
+                showToast('Error: ' + e.message, true);
+            }
+        }
+
+        async function healPeerFault() {
+            const peer = document.getElementById('chaosPeerSelect').value;
+            if (!peer) return;
+            try {
+                const res = await fetch('/v1/chaos/heal?peer=' + encodeURIComponent(peer), { method: 'POST' });
+                if (res.ok) {
+                    showToast(`Healed peer ${peer}`);
+                    document.getElementById('delaySlider').value = 0;
+                    document.getElementById('delayLabel').textContent = '0 ms';
+                    document.getElementById('dropSlider').value = 0;
+                    document.getElementById('dropLabel').textContent = '0 %';
+                    document.getElementById('isolateCheckbox').checked = false;
+                    fetchOverview();
+                }
+            } catch (e) {
+                showToast('Error: ' + e.message, true);
+            }
+        }
+
+        async function healAllChaos() {
+            try {
+                const res = await fetch('/v1/chaos/heal?all=true', { method: 'POST' });
+                if (res.ok) {
+                    showToast('💚 All network faults cleared! Cluster restored.');
+                    fetchOverview();
+                }
+            } catch (e) {
+                showToast('Error: ' + e.message, true);
+            }
+        }
+
+        async function runChaosValidation() {
+            try {
+                const res = await fetch('/v1/chaos/verify', { method: 'POST' });
+                const report = await res.json();
+                const badge = document.getElementById('validationStatusBadge');
+                badge.textContent = report.status;
+                if (report.status === 'HEALTHY') {
+                    badge.className = 'pill-badge leader';
+                } else if (report.status === 'DEGRADED') {
+                    badge.className = 'pill-badge';
+                    badge.style.borderColor = 'rgba(234,179,8,0.4)';
+                    badge.style.color = '#eab308';
+                } else if (report.status === 'SPLIT_BRAIN_PROTECTED') {
+                    badge.className = 'pill-badge follower';
+                } else {
+                    badge.className = 'pill-badge';
+                    badge.style.borderColor = 'rgba(244,63,94,0.4)';
+                    badge.style.color = '#f43f5e';
+                }
+
+                document.getElementById('validationLatencyVal').textContent = (report.probeLatencyMs ?? 0) + ' ms';
+                const list = document.getElementById('validationChecksList');
+                list.innerHTML = (report.checks || []).map(c => `<div>${escapeHtml(c)}</div>`).join('');
+                document.getElementById('validationSummaryText').textContent = report.summary || '';
+                showToast(`Probe result: ${report.status}`);
+            } catch (e) {
+                showToast('Validation probe failed: ' + e.message, true);
+            }
         }
     </script>
 </body>

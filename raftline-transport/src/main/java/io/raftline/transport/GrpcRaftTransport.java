@@ -109,59 +109,191 @@ public class GrpcRaftTransport implements RaftTransport {
         return completableFuture;
     }
 
+    // Fault injection configuration
+    private final java.util.Set<String> isolatedPeers = ConcurrentHashMap.newKeySet();
+    private final Map<String, Long> peerDelaysMs = new ConcurrentHashMap<>();
+    private final Map<String, Double> peerDropRates = new ConcurrentHashMap<>();
+
+    @Override
+    public void isolatePeer(String peerId) {
+        isolatedPeers.add(peerId);
+        log.warn("Node {} isolated peer {}", localNodeId, peerId);
+    }
+
+    @Override
+    public void healPeer(String peerId) {
+        isolatedPeers.remove(peerId);
+        peerDelaysMs.remove(peerId);
+        peerDropRates.remove(peerId);
+        log.info("Node {} healed peer {}", localNodeId, peerId);
+    }
+
+    @Override
+    public void healAll() {
+        isolatedPeers.clear();
+        peerDelaysMs.clear();
+        peerDropRates.clear();
+        log.info("Node {} healed all peers", localNodeId);
+    }
+
+    @Override
+    public void setPeerDelay(String peerId, long delayMs) {
+        if (delayMs <= 0) peerDelaysMs.remove(peerId);
+        else peerDelaysMs.put(peerId, delayMs);
+    }
+
+    @Override
+    public void setPeerDropRate(String peerId, double dropRate) {
+        if (dropRate <= 0.0) peerDropRates.remove(peerId);
+        else peerDropRates.put(peerId, Math.min(1.0, dropRate));
+    }
+
+    @Override
+    public boolean isPeerIsolated(String peerId) {
+        return isolatedPeers.contains(peerId);
+    }
+
+    @Override
+    public java.util.Set<String> getIsolatedPeers() {
+        return java.util.Set.copyOf(isolatedPeers);
+    }
+
+    @Override
+    public Map<String, Long> getPeerDelays() {
+        return Map.copyOf(peerDelaysMs);
+    }
+
+    @Override
+    public Map<String, Double> getPeerDropRates() {
+        return Map.copyOf(peerDropRates);
+    }
+
+    private boolean shouldDropOrIsolate(String peerId, CompletableFuture<?> future) {
+        if (isPeerIsolated(peerId)) {
+            future.completeExceptionally(new java.util.concurrent.TimeoutException("Peer " + peerId + " is isolated (chaos)"));
+            return true;
+        }
+        Double dropRate = peerDropRates.get(peerId);
+        if (dropRate != null && java.util.concurrent.ThreadLocalRandom.current().nextDouble() < dropRate) {
+            future.completeExceptionally(new java.util.concurrent.TimeoutException("Packet to " + peerId + " dropped (chaos drop rate " + dropRate + ")"));
+            return true;
+        }
+        return false;
+    }
+
     @Override
     public CompletableFuture<RequestVoteResponse> sendRequestVote(String peerId, RequestVoteRequest request) {
+        CompletableFuture<RequestVoteResponse> future = new CompletableFuture<>();
+        if (shouldDropOrIsolate(peerId, future)) {
+            return future;
+        }
+        Long delay = peerDelaysMs.get(peerId);
+        if (delay != null && delay > 0) {
+            CompletableFuture.delayedExecutor(delay, TimeUnit.MILLISECONDS).execute(() -> {
+                sendRequestVoteInternal(peerId, request, future);
+            });
+            return future;
+        }
+        sendRequestVoteInternal(peerId, request, future);
+        return future;
+    }
+
+    private void sendRequestVoteInternal(String peerId, RequestVoteRequest request, CompletableFuture<RequestVoteResponse> future) {
         try {
             RaftInternalServiceGrpc.RaftInternalServiceFutureStub stub = getStub(peerId);
             RequestVoteProto protoReq = ProtoConverter.toProto(request);
-            ListenableFuture<RequestVoteResponseProto> future = stub
+            ListenableFuture<RequestVoteResponseProto> rpcFuture = stub
                     .withDeadlineAfter(2500, TimeUnit.MILLISECONDS)
                     .requestVote(protoReq);
 
-            return toCompletableFuture(future).thenApply(ProtoConverter::fromProto);
+            toCompletableFuture(rpcFuture)
+                    .thenApply(ProtoConverter::fromProto)
+                    .whenComplete((res, ex) -> {
+                        if (ex != null) future.completeExceptionally(ex);
+                        else future.complete(res);
+                    });
         } catch (Exception e) {
-            CompletableFuture<RequestVoteResponse> failed = new CompletableFuture<>();
-            failed.completeExceptionally(e);
-            return failed;
+            future.completeExceptionally(e);
         }
     }
 
     @Override
     public CompletableFuture<AppendEntriesResponse> sendAppendEntries(String peerId, AppendEntriesRequest request) {
+        CompletableFuture<AppendEntriesResponse> future = new CompletableFuture<>();
+        if (shouldDropOrIsolate(peerId, future)) {
+            return future;
+        }
+        Long delay = peerDelaysMs.get(peerId);
+        if (delay != null && delay > 0) {
+            CompletableFuture.delayedExecutor(delay, TimeUnit.MILLISECONDS).execute(() -> {
+                sendAppendEntriesInternal(peerId, request, future);
+            });
+            return future;
+        }
+        sendAppendEntriesInternal(peerId, request, future);
+        return future;
+    }
+
+    private void sendAppendEntriesInternal(String peerId, AppendEntriesRequest request, CompletableFuture<AppendEntriesResponse> future) {
         try {
             RaftInternalServiceGrpc.RaftInternalServiceFutureStub stub = getStub(peerId);
             AppendEntriesProto protoReq = ProtoConverter.toProto(request);
-            ListenableFuture<AppendEntriesResponseProto> future = stub
+            ListenableFuture<AppendEntriesResponseProto> rpcFuture = stub
                     .withDeadlineAfter(2500, TimeUnit.MILLISECONDS)
                     .appendEntries(protoReq);
 
-            return toCompletableFuture(future).thenApply(ProtoConverter::fromProto);
+            toCompletableFuture(rpcFuture)
+                    .thenApply(ProtoConverter::fromProto)
+                    .whenComplete((res, ex) -> {
+                        if (ex != null) future.completeExceptionally(ex);
+                        else future.complete(res);
+                    });
         } catch (Exception e) {
-            CompletableFuture<AppendEntriesResponse> failed = new CompletableFuture<>();
-            failed.completeExceptionally(e);
-            return failed;
+            future.completeExceptionally(e);
         }
     }
 
     @Override
     public CompletableFuture<InstallSnapshotResponse> sendInstallSnapshot(String peerId, InstallSnapshotRequest request) {
+        CompletableFuture<InstallSnapshotResponse> future = new CompletableFuture<>();
+        if (shouldDropOrIsolate(peerId, future)) {
+            return future;
+        }
+        Long delay = peerDelaysMs.get(peerId);
+        if (delay != null && delay > 0) {
+            CompletableFuture.delayedExecutor(delay, TimeUnit.MILLISECONDS).execute(() -> {
+                sendInstallSnapshotInternal(peerId, request, future);
+            });
+            return future;
+        }
+        sendInstallSnapshotInternal(peerId, request, future);
+        return future;
+    }
+
+    private void sendInstallSnapshotInternal(String peerId, InstallSnapshotRequest request, CompletableFuture<InstallSnapshotResponse> future) {
         try {
             RaftInternalServiceGrpc.RaftInternalServiceFutureStub stub = getStub(peerId);
             InstallSnapshotProto protoReq = ProtoConverter.toProto(request);
-            ListenableFuture<InstallSnapshotResponseProto> future = stub
+            ListenableFuture<InstallSnapshotResponseProto> rpcFuture = stub
                     .withDeadlineAfter(5000, TimeUnit.MILLISECONDS)
                     .installSnapshot(protoReq);
 
-            return toCompletableFuture(future).thenApply(ProtoConverter::fromProto);
+            toCompletableFuture(rpcFuture)
+                    .thenApply(ProtoConverter::fromProto)
+                    .whenComplete((res, ex) -> {
+                        if (ex != null) future.completeExceptionally(ex);
+                        else future.complete(res);
+                    });
         } catch (Exception e) {
-            CompletableFuture<InstallSnapshotResponse> failed = new CompletableFuture<>();
-            failed.completeExceptionally(e);
-            return failed;
+            future.completeExceptionally(e);
         }
     }
 
     @Override
     public void close() {
+        isolatedPeers.clear();
+        peerDelaysMs.clear();
+        peerDropRates.clear();
         if (server != null) {
             server.close();
         }
@@ -172,3 +304,4 @@ public class GrpcRaftTransport implements RaftTransport {
         stubs.clear();
     }
 }
+

@@ -18,4 +18,18 @@ public interface RaftTransport extends Closeable {
     CompletableFuture<AppendEntriesResponse> sendAppendEntries(String peerId, AppendEntriesRequest request);
 
     CompletableFuture<InstallSnapshotResponse> sendInstallSnapshot(String peerId, InstallSnapshotRequest request);
+
+    // =========================================================================
+    // Chaos & Fault Injection Hooks
+    // =========================================================================
+    default void isolatePeer(String peerId) {}
+    default void healPeer(String peerId) {}
+    default void healAll() {}
+    default void setPeerDelay(String peerId, long delayMs) {}
+    default void setPeerDropRate(String peerId, double dropRate) {}
+    default boolean isPeerIsolated(String peerId) { return false; }
+    default java.util.Set<String> getIsolatedPeers() { return java.util.Set.of(); }
+    default java.util.Map<String, Long> getPeerDelays() { return java.util.Map.of(); }
+    default java.util.Map<String, Double> getPeerDropRates() { return java.util.Map.of(); }
 }
+

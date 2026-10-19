@@ -40,6 +40,7 @@ public class InProcessRaftTransport implements RaftTransport {
         this.clusterHandlers.put(localNodeId, handler);
     }
 
+    @Override
     public void setPeerDelay(String peerId, long delayMs) {
         if (delayMs <= 0) {
             peerDelaysMs.remove(peerId);
@@ -48,12 +49,59 @@ public class InProcessRaftTransport implements RaftTransport {
         }
     }
 
+    @Override
     public void setPeerDropRate(String peerId, double dropRate) {
         if (dropRate <= 0.0) {
             peerDropRates.remove(peerId);
         } else {
             peerDropRates.put(peerId, dropRate);
         }
+    }
+
+    @Override
+    public void isolatePeer(String peerId) {
+        disconnectedPairs.add(localNodeId + "->" + peerId);
+    }
+
+    @Override
+    public void healPeer(String peerId) {
+        disconnectedPairs.remove(localNodeId + "->" + peerId);
+        peerDelaysMs.remove(peerId);
+        peerDropRates.remove(peerId);
+    }
+
+    @Override
+    public void healAll() {
+        disconnectedPairs.removeIf(pair -> pair.startsWith(localNodeId + "->"));
+        peerDelaysMs.clear();
+        peerDropRates.clear();
+    }
+
+    @Override
+    public boolean isPeerIsolated(String peerId) {
+        return disconnectedPairs.contains(localNodeId + "->" + peerId);
+    }
+
+    @Override
+    public Set<String> getIsolatedPeers() {
+        Set<String> result = new java.util.HashSet<>();
+        String prefix = localNodeId + "->";
+        for (String pair : disconnectedPairs) {
+            if (pair.startsWith(prefix)) {
+                result.add(pair.substring(prefix.length()));
+            }
+        }
+        return result;
+    }
+
+    @Override
+    public Map<String, Long> getPeerDelays() {
+        return Map.copyOf(peerDelaysMs);
+    }
+
+    @Override
+    public Map<String, Double> getPeerDropRates() {
+        return Map.copyOf(peerDropRates);
     }
 
     private boolean isPartitioned(String targetPeerId) {

@@ -1143,6 +1143,81 @@ public class QuorixClient implements Closeable {
         throw new IOException("Failed to get cluster overview: status=" + response.statusCode() + ", body=" + response.body());
     }
 
+    /**
+     * Injects a disaster scenario or custom fault into a target node.
+     */
+    public JsonNode injectChaos(String targetUrl, String jsonPayload) throws IOException, InterruptedException {
+        String base = (targetUrl != null && !targetUrl.isBlank()) ? targetUrl : (cachedLeaderUrl != null ? cachedLeaderUrl : seedUrls.get(0));
+        HttpRequest request = newRequestBuilder(URI.create(base + "/v1/chaos/inject"))
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(jsonPayload, StandardCharsets.UTF_8))
+                .timeout(Duration.ofSeconds(5))
+                .build();
+        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+        if (response.statusCode() == 200) {
+            return json.readTree(response.body());
+        }
+        throw new IOException("Failed to inject chaos: status=" + response.statusCode() + ", body=" + response.body());
+    }
+
+    /**
+     * Heals an isolated peer or restores all network faults on a target node.
+     */
+    public JsonNode healChaos(String targetUrl, String peerId) throws IOException, InterruptedException {
+        String base = (targetUrl != null && !targetUrl.isBlank()) ? targetUrl : (cachedLeaderUrl != null ? cachedLeaderUrl : seedUrls.get(0));
+        String uri = (peerId != null && !peerId.isBlank())
+                ? base + "/v1/chaos/heal?peer=" + java.net.URLEncoder.encode(peerId, StandardCharsets.UTF_8)
+                : base + "/v1/chaos/heal?all=true";
+        HttpRequest request = newRequestBuilder(URI.create(uri))
+                .POST(HttpRequest.BodyPublishers.noBody())
+                .timeout(Duration.ofSeconds(5))
+                .build();
+        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+        if (response.statusCode() == 200) {
+            return json.readTree(response.body());
+        }
+        throw new IOException("Failed to heal chaos: status=" + response.statusCode() + ", body=" + response.body());
+    }
+
+    /**
+     * 1-Click Heal: clears all network partitions, delays, drops, and unpauses nodes.
+     */
+    public JsonNode healAllChaos(String targetUrl) throws IOException, InterruptedException {
+        return healChaos(targetUrl, null);
+    }
+
+    /**
+     * Retrieves current chaos status and fault state on the target node.
+     */
+    public JsonNode getChaosStatus(String targetUrl) throws IOException, InterruptedException {
+        String base = (targetUrl != null && !targetUrl.isBlank()) ? targetUrl : (cachedLeaderUrl != null ? cachedLeaderUrl : seedUrls.get(0));
+        HttpRequest request = newRequestBuilder(URI.create(base + "/v1/chaos/status"))
+                .GET()
+                .timeout(Duration.ofSeconds(5))
+                .build();
+        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+        if (response.statusCode() == 200) {
+            return json.readTree(response.body());
+        }
+        throw new IOException("Failed to get chaos status: status=" + response.statusCode() + ", body=" + response.body());
+    }
+
+    /**
+     * Triggers an automated self-healing and consensus invariant probe on the cluster.
+     */
+    public JsonNode verifyClusterHealth(String targetUrl) throws IOException, InterruptedException {
+        String base = (targetUrl != null && !targetUrl.isBlank()) ? targetUrl : (cachedLeaderUrl != null ? cachedLeaderUrl : seedUrls.get(0));
+        HttpRequest request = newRequestBuilder(URI.create(base + "/v1/chaos/verify"))
+                .POST(HttpRequest.BodyPublishers.noBody())
+                .timeout(Duration.ofSeconds(5))
+                .build();
+        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+        if (response.statusCode() == 200) {
+            return json.readTree(response.body());
+        }
+        throw new IOException("Failed to verify cluster health: status=" + response.statusCode() + ", body=" + response.body());
+    }
+
     public String getClientId() {
         return clientId;
     }
@@ -1152,3 +1227,4 @@ public class QuorixClient implements Closeable {
         // HttpClient handles lifecycle
     }
 }
+

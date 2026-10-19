@@ -111,6 +111,10 @@ public class RaftHttpServer implements Closeable {
         server.createContext("/v1/index", new IndexHandler());
         server.createContext("/v1/query", new QueryHandler());
         server.createContext("/v1/cluster/overview", new OverviewHandler());
+        server.createContext("/v1/chaos/inject", new ChaosInjectHandler());
+        server.createContext("/v1/chaos/heal", new ChaosHealHandler());
+        server.createContext("/v1/chaos/status", new ChaosStatusHandler());
+        server.createContext("/v1/chaos/verify", new ChaosVerifyHandler());
         DashboardHandler dashboardHandler = new DashboardHandler();
         server.createContext("/dashboard", dashboardHandler);
         server.createContext("/ui", dashboardHandler);
@@ -1638,7 +1642,157 @@ public class RaftHttpServer implements Closeable {
             } catch (Exception ignored) {}
             overview.put("recentEvents", recentEvents);
 
+            // Chaos status
+            try {
+                var chaosStatus = raftNode.getChaosEngine().getStatus();
+                Map<String, Object> chaos = new LinkedHashMap<>();
+                chaos.put("isPaused", chaosStatus.isPaused());
+                chaos.put("isolatedPeers", chaosStatus.isolatedPeers());
+                chaos.put("peerDelaysMs", chaosStatus.peerDelaysMs());
+                chaos.put("peerDropRates", chaosStatus.peerDropRates());
+                List<Map<String, Object>> chaosEvents = new ArrayList<>();
+                for (var ev : chaosStatus.recentEvents()) {
+                    chaosEvents.add(Map.of(
+                            "id", ev.id(),
+                            "timestamp", ev.timestamp().toString(),
+                            "scenario", ev.scenario().name(),
+                            "target", ev.target(),
+                            "details", ev.details(),
+                            "active", ev.active()
+                    ));
+                }
+                chaos.put("recentEvents", chaosEvents);
+                overview.put("chaos", chaos);
+            } catch (Exception ignored) {}
+
             sendJson(exchange, 200, overview);
+        }
+    }
+
+    private class ChaosInjectHandler implements HttpHandler {
+        @Override
+        public void handle(HttpExchange exchange) throws IOException {
+            if (!isAuthorized(exchange)) {
+                sendJson(exchange, 401, Map.of("error", "Unauthorized: Valid API Key required"));
+                return;
+            }
+            if (!"POST".equalsIgnoreCase(exchange.getRequestMethod())) {
+                sendJson(exchange, 405, Map.of("error", "Chaos injection requires POST"));
+                return;
+            }
+            try {
+                Map<String, Object> body = json.readValue(exchange.getRequestBody(), Map.class);
+                String scenarioStr = (String) body.getOrDefault("scenario", "CUSTOM");
+                io.raftline.core.chaos.ChaosScenario scenario = io.raftline.core.chaos.ChaosScenario.valueOf(scenarioStr.toUpperCase());
+                var event = raftNode.getChaosEngine().inject(scenario, body);
+                sendJson(exchange, 200, Map.of(
+                        "status", "INJECTED",
+                        "eventId", event.id(),
+                        "scenario", event.scenario().name(),
+                        "target", event.target(),
+                        "details", event.details(),
+                        "timestamp", event.timestamp().toString()
+                ));
+            } catch (IllegalArgumentException e) {
+                sendJson(exchange, 400, Map.of("error", "Invalid chaos scenario: " + e.getMessage()));
+            } catch (Exception e) {
+                log.error("Error injecting chaos", e);
+                sendJson(exchange, 500, Map.of("error", e.getMessage() != null ? e.getMessage() : "Internal error"));
+            }
+        }
+    }
+
+    private class ChaosHealHandler implements HttpHandler {
+        @Override
+        public void handle(HttpExchange exchange) throws IOException {
+            if (!isAuthorized(exchange)) {
+                sendJson(exchange, 401, Map.of("error", "Unauthorized: Valid API Key required"));
+                return;
+            }
+            try {
+                String query = exchange.getRequestURI().getQuery();
+                String peer = null;
+                boolean healAll = true;
+                if (query != null) {
+                    for (String param : query.split("&")) {
+                        String[] pair = param.split("=");
+                        if (pair.length == 2) {
+                            if ("peer".equalsIgnoreCase(pair[0])) {
+                                peer = java.net.URLDecoder.decode(pair[1], StandardCharsets.UTF_8);
+                                healAll = false;
+                            } else if ("all".equalsIgnoreCase(pair[0])) {
+                                healAll = Boolean.parseBoolean(pair[1]);
+                            }
+                        }
+                    }
+                }
+                if (!healAll && peer != null && !peer.isBlank()) {
+                    raftNode.getTransport().healPeer(peer);
+                    sendJson(exchange, 200, Map.of("status", "HEALED", "peer", peer));
+                } else {
+                    raftNode.getChaosEngine().healAll();
+                    sendJson(exchange, 200, Map.of("status", "HEALED_ALL"));
+                }
+            } catch (Exception e) {
+                log.error("Error healing chaos", e);
+                sendJson(exchange, 500, Map.of("error", e.getMessage() != null ? e.getMessage() : "Internal error"));
+            }
+        }
+    }
+
+    private class ChaosStatusHandler implements HttpHandler {
+        @Override
+        public void handle(HttpExchange exchange) throws IOException {
+            try {
+                var status = raftNode.getChaosEngine().getStatus();
+                List<Map<String, Object>> evList = new ArrayList<>();
+                for (var ev : status.recentEvents()) {
+                    evList.add(Map.of(
+                            "id", ev.id(),
+                            "timestamp", ev.timestamp().toString(),
+                            "scenario", ev.scenario().name(),
+                            "target", ev.target(),
+                            "details", ev.details(),
+                            "active", ev.active()
+                    ));
+                }
+                sendJson(exchange, 200, Map.of(
+                        "nodeId", status.nodeId(),
+                        "role", status.role(),
+                        "isPaused", status.isPaused(),
+                        "isolatedPeers", status.isolatedPeers(),
+                        "peerDelaysMs", status.peerDelaysMs(),
+                        "peerDropRates", status.peerDropRates(),
+                        "recentEvents", evList
+                ));
+            } catch (Exception e) {
+                log.error("Error getting chaos status", e);
+                sendJson(exchange, 500, Map.of("error", e.getMessage() != null ? e.getMessage() : "Internal error"));
+            }
+        }
+    }
+
+    private class ChaosVerifyHandler implements HttpHandler {
+        @Override
+        public void handle(HttpExchange exchange) throws IOException {
+            try {
+                var report = raftNode.getChaosEngine().runValidationProbe();
+                sendJson(exchange, 200, Map.of(
+                        "timestamp", report.timestamp().toString(),
+                        "status", report.status(),
+                        "leaderId", report.leaderId() != null ? report.leaderId() : "",
+                        "term", report.term(),
+                        "leaderLeaseActive", report.leaderLeaseActive(),
+                        "probeLatencyMs", report.probeLatencyMs(),
+                        "activeFaultCount", report.activeFaultCount(),
+                        "isolatedPeers", report.isolatedPeers(),
+                        "checks", report.checks(),
+                        "summary", report.summary()
+                ));
+            } catch (Exception e) {
+                log.error("Error verifying chaos health", e);
+                sendJson(exchange, 500, Map.of("error", e.getMessage() != null ? e.getMessage() : "Internal error"));
+            }
         }
     }
 

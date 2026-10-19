@@ -72,6 +72,10 @@ public class RaftNode implements RaftRpcHandler, Closeable {
     // Secondary Indexing and Document Filter Engine
     private final io.raftline.core.index.SecondaryIndexEngine indexEngine = new io.raftline.core.index.SecondaryIndexEngine();
 
+    // Embedded Disaster Simulator and Chaos Engineering Suite
+    private final io.raftline.core.chaos.ChaosEngine chaosEngine;
+    private volatile boolean paused = false;
+
     // Timers
     private ScheduledFuture<?> electionTimeoutTask;
     private ScheduledFuture<?> heartbeatTask;
@@ -92,6 +96,7 @@ public class RaftNode implements RaftRpcHandler, Closeable {
 
         this.commitIndex = wal.getSnapshotIndex();
         this.lastApplied = stateMachine.getLastAppliedIndex();
+        this.chaosEngine = new io.raftline.core.chaos.ChaosEngine(this);
 
         this.scheduler = Executors.newScheduledThreadPool(2, r -> {
             Thread t = new Thread(r, "raft-" + config.getLocalNodeId() + "-timer");
@@ -366,6 +371,9 @@ public class RaftNode implements RaftRpcHandler, Closeable {
 
     @Override
     public RequestVoteResponse handleRequestVote(RequestVoteRequest request) {
+        if (paused) {
+            throw new IllegalStateException("Node " + config.getLocalNodeId() + " is paused (chaos freeze)");
+        }
         stateLock.lock();
         try {
             long currentTerm = metaStorage.getCurrentTerm();
@@ -450,6 +458,9 @@ public class RaftNode implements RaftRpcHandler, Closeable {
 
     @Override
     public AppendEntriesResponse handleAppendEntries(AppendEntriesRequest request) {
+        if (paused) {
+            throw new IllegalStateException("Node " + config.getLocalNodeId() + " is paused (chaos freeze)");
+        }
         stateLock.lock();
         try {
             long currentTerm = metaStorage.getCurrentTerm();
@@ -539,6 +550,9 @@ public class RaftNode implements RaftRpcHandler, Closeable {
 
     @Override
     public InstallSnapshotResponse handleInstallSnapshot(InstallSnapshotRequest request) {
+        if (paused) {
+            throw new IllegalStateException("Node " + config.getLocalNodeId() + " is paused (chaos freeze)");
+        }
         stateLock.lock();
         try {
             long currentTerm = metaStorage.getCurrentTerm();
@@ -821,6 +835,12 @@ public class RaftNode implements RaftRpcHandler, Closeable {
             return CompletableFuture.completedFuture(Collections.emptyList());
         }
 
+        if (paused) {
+            CompletableFuture<List<ApplyResult>> failed = new CompletableFuture<>();
+            failed.completeExceptionally(new IllegalStateException("Node " + config.getLocalNodeId() + " is paused (chaos freeze)"));
+            return failed;
+        }
+
         stateLock.lock();
         try {
             if (role != Role.LEADER) {
@@ -966,6 +986,11 @@ public class RaftNode implements RaftRpcHandler, Closeable {
      * Otherwise, falls back to a quorum heartbeat round before returning state.
      */
     public CompletableFuture<byte[]> readLinearizable(String key) {
+        if (paused) {
+            CompletableFuture<byte[]> failed = new CompletableFuture<>();
+            failed.completeExceptionally(new IllegalStateException("Node " + config.getLocalNodeId() + " is paused (chaos freeze)"));
+            return failed;
+        }
         stateLock.lock();
         try {
             if (role != Role.LEADER) {
@@ -1189,6 +1214,55 @@ public class RaftNode implements RaftRpcHandler, Closeable {
         return indexEngine;
     }
 
+    public io.raftline.core.chaos.ChaosEngine getChaosEngine() {
+        return chaosEngine;
+    }
+
+    public RaftTransport getTransport() {
+        return transport;
+    }
+
+    public void abdicate() {
+        stateLock.lock();
+        try {
+            if (role == Role.LEADER) {
+                long newTerm = metaStorage.getCurrentTerm() + 1;
+                log.warn("Leader {} abdicating leadership (chaos). Stepping down in term {}",
+                        config.getLocalNodeId(), newTerm);
+                stepDownToFollower(newTerm, null);
+            }
+        } finally {
+            stateLock.unlock();
+        }
+    }
+
+    public void pause() {
+        stateLock.lock();
+        try {
+            this.paused = true;
+            if (electionTimeoutTask != null) electionTimeoutTask.cancel(false);
+            if (heartbeatTask != null) heartbeatTask.cancel(false);
+            log.warn("Node {} is PAUSED (chaos freeze simulation)", config.getLocalNodeId());
+        } finally {
+            stateLock.unlock();
+        }
+    }
+
+    public void resume() {
+        stateLock.lock();
+        try {
+            this.paused = false;
+            resetElectionTimeout();
+            log.info("Node {} RESUMED from pause", config.getLocalNodeId());
+        } finally {
+            stateLock.unlock();
+        }
+    }
+
+    public boolean isPaused() {
+        return paused;
+    }
+
     @Override
     public void close() throws IOException {
         if (running.compareAndSet(true, false)) {
@@ -1202,6 +1276,7 @@ public class RaftNode implements RaftRpcHandler, Closeable {
             }
             pendingClientRequests.clear();
 
+            chaosEngine.close();
             watchEngine.close();
             cdcEngine.close();
             webhookDispatcher.close();
