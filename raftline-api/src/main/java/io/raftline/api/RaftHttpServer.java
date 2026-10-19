@@ -101,6 +101,7 @@ public class RaftHttpServer implements Closeable {
         server.createContext("/v1/agent/lock", new AgentLockHandler());
         server.createContext("/v1/agent/cas", new AgentCasHandler());
         server.createContext("/v1/agent/state", new AgentStateHandler());
+        server.createContext("/v1/agent/watch", new AgentWatchHandler());
     }
 
     private class TxnHandler implements HttpHandler {
@@ -445,6 +446,102 @@ public class RaftHttpServer implements Closeable {
                     log.error("AgentStateHandler failure", e);
                     sendJson(exchange, 500, Map.of("error", cause.getMessage() != null ? cause.getMessage() : e.getMessage()));
                 }
+            }
+        }
+    }
+
+    private class AgentWatchHandler implements HttpHandler {
+        @Override
+        public void handle(HttpExchange exchange) throws IOException {
+            if (!isAuthorized(exchange)) {
+                sendJson(exchange, 401, Map.of("error", "Unauthorized: Valid API Key required"));
+                return;
+            }
+
+            if (!"GET".equalsIgnoreCase(exchange.getRequestMethod())) {
+                sendJson(exchange, 405, Map.of("error", "Watch requests must use GET"));
+                return;
+            }
+
+            if (raftNode == null) {
+                sendJson(exchange, 501, Map.of("error", "RaftNode is not initialized on this instance"));
+                return;
+            }
+
+            Map<String, String> query = parseQueryParams(exchange.getRequestURI().getQuery());
+            String key = query.get("key");
+            String prefix = query.get("prefix");
+
+            if ((key == null || key.isBlank()) && (prefix == null || prefix.isBlank())) {
+                sendJson(exchange, 400, Map.of("error", "Either 'key' or 'prefix' query parameter is required"));
+                return;
+            }
+
+            boolean isPrefix = prefix != null && !prefix.isBlank();
+            String filter = isPrefix ? prefix : key;
+
+            long sinceVersion = 0;
+            if (query.containsKey("sinceVersion")) {
+                try {
+                    sinceVersion = Long.parseLong(query.get("sinceVersion"));
+                } catch (NumberFormatException ignored) {}
+            }
+
+            // Set SSE headers
+            var headers = exchange.getResponseHeaders();
+            headers.set("Content-Type", "text/event-stream; charset=UTF-8");
+            headers.set("Cache-Control", "no-cache");
+            headers.set("Connection", "keep-alive");
+            exchange.sendResponseHeaders(200, 0); // chunked transfer encoding
+
+            OutputStream out = exchange.getResponseBody();
+
+            // Send initial ping/connection event
+            String initialMsg = "event: connected\ndata: {\"status\":\"CONNECTED\",\"filter\":\"" + filter + "\",\"isPrefix\":" + isPrefix + "}\n\n";
+            out.write(initialMsg.getBytes(StandardCharsets.UTF_8));
+            out.flush();
+
+            try (var watcher = raftNode.getWatchEngine().watch(filter, isPrefix, sinceVersion, null)) {
+                long keepAliveIntervalMs = 5000;
+                long lastPing = System.currentTimeMillis();
+
+                while (watcher.isActive()) {
+                    io.raftline.core.agent.WatchEvent event = watcher.poll(500);
+                    if (event != null) {
+                        String eventVal = (event.value() != null && event.value().length > 0)
+                                ? new String(event.value(), StandardCharsets.UTF_8)
+                                : "";
+                        Map<String, Object> map = Map.of(
+                                "type", event.type().name(),
+                                "key", event.key(),
+                                "value", eventVal,
+                                "version", event.version(),
+                                "logIndex", event.logIndex(),
+                                "timestamp", event.timestampEpochMs()
+                        );
+                        String sse = "event: message\ndata: " + json.writeValueAsString(map) + "\n\n";
+                        out.write(sse.getBytes(StandardCharsets.UTF_8));
+                        out.flush();
+                        lastPing = System.currentTimeMillis();
+                    } else {
+                        // Periodic heartbeat comment to keep HTTP connection alive and detect client disconnect
+                        long now = System.currentTimeMillis();
+                        if (now - lastPing >= keepAliveIntervalMs) {
+                            out.write(": ping\n\n".getBytes(StandardCharsets.UTF_8));
+                            out.flush();
+                            lastPing = now;
+                        }
+                    }
+                }
+            } catch (IOException e) {
+                // Client closed socket or disconnected
+                log.debug("Watcher client disconnected: {}", e.getMessage());
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            } finally {
+                try {
+                    out.close();
+                } catch (Exception ignored) {}
             }
         }
     }

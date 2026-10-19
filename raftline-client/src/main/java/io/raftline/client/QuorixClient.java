@@ -591,6 +591,99 @@ public class QuorixClient implements Closeable {
         return null;
     }
 
+    public static record StreamWatchEvent(String type, String key, String value, long version, long logIndex, long timestamp) {}
+
+    public interface WatchEventListener {
+        void onEvent(StreamWatchEvent event);
+        default void onError(Throwable error) {}
+    }
+
+    public interface WatchSubscription extends AutoCloseable {
+        @Override
+        void close();
+    }
+
+    /**
+     * Subscribes to a reactive Server-Sent Events (SSE) watch stream for a key or prefix.
+     */
+    public WatchSubscription watch(String targetUrl, String keyOrPrefix, boolean isPrefix, long sinceVersion, WatchEventListener listener) {
+        String base = (targetUrl != null && !targetUrl.isBlank()) ? targetUrl : (cachedLeaderUrl != null ? cachedLeaderUrl : seedUrls.get(0));
+        String param = isPrefix ? "prefix=" + java.net.URLEncoder.encode(keyOrPrefix, StandardCharsets.UTF_8)
+                : "key=" + java.net.URLEncoder.encode(keyOrPrefix, StandardCharsets.UTF_8);
+        if (sinceVersion > 0) {
+            param += "&sinceVersion=" + sinceVersion;
+        }
+
+        URI uri = URI.create(base + "/v1/agent/watch?" + param);
+        HttpRequest request = newRequestBuilder(uri)
+                .GET()
+                .header("Accept", "text/event-stream")
+                .timeout(Duration.ofMinutes(60))
+                .build();
+
+        java.util.concurrent.atomic.AtomicBoolean active = new java.util.concurrent.atomic.AtomicBoolean(true);
+        Thread thread = Thread.ofVirtual().start(() -> {
+            try {
+                httpClient.send(request, HttpResponse.BodyHandlers.fromLineSubscriber(new java.util.concurrent.Flow.Subscriber<String>() {
+                    private java.util.concurrent.Flow.Subscription sub;
+
+                    @Override
+                    public void onSubscribe(java.util.concurrent.Flow.Subscription subscription) {
+                        this.sub = subscription;
+                        subscription.request(Long.MAX_VALUE);
+                    }
+
+                    @Override
+                    public void onNext(String line) {
+                        if (!active.get()) {
+                            if (sub != null) sub.cancel();
+                            return;
+                        }
+                        if (line.startsWith("data: ")) {
+                            String data = line.substring("data: ".length()).trim();
+                            if (data.startsWith("{") && data.contains("\"key\"")) {
+                                try {
+                                    JsonNode node = json.readTree(data);
+                                    StreamWatchEvent evt = new StreamWatchEvent(
+                                            node.has("type") ? node.get("type").asText() : "PUT",
+                                            node.has("key") ? node.get("key").asText() : "",
+                                            node.has("value") ? node.get("value").asText() : "",
+                                            node.has("version") ? node.get("version").asLong() : 0L,
+                                            node.has("logIndex") ? node.get("logIndex").asLong() : 0L,
+                                            node.has("timestamp") ? node.get("timestamp").asLong() : 0L
+                                    );
+                                    listener.onEvent(evt);
+                                } catch (Exception e) {
+                                    log.debug("Failed parsing watch event json: {}", e.getMessage());
+                                }
+                            }
+                        }
+                    }
+
+                    @Override
+                    public void onError(Throwable throwable) {
+                        if (active.get()) {
+                            listener.onError(throwable);
+                        }
+                    }
+
+                    @Override
+                    public void onComplete() {
+                    }
+                }));
+            } catch (Exception e) {
+                if (active.get()) {
+                    listener.onError(e);
+                }
+            }
+        });
+
+        return () -> {
+            active.set(false);
+            thread.interrupt();
+        };
+    }
+
     public String getClientId() {
         return clientId;
     }

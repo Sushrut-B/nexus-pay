@@ -54,6 +54,13 @@ public class AgentSharedMemoryManager {
     }
 
     /**
+     * Registers a reactive watcher for key or prefix mutations.
+     */
+    public AgentWatchEngine.WatcherRegistration watch(String keyOrPrefix, boolean isPrefix, long sinceVersion, java.util.function.Consumer<WatchEvent> consumer) {
+        return raftNode.getWatchEngine().watch(keyOrPrefix, isPrefix, sinceVersion, consumer);
+    }
+
+    /**
      * Multi-agent barrier synchronization.
      * Multiple agents register their arrival at a named barrier. When the barrier reaches targetCount,
      * all participating agents are released.

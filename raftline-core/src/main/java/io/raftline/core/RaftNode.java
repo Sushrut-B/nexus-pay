@@ -60,6 +60,9 @@ public class RaftNode implements RaftRpcHandler, Closeable {
     private final java.util.concurrent.atomic.AtomicLong electionCount = new java.util.concurrent.atomic.AtomicLong(0);
     private final java.util.concurrent.atomic.AtomicLong termChangeCount = new java.util.concurrent.atomic.AtomicLong(0);
 
+    // Reactive Watch Stream Engine for agent pub/sub
+    private final io.raftline.core.agent.AgentWatchEngine watchEngine = new io.raftline.core.agent.AgentWatchEngine();
+
     // Timers
     private ScheduledFuture<?> electionTimeoutTask;
     private ScheduledFuture<?> heartbeatTask;
@@ -742,6 +745,21 @@ public class RaftNode implements RaftRpcHandler, Closeable {
             if (future != null) {
                 future.complete(result);
             }
+
+            // Publish reactive watch event to subscribed agents
+            if (entry.getCommand() != null) {
+                io.raftline.storage.model.Command cmd = entry.getCommand();
+                if (cmd.getKey() != null && !cmd.getKey().isEmpty()) {
+                    io.raftline.core.agent.WatchEvent.EventType eventType = switch (cmd.getType()) {
+                        case PUT, CAS -> io.raftline.core.agent.WatchEvent.EventType.PUT;
+                        case DELETE -> io.raftline.core.agent.WatchEvent.EventType.DELETE;
+                        default -> null;
+                    };
+                    if (eventType != null && result.isSuccess()) {
+                        watchEngine.publishEvent(eventType, cmd.getKey(), result.getValue(), result.getVersion(), indexToApply);
+                    }
+                }
+            }
         }
 
         // Automatic log compaction & snapshot trigger (§7)
@@ -1129,6 +1147,10 @@ public class RaftNode implements RaftRpcHandler, Closeable {
         }
     }
 
+    public io.raftline.core.agent.AgentWatchEngine getWatchEngine() {
+        return watchEngine;
+    }
+
     @Override
     public void close() throws IOException {
         if (running.compareAndSet(true, false)) {
@@ -1142,6 +1164,7 @@ public class RaftNode implements RaftRpcHandler, Closeable {
             }
             pendingClientRequests.clear();
 
+            watchEngine.close();
             wal.close();
             transport.close();
         }
