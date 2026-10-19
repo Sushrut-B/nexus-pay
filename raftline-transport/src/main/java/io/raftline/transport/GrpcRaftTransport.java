@@ -115,7 +115,7 @@ public class GrpcRaftTransport implements RaftTransport {
             RaftInternalServiceGrpc.RaftInternalServiceFutureStub stub = getStub(peerId);
             RequestVoteProto protoReq = ProtoConverter.toProto(request);
             ListenableFuture<RequestVoteResponseProto> future = stub
-                    .withDeadlineAfter(500, TimeUnit.MILLISECONDS)
+                    .withDeadlineAfter(2500, TimeUnit.MILLISECONDS)
                     .requestVote(protoReq);
 
             return toCompletableFuture(future).thenApply(ProtoConverter::fromProto);
@@ -132,7 +132,7 @@ public class GrpcRaftTransport implements RaftTransport {
             RaftInternalServiceGrpc.RaftInternalServiceFutureStub stub = getStub(peerId);
             AppendEntriesProto protoReq = ProtoConverter.toProto(request);
             ListenableFuture<AppendEntriesResponseProto> future = stub
-                    .withDeadlineAfter(500, TimeUnit.MILLISECONDS)
+                    .withDeadlineAfter(2500, TimeUnit.MILLISECONDS)
                     .appendEntries(protoReq);
 
             return toCompletableFuture(future).thenApply(ProtoConverter::fromProto);

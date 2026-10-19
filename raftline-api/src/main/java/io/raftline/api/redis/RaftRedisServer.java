@@ -31,6 +31,7 @@ public class RaftRedisServer implements Closeable {
 
     private final int port;
     private final RaftNode raftNode;
+    private final java.util.function.Supplier<RaftNode> leaderSupplier;
     private final MultiRaftManager multiRaftManager;
     private final String authPassword;
     private final ServerSocket serverSocket;
@@ -41,12 +42,21 @@ public class RaftRedisServer implements Closeable {
     private final Map<String, Long> keyTtlMap = new ConcurrentHashMap<>();
 
     public RaftRedisServer(int port, RaftNode raftNode) throws IOException {
-        this(port, raftNode, null, null);
+        this(port, raftNode, null, null, null);
     }
 
     public RaftRedisServer(int port, RaftNode raftNode, MultiRaftManager multiRaftManager, String authPassword) throws IOException {
+        this(port, raftNode, null, multiRaftManager, authPassword);
+    }
+
+    public RaftRedisServer(int port, java.util.function.Supplier<RaftNode> leaderSupplier, String authPassword) throws IOException {
+        this(port, null, leaderSupplier, null, authPassword);
+    }
+
+    public RaftRedisServer(int port, RaftNode raftNode, java.util.function.Supplier<RaftNode> leaderSupplier, MultiRaftManager multiRaftManager, String authPassword) throws IOException {
         this.port = port;
         this.raftNode = raftNode;
+        this.leaderSupplier = leaderSupplier;
         this.multiRaftManager = multiRaftManager;
         this.authPassword = (authPassword != null && !authPassword.isBlank()) ? authPassword.trim() : null;
         this.serverSocket = new ServerSocket(port);
@@ -160,7 +170,9 @@ public class RaftRedisServer implements Closeable {
                         }
                     }
 
-                    executeRaftWrite(Command.put(key, val.getBytes(StandardCharsets.UTF_8)));
+                    String clientId = UUID.randomUUID().toString();
+                    long seq = System.nanoTime();
+                    executeRaftWrite(Command.put(key, val.getBytes(StandardCharsets.UTF_8), clientId, seq));
                     if (ttlSeconds != null && ttlSeconds > 0) {
                         keyTtlMap.put(key, System.currentTimeMillis() + (ttlSeconds * 1000));
                     } else {
@@ -477,14 +489,19 @@ public class RaftRedisServer implements Closeable {
                     return new RespFrame.Error("ERR unknown command '" + cmd + "'");
                 }
             }
-        } catch (Exception e) {
-            Throwable cause = e instanceof ExecutionException ? e.getCause() : e;
+        } catch (Throwable t) {
+            Throwable cause = t;
+            while (cause.getCause() != null && cause != cause.getCause()) {
+                if (cause instanceof NotLeaderException) break;
+                cause = cause.getCause();
+            }
             if (cause instanceof NotLeaderException nle) {
                 String leaderHint = (nle.getLeaderHint() != null) ? nle.getLeaderHint() : "unknown";
                 return new RespFrame.Error("MOVED 0 " + leaderHint);
             }
-            log.error("Failed executing Redis command {}", cmd, e);
-            return new RespFrame.Error("ERR " + e.getMessage());
+            String msg = cause.getMessage() != null ? cause.getMessage() : cause.getClass().getSimpleName();
+            log.error("Failed executing Redis command {}: {}", cmd, msg);
+            return new RespFrame.Error("ERR " + msg);
         }
     }
 
@@ -501,7 +518,7 @@ public class RaftRedisServer implements Closeable {
 
     private void saveHash(String key, Map<String, String> hash) throws Exception {
         byte[] raw = json.writeValueAsBytes(hash);
-        executeRaftWrite(Command.put(key, raw));
+        executeRaftWrite(Command.put(key, raw, UUID.randomUUID().toString(), System.nanoTime()));
     }
 
     // Helper functions for Sets
@@ -517,7 +534,7 @@ public class RaftRedisServer implements Closeable {
 
     private void saveSet(String key, Set<String> set) throws Exception {
         byte[] raw = json.writeValueAsBytes(set);
-        executeRaftWrite(Command.put(key, raw));
+        executeRaftWrite(Command.put(key, raw, UUID.randomUUID().toString(), System.nanoTime()));
     }
 
     // Helper functions for Lists
@@ -533,7 +550,7 @@ public class RaftRedisServer implements Closeable {
 
     private void saveList(String key, LinkedList<String> list) throws Exception {
         byte[] raw = json.writeValueAsBytes(list);
-        executeRaftWrite(Command.put(key, raw));
+        executeRaftWrite(Command.put(key, raw, UUID.randomUUID().toString(), System.nanoTime()));
     }
 
     private RespFrame incrementBy(String key, long delta) throws Exception {
@@ -548,7 +565,7 @@ public class RaftRedisServer implements Closeable {
             }
         }
         val += delta;
-        executeRaftWrite(Command.put(key, String.valueOf(val).getBytes(StandardCharsets.UTF_8)));
+        executeRaftWrite(Command.put(key, String.valueOf(val).getBytes(StandardCharsets.UTF_8), UUID.randomUUID().toString(), System.nanoTime()));
         return new RespFrame.IntegerFrame(val);
     }
 
@@ -557,36 +574,68 @@ public class RaftRedisServer implements Closeable {
         return exp != null && System.currentTimeMillis() > exp;
     }
 
-    private byte[] executeRaftRead(String key) {
-        try {
-            if (multiRaftManager != null) {
-                return multiRaftManager.readLinearizable(key).get(5, TimeUnit.SECONDS);
-            }
-            return (raftNode != null) ? raftNode.readLinearizable(key).get(5, TimeUnit.SECONDS) : null;
-        } catch (Exception e) {
-            throw new RuntimeException(e);
+    private RaftNode resolveNode() {
+        if (leaderSupplier != null) {
+            RaftNode current = leaderSupplier.get();
+            if (current != null) return current;
         }
+        return raftNode;
+    }
+
+    private byte[] executeRaftRead(String key) {
+        long deadline = System.currentTimeMillis() + 5000;
+        Exception lastErr = null;
+        while (System.currentTimeMillis() < deadline) {
+            try {
+                if (multiRaftManager != null) {
+                    return multiRaftManager.readLinearizable(key).get(2, TimeUnit.SECONDS);
+                }
+                RaftNode node = resolveNode();
+                if (node != null) {
+                    return node.readLinearizable(key).get(2, TimeUnit.SECONDS);
+                }
+            } catch (Exception e) {
+                lastErr = e;
+                try { Thread.sleep(50); } catch (InterruptedException ignored) {}
+            }
+        }
+        throw new RuntimeException(lastErr);
     }
 
     private void executeRaftWrite(Command cmd) throws Exception {
-        if (multiRaftManager != null) {
-            ApplyResult result = multiRaftManager.execute(cmd).get(5, TimeUnit.SECONDS);
-            if (!result.isSuccess()) {
-                throw new RuntimeException("Apply write failed on shard");
+        long deadline = System.currentTimeMillis() + 5000;
+        Exception lastErr = null;
+        while (System.currentTimeMillis() < deadline) {
+            try {
+                if (multiRaftManager != null) {
+                    ApplyResult result = multiRaftManager.execute(cmd).get(2, TimeUnit.SECONDS);
+                    if (!result.isSuccess()) {
+                        throw new RuntimeException("Apply write failed on shard");
+                    }
+                    return;
+                }
+                RaftNode node = resolveNode();
+                if (node != null) {
+                    ApplyResult result = node.execute(cmd).get(2, TimeUnit.SECONDS);
+                    if (!result.isSuccess()) {
+                        throw new RuntimeException("Apply write failed on node");
+                    }
+                    return;
+                }
+            } catch (Exception e) {
+                lastErr = e;
+                try { Thread.sleep(50); } catch (InterruptedException ignored) {}
             }
-            return;
         }
-        if (raftNode != null) {
-            ApplyResult result = raftNode.execute(cmd).get(5, TimeUnit.SECONDS);
-            if (!result.isSuccess()) {
-                throw new RuntimeException("Apply write failed on node");
-            }
+        if (lastErr != null) {
+            throw lastErr;
         }
     }
 
     private void executeRaftBatch(List<Command> batch) throws Exception {
-        if (raftNode != null) {
-            List<ApplyResult> results = raftNode.executeBatch(batch).get(5, TimeUnit.SECONDS);
+        RaftNode node = resolveNode();
+        if (node != null) {
+            List<ApplyResult> results = node.executeBatch(batch).get(5, TimeUnit.SECONDS);
             for (ApplyResult ar : results) {
                 if (!ar.isSuccess()) {
                     throw new RuntimeException("Batch apply failed");
