@@ -1127,6 +1127,22 @@ public class QuorixClient implements Closeable {
         return queryDocuments(targetUrl, query);
     }
 
+    /**
+     * Retrieves aggregated cluster overview and telemetry for the visual dashboard.
+     */
+    public JsonNode getClusterOverview(String targetUrl) throws IOException, InterruptedException {
+        String base = (targetUrl != null && !targetUrl.isBlank()) ? targetUrl : (cachedLeaderUrl != null ? cachedLeaderUrl : seedUrls.get(0));
+        HttpRequest request = newRequestBuilder(URI.create(base + "/v1/cluster/overview"))
+                .GET()
+                .timeout(Duration.ofSeconds(5))
+                .build();
+        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+        if (response.statusCode() == 200) {
+            return json.readTree(response.body());
+        }
+        throw new IOException("Failed to get cluster overview: status=" + response.statusCode() + ", body=" + response.body());
+    }
+
     public String getClientId() {
         return clientId;
     }

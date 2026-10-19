@@ -110,6 +110,11 @@ public class RaftHttpServer implements Closeable {
         server.createContext("/v1/cdc/dlq", new CdcDlqHandler());
         server.createContext("/v1/index", new IndexHandler());
         server.createContext("/v1/query", new QueryHandler());
+        server.createContext("/v1/cluster/overview", new OverviewHandler());
+        DashboardHandler dashboardHandler = new DashboardHandler();
+        server.createContext("/dashboard", dashboardHandler);
+        server.createContext("/ui", dashboardHandler);
+        server.createContext("/", dashboardHandler);
     }
 
     private class TxnHandler implements HttpHandler {
@@ -1525,6 +1530,147 @@ public class RaftHttpServer implements Closeable {
             }
 
             sendJson(exchange, 405, Map.of("error", "Method not allowed: " + method));
+        }
+    }
+
+    private class OverviewHandler implements HttpHandler {
+        @Override
+        public void handle(HttpExchange exchange) throws IOException {
+            if (!isAuthorized(exchange)) {
+                sendJson(exchange, 401, Map.of("error", "Unauthorized: Valid API Key required"));
+                return;
+            }
+
+            if (raftNode == null) {
+                sendJson(exchange, 501, Map.of("error", "RaftNode is not initialized on this instance"));
+                return;
+            }
+
+            Map<String, Object> overview = new LinkedHashMap<>();
+
+            // Node info
+            Map<String, Object> node = new LinkedHashMap<>();
+            node.put("nodeId", raftNode.getNodeId());
+            node.put("role", raftNode.getRole().name());
+            node.put("term", raftNode.getCurrentTerm());
+            node.put("leaderId", raftNode.getCurrentLeaderId() != null ? raftNode.getCurrentLeaderId() : "");
+            node.put("isLeader", raftNode.getRole() == io.raftline.core.Role.LEADER);
+            node.put("leaderLeaseValid", raftNode.isLeaderLeaseValid());
+            node.put("commitIndex", raftNode.getCommitIndex());
+            node.put("lastApplied", raftNode.getLastApplied());
+            node.put("lastLogIndex", raftNode.getWal().getLastLogIndex());
+            node.put("lastLogTerm", raftNode.getWal().getLastLogTerm());
+            node.put("snapshotIndex", raftNode.getWal().getSnapshotIndex());
+            node.put("electionCount", raftNode.getElectionCount());
+            node.put("termChangeCount", raftNode.getTermChangeCount());
+            node.put("clusterSize", raftNode.getConfig().getClusterSize());
+            node.put("quorum", raftNode.getConfig().getQuorum());
+            overview.put("node", node);
+
+            // Peers info
+            List<Map<String, Object>> peers = new ArrayList<>();
+            for (String peerId : raftNode.getConfig().getPeerIds()) {
+                Map<String, Object> p = new LinkedHashMap<>();
+                p.put("id", peerId);
+                p.put("httpPort", peerHttpPorts.getOrDefault(peerId, 0));
+                p.put("isLeader", peerId.equals(raftNode.getCurrentLeaderId()));
+                peers.add(p);
+            }
+            overview.put("peers", peers);
+
+            // Secondary Indexes
+            List<Map<String, Object>> idxList = new ArrayList<>();
+            for (var idx : raftNode.getIndexEngine().getAllIndexes()) {
+                idxList.add(idx.stats());
+            }
+            overview.put("indexes", idxList);
+
+            // Webhooks
+            List<Map<String, Object>> whList = new ArrayList<>();
+            for (var wh : raftNode.getWebhookDispatcher().getAllSubscriptions()) {
+                whList.add(wh.toMap());
+            }
+            overview.put("webhooks", whList);
+            overview.put("dlqCount", raftNode.getWebhookDispatcher().getDeadLetterQueueSize());
+
+            // Active Locks
+            List<Map<String, Object>> locks = new ArrayList<>();
+            try {
+                String lockPrefix = io.raftline.core.agent.AgentLockManager.LOCK_PREFIX;
+                Map<String, byte[]> lockEntries = raftNode.getStateMachine().scan(lockPrefix, lockPrefix + "\uffff", 100);
+                for (var e : lockEntries.entrySet()) {
+                    try {
+                        io.raftline.core.agent.AgentLockInfo info = json.readValue(e.getValue(), io.raftline.core.agent.AgentLockInfo.class);
+                        locks.add(Map.of(
+                                "resource", info.getResource(),
+                                "ownerAgentId", info.getOwnerAgentId(),
+                                "fencingToken", info.getFencingToken(),
+                                "acquiredAtEpochMs", info.getAcquiredAtEpochMs(),
+                                "expiresAtEpochMs", info.getExpiresAtEpochMs(),
+                                "expired", info.isExpired()
+                        ));
+                    } catch (Exception ignored) {}
+                }
+            } catch (Exception ignored) {}
+            overview.put("activeLocks", locks);
+
+            // Recent CDC events
+            List<Map<String, Object>> recentEvents = new ArrayList<>();
+            try {
+                long lastApplied = raftNode.getLastApplied();
+                long sinceIndex = Math.max(0, lastApplied - 25);
+                var evts = raftNode.getCdcEngine().pollEvents(sinceIndex, 25);
+                for (var ev : evts) {
+                    String payloadStr = (ev.payload() != null && ev.payload().length > 0)
+                            ? new String(ev.payload(), StandardCharsets.UTF_8)
+                            : "";
+                    recentEvents.add(Map.of(
+                            "eventId", ev.eventId(),
+                            "logIndex", ev.logIndex(),
+                            "logTerm", ev.logTerm(),
+                            "operation", ev.operation().name(),
+                            "key", ev.key(),
+                            "payload", payloadStr,
+                            "version", ev.version(),
+                            "timestamp", ev.timestampEpochMs()
+                    ));
+                }
+            } catch (Exception ignored) {}
+            overview.put("recentEvents", recentEvents);
+
+            sendJson(exchange, 200, overview);
+        }
+    }
+
+    private class DashboardHandler implements HttpHandler {
+        private final byte[] htmlBytes;
+
+        public DashboardHandler() {
+            byte[] bytes = null;
+            try (var is = getClass().getResourceAsStream("/web/index.html")) {
+                if (is != null) {
+                    bytes = is.readAllBytes();
+                }
+            } catch (Exception ignored) {}
+
+            if (bytes == null || bytes.length == 0) {
+                bytes = ("<!DOCTYPE html><html><head><title>Raftline Dashboard</title></head><body style=\"background:#080c14;color:#fff;\"><h1>Raftline Visual Web Dashboard</h1></body></html>").getBytes(StandardCharsets.UTF_8);
+            }
+            this.htmlBytes = bytes;
+        }
+
+        @Override
+        public void handle(HttpExchange exchange) throws IOException {
+            String path = exchange.getRequestURI().getPath();
+            if (!"/".equals(path) && !"/dashboard".equals(path) && !"/ui".equals(path)) {
+                sendJson(exchange, 404, Map.of("error", "Not found: " + path));
+                return;
+            }
+            exchange.getResponseHeaders().set("Content-Type", "text/html; charset=utf-8");
+            exchange.sendResponseHeaders(200, htmlBytes.length);
+            try (OutputStream os = exchange.getResponseBody()) {
+                os.write(htmlBytes);
+            }
         }
     }
 

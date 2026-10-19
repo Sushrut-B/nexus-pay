@@ -1,0 +1,1349 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Raftline — Visual Web Dashboard & Topology Inspector</title>
+    <meta name="description" content="Enterprise Distributed Consensus Database, Real-Time Topology Inspector, CDC Stream & Document Query Console">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-base: #080c14;
+            --bg-surface: rgba(15, 23, 42, 0.75);
+            --bg-surface-elevated: rgba(30, 41, 59, 0.85);
+            --border-subtle: rgba(255, 255, 255, 0.08);
+            --border-highlight: rgba(16, 185, 129, 0.4);
+            --text-primary: #f8fafc;
+            --text-secondary: #94a3b8;
+            --text-muted: #64748b;
+            --accent-emerald: #10b981;
+            --accent-emerald-glow: rgba(16, 185, 129, 0.25);
+            --accent-cyan: #06b6d4;
+            --accent-cyan-glow: rgba(6, 182, 212, 0.25);
+            --accent-purple: #8b5cf6;
+            --accent-amber: #f59e0b;
+            --accent-rose: #f43f5e;
+            --radius-md: 12px;
+            --radius-lg: 18px;
+            --font-sans: 'Inter', -apple-system, sans-serif;
+            --font-display: 'Outfit', sans-serif;
+            --font-mono: 'JetBrains Mono', monospace;
+            --transition-smooth: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            background-color: var(--bg-base);
+            color: var(--text-primary);
+            font-family: var(--font-sans);
+            min-height: 100vh;
+            line-height: 1.5;
+            background-image:
+                radial-gradient(ellipse at 15% 0%, rgba(16, 185, 129, 0.08) 0%, transparent 50%),
+                radial-gradient(ellipse at 85% 10%, rgba(6, 182, 212, 0.07) 0%, transparent 50%),
+                radial-gradient(ellipse at 50% 90%, rgba(139, 92, 246, 0.05) 0%, transparent 60%);
+            background-attachment: fixed;
+            overflow-x: hidden;
+        }
+
+        /* Top Navigation Header */
+        header {
+            position: sticky;
+            top: 0;
+            z-index: 50;
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            background: rgba(8, 12, 20, 0.85);
+            border-bottom: 1px solid var(--border-subtle);
+            padding: 16px 32px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .brand-container {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+        }
+
+        .brand-logo {
+            width: 38px;
+            height: 38px;
+            background: linear-gradient(135deg, #10b981 0%, #06b6d4 100%);
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 0 20px rgba(16, 185, 129, 0.4);
+            position: relative;
+        }
+
+        .brand-logo::after {
+            content: '';
+            position: absolute;
+            inset: -3px;
+            border-radius: 13px;
+            background: linear-gradient(135deg, #10b981, #06b6d4);
+            opacity: 0.3;
+            z-index: -1;
+            filter: blur(4px);
+            animation: pulse-logo 3s infinite alternate;
+        }
+
+        @keyframes pulse-logo {
+            0% { opacity: 0.2; transform: scale(0.98); }
+            100% { opacity: 0.5; transform: scale(1.04); }
+        }
+
+        .brand-text h1 {
+            font-family: var(--font-display);
+            font-size: 22px;
+            font-weight: 700;
+            letter-spacing: -0.5px;
+            background: linear-gradient(to right, #ffffff, #cbd5e1);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .brand-text span {
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 1.5px;
+            color: var(--accent-emerald);
+            font-weight: 600;
+        }
+
+        .header-actions {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+
+        .pill-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 14px;
+            border-radius: 9999px;
+            font-size: 12px;
+            font-weight: 600;
+            background: var(--bg-surface);
+            border: 1px solid var(--border-subtle);
+        }
+
+        .pill-badge.leader {
+            border-color: rgba(16, 185, 129, 0.3);
+            color: var(--accent-emerald);
+            background: rgba(16, 185, 129, 0.08);
+        }
+
+        .pill-badge.follower {
+            border-color: rgba(6, 182, 212, 0.3);
+            color: var(--accent-cyan);
+            background: rgba(6, 182, 212, 0.08);
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background-color: currentColor;
+            box-shadow: 0 0 8px currentColor;
+            animation: pulse-dot 2s infinite;
+        }
+
+        @keyframes pulse-dot {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.4; transform: scale(0.85); }
+        }
+
+        .select-custom, .btn-action {
+            background: var(--bg-surface-elevated);
+            color: var(--text-primary);
+            border: 1px solid var(--border-subtle);
+            padding: 8px 14px;
+            border-radius: 8px;
+            font-size: 13px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: var(--transition-smooth);
+            outline: none;
+        }
+
+        .select-custom:hover, .btn-action:hover {
+            border-color: rgba(255, 255, 255, 0.2);
+            background: rgba(51, 65, 85, 0.9);
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+            color: #ffffff;
+            border: none;
+            box-shadow: 0 4px 14px rgba(16, 185, 129, 0.3);
+        }
+
+        .btn-primary:hover {
+            background: linear-gradient(135deg, #059669 0%, #047857 100%);
+            box-shadow: 0 6px 18px rgba(16, 185, 129, 0.45);
+            transform: translateY(-1px);
+        }
+
+        /* Layout Container */
+        .dashboard-container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 28px 32px 64px;
+        }
+
+        /* Overview Stat Grid */
+        .stat-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+            gap: 18px;
+            margin-bottom: 28px;
+        }
+
+        .stat-card {
+            background: var(--bg-surface);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border: 1px solid var(--border-subtle);
+            border-radius: var(--radius-md);
+            padding: 18px 20px;
+            position: relative;
+            overflow: hidden;
+            transition: var(--transition-smooth);
+        }
+
+        .stat-card:hover {
+            border-color: rgba(255, 255, 255, 0.16);
+            transform: translateY(-2px);
+            box-shadow: 0 12px 24px -10px rgba(0, 0, 0, 0.5);
+        }
+
+        .stat-title {
+            font-size: 12px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.8px;
+            color: var(--text-muted);
+            margin-bottom: 8px;
+        }
+
+        .stat-value {
+            font-family: var(--font-display);
+            font-size: 26px;
+            font-weight: 700;
+            letter-spacing: -0.5px;
+            color: var(--text-primary);
+        }
+
+        .stat-meta {
+            font-size: 11px;
+            color: var(--text-secondary);
+            margin-top: 4px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        /* Tabs Navigation */
+        .tabs-nav {
+            display: flex;
+            gap: 8px;
+            border-bottom: 1px solid var(--border-subtle);
+            margin-bottom: 24px;
+            overflow-x: auto;
+        }
+
+        .tab-btn {
+            background: none;
+            border: none;
+            color: var(--text-secondary);
+            font-family: var(--font-display);
+            font-size: 14px;
+            font-weight: 600;
+            padding: 12px 20px;
+            cursor: pointer;
+            position: relative;
+            transition: var(--transition-smooth);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            white-space: nowrap;
+        }
+
+        .tab-btn:hover {
+            color: var(--text-primary);
+        }
+
+        .tab-btn.active {
+            color: var(--accent-emerald);
+        }
+
+        .tab-btn.active::after {
+            content: '';
+            position: absolute;
+            bottom: -1px;
+            left: 0;
+            right: 0;
+            height: 2px;
+            background: linear-gradient(90deg, #10b981, #06b6d4);
+            box-shadow: 0 0 10px rgba(16, 185, 129, 0.6);
+        }
+
+        /* Tab Panes */
+        .tab-pane {
+            display: none;
+            animation: fadeIn 0.3s ease-out;
+        }
+
+        .tab-pane.active {
+            display: block;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(6px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        /* Glass Panel */
+        .glass-panel {
+            background: var(--bg-surface);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border: 1px solid var(--border-subtle);
+            border-radius: var(--radius-lg);
+            padding: 24px;
+            margin-bottom: 24px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+        }
+
+        .panel-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 20px;
+            padding-bottom: 14px;
+            border-bottom: 1px solid var(--border-subtle);
+        }
+
+        .panel-title {
+            font-family: var(--font-display);
+            font-size: 17px;
+            font-weight: 700;
+            letter-spacing: -0.3px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        /* Topology Inspector Canvas / SVG */
+        .topology-wrapper {
+            position: relative;
+            width: 100%;
+            height: 420px;
+            background: radial-gradient(circle at center, rgba(30, 41, 59, 0.5) 0%, rgba(15, 23, 42, 0.9) 70%);
+            border-radius: var(--radius-md);
+            border: 1px solid var(--border-subtle);
+            overflow: hidden;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        svg.topology-svg {
+            width: 100%;
+            height: 100%;
+        }
+
+        .node-circle {
+            transition: var(--transition-smooth);
+            cursor: pointer;
+        }
+
+        .node-circle:hover {
+            filter: brightness(1.25);
+        }
+
+        .replication-line {
+            stroke: rgba(6, 182, 212, 0.3);
+            stroke-width: 2;
+            stroke-dasharray: 6 6;
+            animation: flow-replicate 1.5s linear infinite;
+        }
+
+        @keyframes flow-replicate {
+            to {
+                stroke-dashoffset: -24;
+            }
+        }
+
+        /* Tables & Lists */
+        .custom-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 13px;
+        }
+
+        .custom-table th {
+            text-align: left;
+            padding: 12px 16px;
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.8px;
+            color: var(--text-muted);
+            border-bottom: 1px solid var(--border-subtle);
+        }
+
+        .custom-table td {
+            padding: 14px 16px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+            color: var(--text-secondary);
+        }
+
+        .custom-table tr:hover td {
+            background: rgba(255, 255, 255, 0.02);
+            color: var(--text-primary);
+        }
+
+        .code-pill {
+            font-family: var(--font-mono);
+            font-size: 12px;
+            padding: 3px 8px;
+            background: rgba(15, 23, 42, 0.8);
+            border: 1px solid var(--border-subtle);
+            border-radius: 6px;
+            color: #38bdf8;
+        }
+
+        .op-badge {
+            font-family: var(--font-mono);
+            font-size: 10px;
+            font-weight: 700;
+            padding: 2px 7px;
+            border-radius: 4px;
+            text-transform: uppercase;
+        }
+
+        .op-badge.PUT { background: rgba(16, 185, 129, 0.15); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.3); }
+        .op-badge.CAS { background: rgba(139, 92, 246, 0.15); color: #a78bfa; border: 1px solid rgba(139, 92, 246, 0.3); }
+        .op-badge.DELETE { background: rgba(244, 63, 94, 0.15); color: #fb7185; border: 1px solid rgba(244, 63, 94, 0.3); }
+        .op-badge.OUTBOX { background: rgba(245, 158, 11, 0.15); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.3); }
+
+        /* Query Workbench */
+        .query-grid {
+            display: grid;
+            grid-template-columns: 360px 1fr;
+            gap: 20px;
+        }
+
+        .form-group {
+            margin-bottom: 14px;
+        }
+
+        .form-label {
+            display: block;
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--text-secondary);
+            margin-bottom: 6px;
+        }
+
+        .input-text, .input-select {
+            width: 100%;
+            background: var(--bg-surface-elevated);
+            color: var(--text-primary);
+            border: 1px solid var(--border-subtle);
+            padding: 10px 14px;
+            border-radius: 8px;
+            font-size: 13px;
+            font-family: var(--font-sans);
+            outline: none;
+            transition: var(--transition-smooth);
+        }
+
+        .input-text:focus, .input-select:focus {
+            border-color: var(--accent-emerald);
+            box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.15);
+        }
+
+        .json-viewer {
+            background: #05080f;
+            border: 1px solid var(--border-subtle);
+            border-radius: var(--radius-md);
+            padding: 16px;
+            font-family: var(--font-mono);
+            font-size: 12px;
+            color: #cbd5e1;
+            max-height: 380px;
+            overflow: auto;
+            white-space: pre-wrap;
+            line-height: 1.6;
+        }
+
+        /* Modal Dialog */
+        .modal-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.7);
+            backdrop-filter: blur(8px);
+            z-index: 100;
+            display: none;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .modal-overlay.active {
+            display: flex;
+        }
+
+        .modal-card {
+            background: #0f172a;
+            border: 1px solid var(--border-subtle);
+            border-radius: var(--radius-lg);
+            width: 100%;
+            max-width: 520px;
+            padding: 28px;
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.8);
+            animation: modalPop 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+
+        @keyframes modalPop {
+            from { opacity: 0; transform: scale(0.95); }
+            to { opacity: 1; transform: scale(1); }
+        }
+
+        /* Toast notifications */
+        .toast-container {
+            position: fixed;
+            bottom: 24px;
+            right: 24px;
+            z-index: 200;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .toast {
+            background: #1e293b;
+            color: #fff;
+            padding: 12px 20px;
+            border-radius: 8px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            font-size: 13px;
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.4);
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            animation: toastIn 0.3s ease;
+        }
+
+        @keyframes toastIn {
+            from { transform: translateX(100%); opacity: 0; }
+            to { transform: translateX(0); opacity: 1; }
+        }
+
+        .accelerator-badge {
+            background: linear-gradient(135deg, rgba(16, 185, 129, 0.2) 0%, rgba(6, 182, 212, 0.2) 100%);
+            border: 1px solid rgba(16, 185, 129, 0.4);
+            color: #34d399;
+            font-size: 11px;
+            font-weight: 700;
+            padding: 3px 8px;
+            border-radius: 6px;
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+        }
+    </style>
+</head>
+<body>
+
+    <!-- Header -->
+    <header>
+        <div class="brand-container">
+            <div class="brand-logo">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#ffffff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                    <polygon points="12 2 2 7 12 12 22 7 12 2"></polygon>
+                    <polyline points="2 17 12 22 22 17"></polyline>
+                    <polyline points="2 12 12 17 22 12"></polyline>
+                </svg>
+            </div>
+            <div class="brand-text">
+                <h1>Raftline</h1>
+                <span>Cluster Topology & Control Plane</span>
+            </div>
+        </div>
+
+        <div class="header-actions">
+            <div id="leaderPill" class="pill-badge leader">
+                <span class="status-dot"></span>
+                <span id="leaderStatusText">CONNECTING...</span>
+            </div>
+            <div id="leasePill" class="pill-badge" style="color: var(--accent-cyan); border-color: rgba(6,182,212,0.3); background: rgba(6,182,212,0.08);">
+                <span>⚡ ZERO-RPC LEASE</span>
+            </div>
+            <select id="refreshRateSelect" class="select-custom" onchange="setRefreshRate(this.value)">
+                <option value="1000">Poll: 1s</option>
+                <option value="2000" selected>Poll: 2s</option>
+                <option value="5000">Poll: 5s</option>
+                <option value="0">Poll: Paused</option>
+            </select>
+            <button class="btn-action btn-primary" onclick="openMutationModal()">+ Fast Mutate</button>
+        </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="dashboard-container">
+
+        <!-- Stat Grid -->
+        <section class="stat-grid">
+            <div class="stat-card">
+                <div class="stat-title">Consensus Term</div>
+                <div class="stat-value" id="termVal">-</div>
+                <div class="stat-meta">Elections witnessed: <span id="electionsCount" style="color:var(--text-primary);font-weight:600;">-</span></div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-title">Commit / Applied Index</div>
+                <div class="stat-value" id="commitVal">- / -</div>
+                <div class="stat-meta">Disk WAL Index: <span id="walIndexVal" style="color:var(--text-primary);font-weight:600;">-</span></div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-title">Cluster Quorum</div>
+                <div class="stat-value" id="quorumVal">- / -</div>
+                <div class="stat-meta">Majority Threshold: <span id="quorumReqVal" style="color:var(--text-primary);font-weight:600;">-</span></div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-title">Secondary Indexes</div>
+                <div class="stat-value" id="indexesCountVal">-</div>
+                <div class="stat-meta">Accelerated queries active</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-title">Agent Locks & Fences</div>
+                <div class="stat-value" id="locksCountVal">-</div>
+                <div class="stat-meta">Split-brain proof tokens</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-title">Webhooks & DLQ</div>
+                <div class="stat-value" id="webhookCountVal">-</div>
+                <div class="stat-meta">DLQ Backlog: <span id="dlqCountVal" style="color:var(--accent-rose);font-weight:600;">0</span></div>
+            </div>
+        </section>
+
+        <!-- Tabs Navigation -->
+        <nav class="tabs-nav">
+            <button class="tab-btn active" onclick="switchTab('topology')">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="5" r="3"/><circle cx="5" cy="19" r="3"/><circle cx="19" cy="19" r="3"/><line x1="12" y1="8" x2="5" y2="16"/><line x1="12" y1="8" x2="19" y2="16"/></svg>
+                Topology & Interconnects
+            </button>
+            <button class="tab-btn" onclick="switchTab('query')">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
+                Secondary Indexes & Query Console
+            </button>
+            <button class="tab-btn" onclick="switchTab('cdc')">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+                Live CDC & Outbox Stream
+            </button>
+            <button class="tab-btn" onclick="switchTab('locks')">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+                Agent Locks & Fencing
+            </button>
+            <button class="tab-btn" onclick="switchTab('webhooks')">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+                Webhooks & DLQ Hub
+            </button>
+        </nav>
+
+        <!-- Tab 1: Topology Inspector -->
+        <div id="tab-topology" class="tab-pane active">
+            <div class="glass-panel">
+                <div class="panel-header">
+                    <div class="panel-title">
+                        <span>Cluster Consensus Topology</span>
+                        <span id="topologySubTitle" style="font-size:12px;font-weight:400;color:var(--text-muted);">Real-time heartbeat & replication links</span>
+                    </div>
+                    <div style="font-size:12px;color:var(--text-secondary);">
+                        Local Node: <strong id="localNodeIdLabel" style="color:#38bdf8;">-</strong>
+                    </div>
+                </div>
+
+                <div class="topology-wrapper">
+                    <svg id="topologySvg" class="topology-svg"></svg>
+                </div>
+            </div>
+
+            <!-- Nodes Table -->
+            <div class="glass-panel">
+                <div class="panel-header">
+                    <div class="panel-title">Node Telemetry & Replicas</div>
+                </div>
+                <table class="custom-table">
+                    <thead>
+                        <tr>
+                            <th>Node ID</th>
+                            <th>Role</th>
+                            <th>Term</th>
+                            <th>Commit Index</th>
+                            <th>Last Applied</th>
+                            <th>Disk WAL Index</th>
+                            <th>Zero-RPC Lease</th>
+                            <th>HTTP Address</th>
+                        </tr>
+                    </thead>
+                    <tbody id="nodesTableBody">
+                        <tr><td colspan="8" style="text-align:center;">Loading cluster nodes...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Tab 2: Secondary Indexes & Query Workbench -->
+        <div id="tab-query" class="tab-pane">
+            <div class="glass-panel">
+                <div class="panel-header">
+                    <div class="panel-title">Active Secondary Indexes</div>
+                    <button class="btn-action btn-primary" onclick="openCreateIndexModal()">+ Create Secondary Index</button>
+                </div>
+                <table class="custom-table">
+                    <thead>
+                        <tr>
+                            <th>Index Name</th>
+                            <th>Key Prefix</th>
+                            <th>Indexed Field</th>
+                            <th>Field Type</th>
+                            <th>Indexed Documents</th>
+                            <th>Unique Values</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="indexesTableBody">
+                        <tr><td colspan="7" style="text-align:center;">No secondary indexes registered.</td></tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <div class="glass-panel">
+                <div class="panel-header">
+                    <div class="panel-title">Document Query Workbench</div>
+                    <div id="queryMetaBadge"></div>
+                </div>
+                <div class="query-grid">
+                    <div style="background:var(--bg-surface-elevated);padding:18px;border-radius:var(--radius-md);border:1px solid var(--border-subtle);">
+                        <div class="form-group">
+                            <label class="form-label">Key Prefix</label>
+                            <input type="text" id="queryPrefixInput" class="input-text" value="order:" placeholder="e.g. order:, agent:">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Field Name (supports nested dot-notation)</label>
+                            <input type="text" id="queryFieldInput" class="input-text" value="status" placeholder="e.g. status, customer.tier, amount">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Operator</label>
+                            <select id="queryOpSelect" class="input-select">
+                                <option value="EQ">EQ (Equals ==)</option>
+                                <option value="NEQ">NEQ (Not Equals !=)</option>
+                                <option value="GT">GT (Greater &gt;)</option>
+                                <option value="GTE">GTE (Greater or Equal &gt;=)</option>
+                                <option value="LT">LT (Less &lt;)</option>
+                                <option value="LTE">LTE (Less or Equal &lt;=)</option>
+                                <option value="PREFIX">PREFIX (Starts With)</option>
+                                <option value="CONTAINS">CONTAINS (Substring Match)</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Value</label>
+                            <input type="text" id="queryValInput" class="input-text" value="PAID" placeholder="Value to match">
+                        </div>
+                        <button class="btn-action btn-primary" style="width:100%;margin-top:8px;" onclick="executeDocumentQuery()">Run Query</button>
+                    </div>
+
+                    <div>
+                        <div class="form-label" style="margin-bottom:8px;display:flex;justify-content:space-between;">
+                            <span>Matching Documents</span>
+                            <span id="queryStatsLabel" style="color:var(--text-muted);font-size:11px;"></span>
+                        </div>
+                        <div id="queryResultViewer" class="json-viewer">// Results will appear here...</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Tab 3: Live CDC & Outbox Stream -->
+        <div id="tab-cdc" class="tab-pane">
+            <div class="glass-panel">
+                <div class="panel-header">
+                    <div class="panel-title">Committed State Transitions & Transactional Outbox</div>
+                    <span style="font-size:12px;color:var(--text-muted);">Deterministic, consensus-ordered ring buffer</span>
+                </div>
+                <table class="custom-table">
+                    <thead>
+                        <tr>
+                            <th>Event ID</th>
+                            <th>Log Index</th>
+                            <th>Term</th>
+                            <th>Operation</th>
+                            <th>Key</th>
+                            <th>Version</th>
+                            <th>Payload Preview</th>
+                            <th>Timestamp</th>
+                        </tr>
+                    </thead>
+                    <tbody id="cdcTableBody">
+                        <tr><td colspan="8" style="text-align:center;">Listening for committed mutations...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Tab 4: Agent Locks -->
+        <div id="tab-locks" class="tab-pane">
+            <div class="glass-panel">
+                <div class="panel-header">
+                    <div class="panel-title">Distributed Multi-Agent Fencing Tokens</div>
+                    <span style="font-size:12px;color:var(--text-muted);">Monotonic token sequence guarding tool execution</span>
+                </div>
+                <table class="custom-table">
+                    <thead>
+                        <tr>
+                            <th>Resource</th>
+                            <th>Owner Agent ID</th>
+                            <th>Fencing Token</th>
+                            <th>Acquired At</th>
+                            <th>Lease Expiration</th>
+                            <th>Status</th>
+                        </tr>
+                    </thead>
+                    <tbody id="locksTableBody">
+                        <tr><td colspan="6" style="text-align:center;">No active agent locks held.</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Tab 5: Webhooks & DLQ -->
+        <div id="tab-webhooks" class="tab-pane">
+            <div class="glass-panel">
+                <div class="panel-header">
+                    <div class="panel-title">Registered External Webhook Sinks</div>
+                </div>
+                <table class="custom-table">
+                    <thead>
+                        <tr>
+                            <th>Subscription ID</th>
+                            <th>Target URL</th>
+                            <th>Prefix Filter</th>
+                            <th>HMAC Secret</th>
+                            <th>Max Retries</th>
+                            <th>Delivered</th>
+                            <th>Failed</th>
+                        </tr>
+                    </thead>
+                    <tbody id="webhooksTableBody">
+                        <tr><td colspan="7" style="text-align:center;">No external webhook sinks registered.</td></tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <div class="glass-panel">
+                <div class="panel-header">
+                    <div class="panel-title">Dead-Letter Queue (DLQ)</div>
+                    <button class="btn-action" style="color:var(--accent-rose);border-color:rgba(244,63,94,0.3);" onclick="clearDlq()">Clear DLQ</button>
+                </div>
+                <div id="dlqContainer" style="font-size:13px;color:var(--text-secondary);">
+                    Loading DLQ events...
+                </div>
+            </div>
+        </div>
+
+    </main>
+
+    <!-- Modal: Fast Mutate -->
+    <div id="mutationModal" class="modal-overlay">
+        <div class="modal-card">
+            <h2 style="font-family:var(--font-display);font-size:18px;margin-bottom:16px;">Fast Write / Replicate Command</h2>
+            <div class="form-group">
+                <label class="form-label">Key</label>
+                <input type="text" id="mutateKeyInput" class="input-text" value="order:test-1" placeholder="e.g. order:101">
+            </div>
+            <div class="form-group">
+                <label class="form-label">JSON Document / Value</label>
+                <textarea id="mutateValInput" class="input-text" rows="4" style="font-family:var(--font-mono);">{ "status": "PAID", "amount": 350.0, "customer": { "tier": "GOLD" } }</textarea>
+            </div>
+            <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:20px;">
+                <button class="btn-action" onclick="closeMutationModal()">Cancel</button>
+                <button class="btn-action btn-primary" onclick="submitMutation()">Submit Consensus PUT</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal: Create Index -->
+    <div id="createIndexModal" class="modal-overlay">
+        <div class="modal-card">
+            <h2 style="font-family:var(--font-display);font-size:18px;margin-bottom:16px;">Create Secondary Index</h2>
+            <div class="form-group">
+                <label class="form-label">Index Name</label>
+                <input type="text" id="idxNameInput" class="input-text" placeholder="e.g. idx_order_status">
+            </div>
+            <div class="form-group">
+                <label class="form-label">Key Prefix</label>
+                <input type="text" id="idxPrefixInput" class="input-text" value="order:" placeholder="e.g. order:">
+            </div>
+            <div class="form-group">
+                <label class="form-label">JSON Field (supports dot-notation)</label>
+                <input type="text" id="idxFieldInput" class="input-text" placeholder="e.g. status or customer.tier">
+            </div>
+            <div class="form-group">
+                <label class="form-label">Field Type</label>
+                <select id="idxTypeSelect" class="input-select">
+                    <option value="STRING">STRING</option>
+                    <option value="NUMBER">NUMBER</option>
+                    <option value="BOOLEAN">BOOLEAN</option>
+                </select>
+            </div>
+            <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:20px;">
+                <button class="btn-action" onclick="closeCreateIndexModal()">Cancel</button>
+                <button class="btn-action btn-primary" onclick="submitCreateIndex()">Create & Backfill</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast Notifications -->
+    <div id="toastContainer" class="toast-container"></div>
+
+    <script>
+        let pollTimer = null;
+        let pollIntervalMs = 2000;
+        let currentOverview = null;
+
+        document.addEventListener('DOMContentLoaded', () => {
+            fetchOverview();
+            startPolling();
+        });
+
+        function setRefreshRate(ms) {
+            pollIntervalMs = parseInt(ms);
+            startPolling();
+        }
+
+        function startPolling() {
+            if (pollTimer) clearInterval(pollTimer);
+            if (pollIntervalMs > 0) {
+                pollTimer = setInterval(fetchOverview, pollIntervalMs);
+            }
+        }
+
+        function switchTab(tabId) {
+            document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+            document.querySelectorAll('.tab-pane').forEach(pane => pane.classList.remove('active'));
+
+            const targetPane = document.getElementById('tab-' + tabId);
+            if (targetPane) targetPane.classList.add('active');
+
+            event.currentTarget.classList.add('active');
+            if (tabId === 'topology') renderTopology();
+        }
+
+        async function fetchOverview() {
+            try {
+                const res = await fetch('/v1/cluster/overview');
+                if (!res.ok) throw new Error('Status: ' + res.status);
+                const data = await res.json();
+                currentOverview = data;
+                updateDashboard(data);
+            } catch (err) {
+                document.getElementById('leaderStatusText').textContent = 'UNREACHABLE';
+                document.getElementById('leaderPill').className = 'pill-badge';
+                document.getElementById('leaderPill').style.borderColor = 'rgba(244,63,94,0.4)';
+                document.getElementById('leaderPill').style.color = '#fb7185';
+            }
+        }
+
+        function updateDashboard(data) {
+            const node = data.node || {};
+
+            // Header badges
+            const isLeader = node.role === 'LEADER';
+            const leaderPill = document.getElementById('leaderPill');
+            leaderPill.className = 'pill-badge ' + (isLeader ? 'leader' : 'follower');
+            document.getElementById('leaderStatusText').textContent = node.role + ' (' + node.nodeId + ')';
+
+            const leasePill = document.getElementById('leasePill');
+            leasePill.style.display = node.leaderLeaseValid ? 'inline-flex' : 'none';
+
+            // Stat Cards
+            document.getElementById('termVal').textContent = node.term ?? '-';
+            document.getElementById('electionsCount').textContent = node.electionCount ?? 0;
+
+            document.getElementById('commitVal').textContent = (node.commitIndex ?? 0) + ' / ' + (node.lastApplied ?? 0);
+            document.getElementById('walIndexVal').textContent = node.lastLogIndex ?? 0;
+
+            document.getElementById('quorumVal').textContent = (node.clusterSize ?? 0) + ' nodes';
+            document.getElementById('quorumReqVal').textContent = (node.quorum ?? 0) + ' required';
+
+            const indexes = data.indexes || [];
+            document.getElementById('indexesCountVal').textContent = indexes.length;
+
+            const locks = data.activeLocks || [];
+            document.getElementById('locksCountVal').textContent = locks.length;
+
+            const webhooks = data.webhooks || [];
+            document.getElementById('webhookCountVal').textContent = webhooks.length;
+            document.getElementById('dlqCountVal').textContent = data.dlqCount ?? 0;
+
+            document.getElementById('localNodeIdLabel').textContent = node.nodeId;
+
+            // Render tables
+            renderNodesTable(node, data.peers || []);
+            renderIndexesTable(indexes);
+            renderCdcTable(data.recentEvents || []);
+            renderLocksTable(locks);
+            renderWebhooksTable(webhooks);
+            renderTopology();
+        }
+
+        function renderNodesTable(localNode, peers) {
+            const tbody = document.getElementById('nodesTableBody');
+            let html = '';
+
+            // Local node row
+            const isLocalLeader = localNode.role === 'LEADER';
+            html += `<tr>
+                <td><strong>${localNode.nodeId}</strong> <span style="font-size:10px;color:var(--text-muted);">(local)</span></td>
+                <td><span class="pill-badge ${isLocalLeader ? 'leader' : 'follower'}" style="padding:2px 8px;font-size:11px;">${localNode.role}</span></td>
+                <td>${localNode.term}</td>
+                <td>${localNode.commitIndex}</td>
+                <td>${localNode.lastApplied}</td>
+                <td>${localNode.lastLogIndex}</td>
+                <td>${localNode.leaderLeaseValid ? '✅ Active' : '❌ Inactive'}</td>
+                <td><span class="code-pill">http://localhost:${window.location.port || 80}</span></td>
+            </tr>`;
+
+            // Peer rows
+            for (const p of peers) {
+                html += `<tr>
+                    <td>${p.id}</td>
+                    <td><span class="pill-badge ${p.isLeader ? 'leader' : 'follower'}" style="padding:2px 8px;font-size:11px;">${p.isLeader ? 'LEADER' : 'FOLLOWER'}</span></td>
+                    <td>${localNode.term}</td>
+                    <td>-</td>
+                    <td>-</td>
+                    <td>-</td>
+                    <td>-</td>
+                    <td><span class="code-pill">http://localhost:${p.httpPort || '-'}</span></td>
+                </tr>`;
+            }
+            tbody.innerHTML = html;
+        }
+
+        function renderTopology() {
+            if (!currentOverview) return;
+            const svg = document.getElementById('topologySvg');
+            const node = currentOverview.node || {};
+            const peers = currentOverview.peers || [];
+
+            const allNodes = [
+                { id: node.nodeId, isLeader: node.role === 'LEADER', isLocal: true },
+                ...peers.map(p => ({ id: p.id, isLeader: p.isLeader, isLocal: false }))
+            ];
+
+            const width = svg.clientWidth || 800;
+            const height = 400;
+            const centerX = width / 2;
+            const centerY = height / 2;
+            const radius = Math.min(width, height) * 0.35;
+
+            let svgContent = '';
+
+            // Calculate coordinates
+            const coords = [];
+            const count = allNodes.length;
+            for (let i = 0; i < count; i++) {
+                const angle = (i * 2 * Math.PI / count) - (Math.PI / 2);
+                const x = centerX + radius * Math.cos(angle);
+                const y = centerY + radius * Math.sin(angle);
+                coords.push({ ...allNodes[i], x, y });
+            }
+
+            // Draw interconnect replication lines
+            for (let i = 0; i < coords.length; i++) {
+                for (let j = i + 1; j < coords.length; j++) {
+                    const n1 = coords[i];
+                    const n2 = coords[j];
+                    const isLeaderLink = n1.isLeader || n2.isLeader;
+                    svgContent += `<line x1="${n1.x}" y1="${n1.y}" x2="${n2.x}" y2="${n2.y}" class="replication-line" style="stroke:${isLeaderLink ? 'rgba(16,185,129,0.5)' : 'rgba(255,255,255,0.1)'}; stroke-width:${isLeaderLink ? 2.5 : 1.5};" />`;
+                }
+            }
+
+            // Draw Node Circles
+            for (const n of coords) {
+                const color = n.isLeader ? '#10b981' : '#06b6d4';
+                const glow = n.isLeader ? 'rgba(16,185,129,0.4)' : 'rgba(6,182,212,0.25)';
+
+                if (n.isLeader) {
+                    svgContent += `<circle cx="${n.x}" cy="${n.y}" r="38" fill="none" stroke="${color}" stroke-width="1.5" opacity="0.4">
+                        <animate attributeName="r" values="32;44;32" dur="3s" repeatCount="indefinite" />
+                        <animate attributeName="opacity" values="0.6;0.1;0.6" dur="3s" repeatCount="indefinite" />
+                    </circle>`;
+                }
+
+                svgContent += `
+                    <g class="node-circle" onclick="showToast('Inspecting ${n.id} (${n.isLeader ? 'LEADER' : 'FOLLOWER'})')">
+                        <circle cx="${n.x}" cy="${n.y}" r="28" fill="#0f172a" stroke="${color}" stroke-width="3" filter="drop-shadow(0 0 12px ${glow})" />
+                        <text x="${n.x}" y="${n.y - 4}" text-anchor="middle" fill="#f8fafc" font-size="12" font-family="Outfit" font-weight="700">${n.id}</text>
+                        <text x="${n.x}" y="${n.y + 11}" text-anchor="middle" fill="${color}" font-size="9" font-family="JetBrains Mono" font-weight="600">${n.isLeader ? 'LEADER' : 'FOLLOWER'}</text>
+                    </g>
+                `;
+            }
+
+            svg.innerHTML = svgContent;
+        }
+
+        function renderIndexesTable(indexes) {
+            const tbody = document.getElementById('indexesTableBody');
+            if (!indexes || indexes.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;">No secondary indexes registered.</td></tr>';
+                return;
+            }
+            let html = '';
+            for (const idx of indexes) {
+                html += `<tr>
+                    <td><strong>${idx.name}</strong></td>
+                    <td><span class="code-pill">${idx.keyPrefix || '(all)'}</span></td>
+                    <td><span class="code-pill" style="color:#a78bfa;">${idx.field}</span></td>
+                    <td><span class="pill-badge" style="font-size:11px;padding:2px 8px;">${idx.type}</span></td>
+                    <td><strong style="color:var(--accent-emerald);">${idx.indexedKeysCount ?? 0}</strong></td>
+                    <td>${idx.uniqueValuesCount ?? 0}</td>
+                    <td><button class="btn-action" style="padding:4px 10px;font-size:11px;color:var(--accent-rose);" onclick="dropIndex('${idx.name}')">Drop</button></td>
+                </tr>`;
+            }
+            tbody.innerHTML = html;
+        }
+
+        function renderCdcTable(events) {
+            const tbody = document.getElementById('cdcTableBody');
+            if (!events || events.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;">No CDC mutations recorded yet.</td></tr>';
+                return;
+            }
+            let html = '';
+            for (const ev of events) {
+                const preview = (ev.payload && ev.payload.length > 50) ? ev.payload.substring(0, 50) + '...' : (ev.payload || '');
+                html += `<tr>
+                    <td>${ev.eventId}</td>
+                    <td>${ev.logIndex}</td>
+                    <td>${ev.logTerm}</td>
+                    <td><span class="op-badge ${ev.operation}">${ev.operation}</span></td>
+                    <td><span class="code-pill">${ev.key}</span></td>
+                    <td>v${ev.version}</td>
+                    <td style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted);">${escapeHtml(preview)}</td>
+                    <td style="font-size:11px;">${new Date(ev.timestamp).toLocaleTimeString()}</td>
+                </tr>`;
+            }
+            tbody.innerHTML = html;
+        }
+
+        function renderLocksTable(locks) {
+            const tbody = document.getElementById('locksTableBody');
+            if (!locks || locks.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;">No active agent locks held.</td></tr>';
+                return;
+            }
+            let html = '';
+            for (const l of locks) {
+                const isExp = l.expired;
+                html += `<tr>
+                    <td><strong>${l.resource}</strong></td>
+                    <td><span class="code-pill" style="color:#38bdf8;">${l.ownerAgentId}</span></td>
+                    <td><span class="code-pill" style="color:#a78bfa;">token #${l.fencingToken}</span></td>
+                    <td>${new Date(l.acquiredAtEpochMs).toLocaleTimeString()}</td>
+                    <td>${new Date(l.expiresAtEpochMs).toLocaleTimeString()}</td>
+                    <td><span class="pill-badge" style="color:${isExp ? 'var(--accent-rose)' : 'var(--accent-emerald)'};font-size:11px;">${isExp ? 'EXPIRED' : 'ACTIVE LEASE'}</span></td>
+                </tr>`;
+            }
+            tbody.innerHTML = html;
+        }
+
+        function renderWebhooksTable(webhooks) {
+            const tbody = document.getElementById('webhooksTableBody');
+            if (!webhooks || webhooks.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;">No external webhook sinks registered.</td></tr>';
+                return;
+            }
+            let html = '';
+            for (const w of webhooks) {
+                html += `<tr>
+                    <td><strong>${w.id}</strong></td>
+                    <td><span class="code-pill">${w.targetUrl}</span></td>
+                    <td><span class="code-pill">${w.prefixFilter || '(all)'}</span></td>
+                    <td>${w.hasSecret ? '🔒 HMAC-SHA256' : 'None'}</td>
+                    <td>${w.maxRetries}</td>
+                    <td><strong style="color:var(--accent-emerald);">${w.deliveredCount ?? 0}</strong></td>
+                    <td><strong style="color:var(--accent-rose);">${w.failedCount ?? 0}</strong></td>
+                </tr>`;
+            }
+            tbody.innerHTML = html;
+        }
+
+        async function executeDocumentQuery() {
+            const prefix = document.getElementById('queryPrefixInput').value;
+            const field = document.getElementById('queryFieldInput').value;
+            const op = document.getElementById('queryOpSelect').value;
+            const rawVal = document.getElementById('queryValInput').value;
+
+            let val = rawVal;
+            if (!isNaN(rawVal) && rawVal.trim() !== '') {
+                val = Number(rawVal);
+            } else if (rawVal === 'true' || rawVal === 'false') {
+                val = rawVal === 'true';
+            }
+
+            const body = {
+                prefix: prefix,
+                filter: { field: field, op: op, value: val },
+                includeValues: true
+            };
+
+            const viewer = document.getElementById('queryResultViewer');
+            const metaBadge = document.getElementById('queryMetaBadge');
+            viewer.textContent = 'Executing query...';
+
+            try {
+                const res = await fetch('/v1/query', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body)
+                });
+                const result = await res.json();
+                viewer.textContent = JSON.stringify(result.results || [], null, 2);
+
+                if (result.usedIndex) {
+                    metaBadge.innerHTML = `<span class="accelerator-badge">⚡ INDEX ACCELERATED (${result.executionTimeMs}ms)</span>`;
+                } else {
+                    metaBadge.innerHTML = `<span class="pill-badge" style="font-size:11px;">Scanned prefix (${result.executionTimeMs}ms)</span>`;
+                }
+
+                document.getElementById('queryStatsLabel').textContent = `Matched ${result.totalMatched ?? 0} records`;
+                showToast(`Query completed: matched ${result.totalMatched ?? 0} records (${result.usedIndex ? 'Indexed' : 'Scanned'})`);
+            } catch (err) {
+                viewer.textContent = 'Error executing query: ' + err.message;
+            }
+        }
+
+        async function dropIndex(name) {
+            if (!confirm(`Are you sure you want to drop secondary index '${name}'?`)) return;
+            try {
+                const res = await fetch('/v1/index?name=' + encodeURIComponent(name), { method: 'DELETE' });
+                if (res.ok) {
+                    showToast(`Index '${name}' dropped successfully.`);
+                    fetchOverview();
+                } else {
+                    showToast('Failed to drop index', true);
+                }
+            } catch (e) {
+                showToast('Error dropping index: ' + e.message, true);
+            }
+        }
+
+        async function submitCreateIndex() {
+            const name = document.getElementById('idxNameInput').value;
+            const prefix = document.getElementById('idxPrefixInput').value;
+            const field = document.getElementById('idxFieldInput').value;
+            const type = document.getElementById('idxTypeSelect').value;
+
+            if (!name || !field) {
+                alert('Index Name and Field Name are required');
+                return;
+            }
+
+            try {
+                const res = await fetch('/v1/index', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name, prefix, field, type })
+                });
+                if (res.ok) {
+                    showToast(`Index '${name}' registered and backfilled!`);
+                    closeCreateIndexModal();
+                    fetchOverview();
+                } else {
+                    const err = await res.json();
+                    showToast('Failed to create index: ' + (err.error || res.status), true);
+                }
+            } catch (e) {
+                showToast('Error: ' + e.message, true);
+            }
+        }
+
+        async function submitMutation() {
+            const key = document.getElementById('mutateKeyInput').value;
+            const val = document.getElementById('mutateValInput').value;
+
+            if (!key) return;
+
+            try {
+                const res = await fetch('/v1/kv/' + encodeURIComponent(key), {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: val
+                });
+                if (res.ok || res.status === 307) {
+                    showToast(`Consensus mutation applied for '${key}'!`);
+                    closeMutationModal();
+                    fetchOverview();
+                } else {
+                    const err = await res.json();
+                    showToast('Mutation failed: ' + (err.error || res.status), true);
+                }
+            } catch (e) {
+                showToast('Error: ' + e.message, true);
+            }
+        }
+
+        async function clearDlq() {
+            try {
+                const res = await fetch('/v1/cdc/dlq', { method: 'DELETE' });
+                if (res.ok) {
+                    showToast('Dead-letter queue purged.');
+                    fetchOverview();
+                }
+            } catch (e) {
+                showToast('Error clearing DLQ: ' + e.message, true);
+            }
+        }
+
+        function openMutationModal() { document.getElementById('mutationModal').classList.add('active'); }
+        function closeMutationModal() { document.getElementById('mutationModal').classList.remove('active'); }
+
+        function openCreateIndexModal() { document.getElementById('createIndexModal').classList.add('active'); }
+        function closeCreateIndexModal() { document.getElementById('createIndexModal').classList.remove('active'); }
+
+        function showToast(msg, isError = false) {
+            const container = document.getElementById('toastContainer');
+            const toast = document.createElement('div');
+            toast.className = 'toast';
+            if (isError) toast.style.borderColor = 'rgba(244,63,94,0.4)';
+            toast.innerHTML = `<span>${isError ? '⚠️' : '✨'}</span><span>${escapeHtml(msg)}</span>`;
+            container.appendChild(toast);
+            setTimeout(() => {
+                toast.style.opacity = '0';
+                toast.style.transform = 'translateY(10px)';
+                setTimeout(() => toast.remove(), 300);
+            }, 3000);
+        }
+
+        function escapeHtml(text) {
+            if (!text) return '';
+            return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+        }
+    </script>
+</body>
+</html>
