@@ -38,6 +38,7 @@ public class RaftHttpServer implements Closeable {
     private final RaftNode raftNode;
     private final io.raftline.core.shard.MultiRaftManager multiRaftManager;
     private final io.raftline.core.shard.txn.TwoPhaseCommitCoordinator txnCoordinator;
+    private final io.raftline.core.agent.AgentLockManager agentLockManager;
     private final Map<String, Integer> peerHttpPorts;
     private final String apiKey;
     private final HttpServer server;
@@ -55,6 +56,7 @@ public class RaftHttpServer implements Closeable {
         this.raftNode = raftNode;
         this.multiRaftManager = multiRaftManager;
         this.txnCoordinator = (multiRaftManager != null) ? new io.raftline.core.shard.txn.TwoPhaseCommitCoordinator(multiRaftManager) : null;
+        this.agentLockManager = (raftNode != null) ? new io.raftline.core.agent.AgentLockManager(raftNode) : null;
         this.peerHttpPorts = peerHttpPorts != null ? peerHttpPorts : Map.of();
         this.apiKey = (apiKey != null && !apiKey.isBlank()) ? apiKey.trim() : null;
 
@@ -94,6 +96,7 @@ public class RaftHttpServer implements Closeable {
         server.createContext("/v1/health/ready", new ReadinessHandler());
         server.createContext("/v1/metrics", new MetricsHandler());
         server.createContext("/v1/admin/snapshot", new AdminSnapshotHandler());
+        server.createContext("/v1/agent/lock", new AgentLockHandler());
     }
 
     private class TxnHandler implements HttpHandler {
@@ -136,6 +139,152 @@ public class RaftHttpServer implements Closeable {
             } catch (Exception e) {
                 log.error("Failed to execute 2PC transaction", e);
                 sendJson(exchange, 500, Map.of("error", e.getMessage()));
+            }
+        }
+    }
+
+    private class AgentLockHandler implements HttpHandler {
+        @Override
+        public void handle(HttpExchange exchange) throws IOException {
+            if (!isAuthorized(exchange)) {
+                sendJson(exchange, 401, Map.of("error", "Unauthorized: Valid API Key required"));
+                return;
+            }
+
+            if (agentLockManager == null) {
+                sendJson(exchange, 501, Map.of("error", "AgentLockManager is not enabled on this node"));
+                return;
+            }
+
+            String path = exchange.getRequestURI().getPath();
+            String method = exchange.getRequestMethod().toUpperCase();
+
+            try {
+                if ("GET".equals(method)) {
+                    Map<String, String> query = parseQueryParams(exchange.getRequestURI().getQuery());
+                    String resource = query.get("resource");
+                    if (resource == null || resource.isBlank()) {
+                        sendJson(exchange, 400, Map.of("error", "Query parameter 'resource' is required"));
+                        return;
+                    }
+
+                    var lockOpt = agentLockManager.getLockStatus(resource).get(5, TimeUnit.SECONDS);
+                    if (lockOpt.isPresent()) {
+                        var lock = lockOpt.get();
+                        sendJson(exchange, 200, Map.of(
+                                "status", "LOCKED",
+                                "resource", lock.getResource(),
+                                "ownerAgentId", lock.getOwnerAgentId(),
+                                "fencingToken", lock.getFencingToken(),
+                                "acquiredAtEpochMs", lock.getAcquiredAtEpochMs(),
+                                "expiresAtEpochMs", lock.getExpiresAtEpochMs(),
+                                "expired", lock.isExpired()
+                        ));
+                    } else {
+                        sendJson(exchange, 404, Map.of("status", "UNLOCKED", "resource", resource));
+                    }
+                    return;
+                }
+
+                if ("POST".equals(method)) {
+                    Map<String, Object> body = json.readValue(exchange.getRequestBody(), Map.class);
+                    String resource = (String) body.get("resource");
+                    String agentId = (String) body.get("agentId");
+
+                    if (resource == null || resource.isBlank() || agentId == null || agentId.isBlank()) {
+                        sendJson(exchange, 400, Map.of("error", "resource and agentId are required"));
+                        return;
+                    }
+
+                    if (path.endsWith("/acquire")) {
+                        long ttlMs = body.containsKey("ttlMs") ? ((Number) body.get("ttlMs")).longValue() : 10000L;
+                        var resultOpt = agentLockManager.acquireLock(resource, agentId, ttlMs).get(5, TimeUnit.SECONDS);
+                        if (resultOpt.isPresent()) {
+                            var lock = resultOpt.get();
+                            sendJson(exchange, 200, Map.of(
+                                    "status", "ACQUIRED",
+                                    "resource", lock.getResource(),
+                                    "ownerAgentId", lock.getOwnerAgentId(),
+                                    "fencingToken", lock.getFencingToken(),
+                                    "acquiredAtEpochMs", lock.getAcquiredAtEpochMs(),
+                                    "expiresAtEpochMs", lock.getExpiresAtEpochMs()
+                            ));
+                        } else {
+                            sendJson(exchange, 409, Map.of(
+                                    "status", "LOCK_HELD",
+                                    "error", "Lock is currently held by another agent"
+                            ));
+                        }
+                        return;
+                    } else if (path.endsWith("/renew")) {
+                        if (!body.containsKey("fencingToken")) {
+                            sendJson(exchange, 400, Map.of("error", "fencingToken is required for lock renewal"));
+                            return;
+                        }
+                        long fencingToken = ((Number) body.get("fencingToken")).longValue();
+                        long extendTtlMs = body.containsKey("extendTtlMs") ? ((Number) body.get("extendTtlMs")).longValue() : 10000L;
+
+                        var renewedOpt = agentLockManager.renewLock(resource, agentId, fencingToken, extendTtlMs).get(5, TimeUnit.SECONDS);
+                        if (renewedOpt.isPresent()) {
+                            var lock = renewedOpt.get();
+                            sendJson(exchange, 200, Map.of(
+                                    "status", "RENEWED",
+                                    "resource", lock.getResource(),
+                                    "ownerAgentId", lock.getOwnerAgentId(),
+                                    "fencingToken", lock.getFencingToken(),
+                                    "expiresAtEpochMs", lock.getExpiresAtEpochMs()
+                            ));
+                        } else {
+                            sendJson(exchange, 403, Map.of(
+                                    "status", "RENEW_REJECTED",
+                                    "error", "Lock not found or fencing token mismatch"
+                            ));
+                        }
+                        return;
+                    } else if (path.endsWith("/release")) {
+                        if (!body.containsKey("fencingToken")) {
+                            sendJson(exchange, 400, Map.of("error", "fencingToken is required for lock release"));
+                            return;
+                        }
+                        long fencingToken = ((Number) body.get("fencingToken")).longValue();
+
+                        boolean released = agentLockManager.releaseLock(resource, agentId, fencingToken).get(5, TimeUnit.SECONDS);
+                        if (released) {
+                            sendJson(exchange, 200, Map.of(
+                                    "status", "RELEASED",
+                                    "resource", resource,
+                                    "fencingToken", fencingToken
+                            ));
+                        } else {
+                            sendJson(exchange, 403, Map.of(
+                                    "status", "RELEASE_REJECTED",
+                                    "error", "Cannot release lock: token mismatch or unauthorized agent"
+                            ));
+                        }
+                        return;
+                    }
+                }
+
+                sendJson(exchange, 405, Map.of("error", "Method not allowed for path: " + path));
+            } catch (Exception e) {
+                Throwable cause = (e instanceof ExecutionException) ? e.getCause() : e;
+                if (cause instanceof RuntimeException && cause.getCause() != null) {
+                    cause = cause.getCause();
+                }
+                if (cause instanceof ExecutionException && cause.getCause() != null) {
+                    cause = cause.getCause();
+                }
+                if (cause instanceof NotLeaderException nle) {
+                    Integer leaderPort = peerHttpPorts.get(nle.getLeaderHint());
+                    String redirectUrl = (leaderPort != null) ? "http://localhost:" + leaderPort + path + (exchange.getRequestURI().getQuery() != null ? "?" + exchange.getRequestURI().getQuery() : "") : null;
+                    if (redirectUrl != null) {
+                        exchange.getResponseHeaders().set("Location", redirectUrl);
+                    }
+                    sendJson(exchange, 307, Map.of("error", "Node is not the leader", "leaderHint", nle.getLeaderHint() != null ? nle.getLeaderHint() : "unknown", "redirectUrl", redirectUrl != null ? redirectUrl : ""));
+                } else {
+                    log.error("AgentLockHandler failure", e);
+                    sendJson(exchange, 500, Map.of("error", cause.getMessage() != null ? cause.getMessage() : e.getMessage()));
+                }
             }
         }
     }

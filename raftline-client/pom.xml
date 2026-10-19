@@ -15,6 +15,11 @@
 
     <dependencies>
         <dependency>
+            <groupId>io.raftline</groupId>
+            <artifactId>raftline-core</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
             <groupId>com.fasterxml.jackson.core</groupId>
             <artifactId>jackson-databind</artifactId>
         </dependency>

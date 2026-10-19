@@ -368,6 +368,146 @@ public class QuorixClient implements Closeable {
         return response.body();
     }
 
+    public io.raftline.core.agent.AgentLockInfo acquireAgentLock(String targetUrl, String resource, String agentId, long ttlMs) throws IOException, InterruptedException {
+        String base = (targetUrl != null && !targetUrl.isBlank()) ? targetUrl : (cachedLeaderUrl != null ? cachedLeaderUrl : seedUrls.get(0));
+        Map<String, Object> body = Map.of(
+                "resource", resource,
+                "agentId", agentId,
+                "ttlMs", ttlMs
+        );
+        byte[] payload = json.writeValueAsBytes(body);
+        HttpRequest request = newRequestBuilder(URI.create(base + "/v1/agent/lock/acquire"))
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofByteArray(payload))
+                .timeout(Duration.ofSeconds(5))
+                .build();
+        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+        if (response.statusCode() == 307) {
+            String redirectUrl = response.headers().firstValue("Location").orElse(null);
+            if (redirectUrl != null) {
+                cachedLeaderUrl = redirectUrl.substring(0, redirectUrl.indexOf("/v1/"));
+                request = newRequestBuilder(URI.create(redirectUrl))
+                        .header("Content-Type", "application/json")
+                        .POST(HttpRequest.BodyPublishers.ofByteArray(payload))
+                        .timeout(Duration.ofSeconds(5))
+                        .build();
+                response = httpClient.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+            }
+        }
+        if (response.statusCode() == 200) {
+            JsonNode tree = json.readTree(response.body());
+            return new io.raftline.core.agent.AgentLockInfo(
+                    tree.get("resource").asText(),
+                    tree.get("ownerAgentId").asText(),
+                    tree.get("fencingToken").asLong(),
+                    tree.get("acquiredAtEpochMs").asLong(),
+                    tree.get("expiresAtEpochMs").asLong()
+            );
+        }
+        return null;
+    }
+
+    public io.raftline.core.agent.AgentLockInfo renewAgentLock(String targetUrl, String resource, String agentId, long fencingToken, long extendTtlMs) throws IOException, InterruptedException {
+        String base = (targetUrl != null && !targetUrl.isBlank()) ? targetUrl : (cachedLeaderUrl != null ? cachedLeaderUrl : seedUrls.get(0));
+        Map<String, Object> body = Map.of(
+                "resource", resource,
+                "agentId", agentId,
+                "fencingToken", fencingToken,
+                "extendTtlMs", extendTtlMs
+        );
+        byte[] payload = json.writeValueAsBytes(body);
+        HttpRequest request = newRequestBuilder(URI.create(base + "/v1/agent/lock/renew"))
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofByteArray(payload))
+                .timeout(Duration.ofSeconds(5))
+                .build();
+        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+        if (response.statusCode() == 307) {
+            String redirectUrl = response.headers().firstValue("Location").orElse(null);
+            if (redirectUrl != null) {
+                cachedLeaderUrl = redirectUrl.substring(0, redirectUrl.indexOf("/v1/"));
+                request = newRequestBuilder(URI.create(redirectUrl))
+                        .header("Content-Type", "application/json")
+                        .POST(HttpRequest.BodyPublishers.ofByteArray(payload))
+                        .timeout(Duration.ofSeconds(5))
+                        .build();
+                response = httpClient.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+            }
+        }
+        if (response.statusCode() == 200) {
+            JsonNode tree = json.readTree(response.body());
+            return new io.raftline.core.agent.AgentLockInfo(
+                    tree.get("resource").asText(),
+                    tree.get("ownerAgentId").asText(),
+                    tree.get("fencingToken").asLong(),
+                    System.currentTimeMillis(),
+                    tree.get("expiresAtEpochMs").asLong()
+            );
+        }
+        return null;
+    }
+
+    public boolean releaseAgentLock(String targetUrl, String resource, String agentId, long fencingToken) throws IOException, InterruptedException {
+        String base = (targetUrl != null && !targetUrl.isBlank()) ? targetUrl : (cachedLeaderUrl != null ? cachedLeaderUrl : seedUrls.get(0));
+        Map<String, Object> body = Map.of(
+                "resource", resource,
+                "agentId", agentId,
+                "fencingToken", fencingToken
+        );
+        byte[] payload = json.writeValueAsBytes(body);
+        HttpRequest request = newRequestBuilder(URI.create(base + "/v1/agent/lock/release"))
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofByteArray(payload))
+                .timeout(Duration.ofSeconds(5))
+                .build();
+        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+        if (response.statusCode() == 307) {
+            String redirectUrl = response.headers().firstValue("Location").orElse(null);
+            if (redirectUrl != null) {
+                cachedLeaderUrl = redirectUrl.substring(0, redirectUrl.indexOf("/v1/"));
+                request = newRequestBuilder(URI.create(redirectUrl))
+                        .header("Content-Type", "application/json")
+                        .POST(HttpRequest.BodyPublishers.ofByteArray(payload))
+                        .timeout(Duration.ofSeconds(5))
+                        .build();
+                response = httpClient.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+            }
+        }
+        return response.statusCode() == 200;
+    }
+
+    public io.raftline.core.agent.AgentLockInfo getAgentLock(String targetUrl, String resource) throws IOException, InterruptedException {
+        String base = (targetUrl != null && !targetUrl.isBlank()) ? targetUrl : (cachedLeaderUrl != null ? cachedLeaderUrl : seedUrls.get(0));
+        String encodedResource = java.net.URLEncoder.encode(resource, StandardCharsets.UTF_8);
+        HttpRequest request = newRequestBuilder(URI.create(base + "/v1/agent/lock?resource=" + encodedResource))
+                .GET()
+                .timeout(Duration.ofSeconds(5))
+                .build();
+        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+        if (response.statusCode() == 307) {
+            String redirectUrl = response.headers().firstValue("Location").orElse(null);
+            if (redirectUrl != null) {
+                request = newRequestBuilder(URI.create(redirectUrl))
+                        .GET()
+                        .timeout(Duration.ofSeconds(5))
+                        .build();
+                response = httpClient.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+            }
+        }
+        if (response.statusCode() == 200) {
+            JsonNode tree = json.readTree(response.body());
+            return new io.raftline.core.agent.AgentLockInfo(
+                    tree.get("resource").asText(),
+                    tree.get("ownerAgentId").asText(),
+                    tree.get("fencingToken").asLong(),
+                    tree.get("acquiredAtEpochMs").asLong(),
+                    tree.get("expiresAtEpochMs").asLong()
+            );
+        }
+        log.warn("getAgentLock failed: status={}, body={}", response.statusCode(), response.body());
+        return null;
+    }
+
     public String getClientId() {
         return clientId;
     }
