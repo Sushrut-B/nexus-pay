@@ -1,5 +1,7 @@
 package io.raftline.api.redis;
 
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import io.raftline.core.NotLeaderException;
 import io.raftline.core.RaftNode;
 import io.raftline.core.shard.MultiRaftManager;
@@ -15,24 +17,17 @@ import java.io.IOException;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Map;
-import java.util.UUID;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.TimeoutException;
+import java.util.*;
+import java.util.concurrent.*;
 
 /**
  * High-performance TCP Server speaking Redis Wire Protocol (RESP).
- * Allows standard Redis clients (redis-cli, redis-py, Jedis, ioredis)
- * to interact directly with the Raftline consensus cluster.
+ * Supports core Strings, Hashes (HSET/HGET/HDEL/HGETALL/HLEN),
+ * Sets (SADD/SMEMBERS/SREM/SCARD/SISMEMBER), and Lists/Queues (LPUSH/RPUSH/LPOP/RPOP/LLEN/LRANGE).
  */
 public class RaftRedisServer implements Closeable {
     private static final Logger log = LoggerFactory.getLogger(RaftRedisServer.class);
+    private static final ObjectMapper json = new ObjectMapper();
 
     private final int port;
     private final RaftNode raftNode;
@@ -129,6 +124,7 @@ public class RaftRedisServer implements Closeable {
     private RespFrame executeCommand(String cmd, List<RespFrame> items, boolean authenticated) {
         try {
             switch (cmd) {
+                // Connection & Info Commands
                 case "PING" -> {
                     if (items.size() > 1) {
                         return RespFrame.BulkString.of(extractString(items.get(1)));
@@ -149,6 +145,8 @@ public class RaftRedisServer implements Closeable {
                     if (items.size() < 2) return new RespFrame.Error("wrong number of arguments for 'echo'");
                     return RespFrame.BulkString.of(extractString(items.get(1)));
                 }
+
+                // Core String Commands
                 case "SET" -> {
                     if (items.size() < 3) return new RespFrame.Error("wrong number of arguments for 'set' command");
                     String key = extractString(items.get(1));
@@ -174,7 +172,6 @@ public class RaftRedisServer implements Closeable {
                     if (items.size() < 2) return new RespFrame.Error("wrong number of arguments for 'get' command");
                     String key = extractString(items.get(1));
 
-                    // Check TTL
                     if (isExpired(key)) {
                         executeRaftWrite(Command.delete(key));
                         keyTtlMap.remove(key);
@@ -268,6 +265,200 @@ public class RaftRedisServer implements Closeable {
                     }
                     return new RespFrame.IntegerFrame(remainingSec);
                 }
+
+                // ==========================================
+                // Day 2: Redis Hashes (HSET, HGET, HDEL, HGETALL, HLEN)
+                // ==========================================
+                case "HSET" -> {
+                    if (items.size() < 4 || (items.size() - 2) % 2 != 0) {
+                        return new RespFrame.Error("wrong number of arguments for 'hset' command");
+                    }
+                    String key = extractString(items.get(1));
+                    Map<String, String> hash = readHash(key);
+                    int addedFields = 0;
+                    for (int i = 2; i < items.size(); i += 2) {
+                        String field = extractString(items.get(i));
+                        String value = extractString(items.get(i + 1));
+                        if (!hash.containsKey(field)) {
+                            addedFields++;
+                        }
+                        hash.put(field, value);
+                    }
+                    saveHash(key, hash);
+                    return new RespFrame.IntegerFrame(addedFields);
+                }
+                case "HGET" -> {
+                    if (items.size() < 3) return new RespFrame.Error("wrong number of arguments for 'hget' command");
+                    String key = extractString(items.get(1));
+                    String field = extractString(items.get(2));
+                    Map<String, String> hash = readHash(key);
+                    String val = hash.get(field);
+                    return (val == null) ? RespFrame.BulkString.NULL : RespFrame.BulkString.of(val);
+                }
+                case "HDEL" -> {
+                    if (items.size() < 3) return new RespFrame.Error("wrong number of arguments for 'hdel' command");
+                    String key = extractString(items.get(1));
+                    Map<String, String> hash = readHash(key);
+                    int removed = 0;
+                    for (int i = 2; i < items.size(); i++) {
+                        String field = extractString(items.get(i));
+                        if (hash.remove(field) != null) {
+                            removed++;
+                        }
+                    }
+                    if (removed > 0) {
+                        saveHash(key, hash);
+                    }
+                    return new RespFrame.IntegerFrame(removed);
+                }
+                case "HLEN" -> {
+                    if (items.size() < 2) return new RespFrame.Error("wrong number of arguments for 'hlen' command");
+                    String key = extractString(items.get(1));
+                    Map<String, String> hash = readHash(key);
+                    return new RespFrame.IntegerFrame(hash.size());
+                }
+                case "HGETALL" -> {
+                    if (items.size() < 2) return new RespFrame.Error("wrong number of arguments for 'hgetall' command");
+                    String key = extractString(items.get(1));
+                    Map<String, String> hash = readHash(key);
+                    List<RespFrame> elements = new ArrayList<>(hash.size() * 2);
+                    for (Map.Entry<String, String> entry : hash.entrySet()) {
+                        elements.add(RespFrame.BulkString.of(entry.getKey()));
+                        elements.add(RespFrame.BulkString.of(entry.getValue()));
+                    }
+                    return new RespFrame.Array(elements);
+                }
+
+                // ==========================================
+                // Day 2: Redis Sets (SADD, SMEMBERS, SREM, SCARD, SISMEMBER)
+                // ==========================================
+                case "SADD" -> {
+                    if (items.size() < 3) return new RespFrame.Error("wrong number of arguments for 'sadd' command");
+                    String key = extractString(items.get(1));
+                    Set<String> set = readSet(key);
+                    int added = 0;
+                    for (int i = 2; i < items.size(); i++) {
+                        String member = extractString(items.get(i));
+                        if (set.add(member)) {
+                            added++;
+                        }
+                    }
+                    if (added > 0) {
+                        saveSet(key, set);
+                    }
+                    return new RespFrame.IntegerFrame(added);
+                }
+                case "SMEMBERS" -> {
+                    if (items.size() < 2) return new RespFrame.Error("wrong number of arguments for 'smembers' command");
+                    String key = extractString(items.get(1));
+                    Set<String> set = readSet(key);
+                    List<RespFrame> elements = new ArrayList<>(set.size());
+                    for (String member : set) {
+                        elements.add(RespFrame.BulkString.of(member));
+                    }
+                    return new RespFrame.Array(elements);
+                }
+                case "SREM" -> {
+                    if (items.size() < 3) return new RespFrame.Error("wrong number of arguments for 'srem' command");
+                    String key = extractString(items.get(1));
+                    Set<String> set = readSet(key);
+                    int removed = 0;
+                    for (int i = 2; i < items.size(); i++) {
+                        String member = extractString(items.get(i));
+                        if (set.remove(member)) {
+                            removed++;
+                        }
+                    }
+                    if (removed > 0) {
+                        saveSet(key, set);
+                    }
+                    return new RespFrame.IntegerFrame(removed);
+                }
+                case "SCARD" -> {
+                    if (items.size() < 2) return new RespFrame.Error("wrong number of arguments for 'scard' command");
+                    String key = extractString(items.get(1));
+                    Set<String> set = readSet(key);
+                    return new RespFrame.IntegerFrame(set.size());
+                }
+                case "SISMEMBER" -> {
+                    if (items.size() < 3) return new RespFrame.Error("wrong number of arguments for 'sismember' command");
+                    String key = extractString(items.get(1));
+                    String member = extractString(items.get(2));
+                    Set<String> set = readSet(key);
+                    return new RespFrame.IntegerFrame(set.contains(member) ? 1 : 0);
+                }
+
+                // ==========================================
+                // Day 2: Redis Atomic Lists / Queues (LPUSH, RPUSH, LPOP, RPOP, LLEN, LRANGE)
+                // ==========================================
+                case "LPUSH" -> {
+                    if (items.size() < 3) return new RespFrame.Error("wrong number of arguments for 'lpush' command");
+                    String key = extractString(items.get(1));
+                    LinkedList<String> list = readList(key);
+                    for (int i = 2; i < items.size(); i++) {
+                        list.addFirst(extractString(items.get(i)));
+                    }
+                    saveList(key, list);
+                    return new RespFrame.IntegerFrame(list.size());
+                }
+                case "RPUSH" -> {
+                    if (items.size() < 3) return new RespFrame.Error("wrong number of arguments for 'rpush' command");
+                    String key = extractString(items.get(1));
+                    LinkedList<String> list = readList(key);
+                    for (int i = 2; i < items.size(); i++) {
+                        list.addLast(extractString(items.get(i)));
+                    }
+                    saveList(key, list);
+                    return new RespFrame.IntegerFrame(list.size());
+                }
+                case "LPOP" -> {
+                    if (items.size() < 2) return new RespFrame.Error("wrong number of arguments for 'lpop' command");
+                    String key = extractString(items.get(1));
+                    LinkedList<String> list = readList(key);
+                    if (list.isEmpty()) {
+                        return RespFrame.BulkString.NULL;
+                    }
+                    String popped = list.removeFirst();
+                    saveList(key, list);
+                    return RespFrame.BulkString.of(popped);
+                }
+                case "RPOP" -> {
+                    if (items.size() < 2) return new RespFrame.Error("wrong number of arguments for 'rpop' command");
+                    String key = extractString(items.get(1));
+                    LinkedList<String> list = readList(key);
+                    if (list.isEmpty()) {
+                        return RespFrame.BulkString.NULL;
+                    }
+                    String popped = list.removeLast();
+                    saveList(key, list);
+                    return RespFrame.BulkString.of(popped);
+                }
+                case "LLEN" -> {
+                    if (items.size() < 2) return new RespFrame.Error("wrong number of arguments for 'llen' command");
+                    String key = extractString(items.get(1));
+                    LinkedList<String> list = readList(key);
+                    return new RespFrame.IntegerFrame(list.size());
+                }
+                case "LRANGE" -> {
+                    if (items.size() < 4) return new RespFrame.Error("wrong number of arguments for 'lrange' command");
+                    String key = extractString(items.get(1));
+                    int start = Integer.parseInt(extractString(items.get(2)));
+                    int stop = Integer.parseInt(extractString(items.get(3)));
+                    LinkedList<String> list = readList(key);
+                    int size = list.size();
+                    if (start < 0) start = Math.max(0, size + start);
+                    if (stop < 0) stop = size + stop;
+                    if (start >= size || start > stop) {
+                        return RespFrame.Array.EMPTY;
+                    }
+                    stop = Math.min(stop, size - 1);
+                    List<RespFrame> elements = new ArrayList<>(stop - start + 1);
+                    for (int i = start; i <= stop; i++) {
+                        elements.add(RespFrame.BulkString.of(list.get(i)));
+                    }
+                    return new RespFrame.Array(elements);
+                }
+
                 case "INFO" -> {
                     String roleStr = (raftNode != null && raftNode.getRole() != null) ? raftNode.getRole().name().toLowerCase() : "standalone";
                     String info = "# Server\r\nredis_version:7.2.0-raftline\r\n"
@@ -295,6 +486,54 @@ public class RaftRedisServer implements Closeable {
             log.error("Failed executing Redis command {}", cmd, e);
             return new RespFrame.Error("ERR " + e.getMessage());
         }
+    }
+
+    // Helper functions for Hashes
+    private Map<String, String> readHash(String key) {
+        byte[] raw = executeRaftRead(key);
+        if (raw == null || raw.length == 0) return new LinkedHashMap<>();
+        try {
+            return json.readValue(raw, new TypeReference<LinkedHashMap<String, String>>() {});
+        } catch (Exception e) {
+            return new LinkedHashMap<>();
+        }
+    }
+
+    private void saveHash(String key, Map<String, String> hash) throws Exception {
+        byte[] raw = json.writeValueAsBytes(hash);
+        executeRaftWrite(Command.put(key, raw));
+    }
+
+    // Helper functions for Sets
+    private Set<String> readSet(String key) {
+        byte[] raw = executeRaftRead(key);
+        if (raw == null || raw.length == 0) return new LinkedHashSet<>();
+        try {
+            return json.readValue(raw, new TypeReference<LinkedHashSet<String>>() {});
+        } catch (Exception e) {
+            return new LinkedHashSet<>();
+        }
+    }
+
+    private void saveSet(String key, Set<String> set) throws Exception {
+        byte[] raw = json.writeValueAsBytes(set);
+        executeRaftWrite(Command.put(key, raw));
+    }
+
+    // Helper functions for Lists
+    private LinkedList<String> readList(String key) {
+        byte[] raw = executeRaftRead(key);
+        if (raw == null || raw.length == 0) return new LinkedList<>();
+        try {
+            return json.readValue(raw, new TypeReference<LinkedList<String>>() {});
+        } catch (Exception e) {
+            return new LinkedList<>();
+        }
+    }
+
+    private void saveList(String key, LinkedList<String> list) throws Exception {
+        byte[] raw = json.writeValueAsBytes(list);
+        executeRaftWrite(Command.put(key, raw));
     }
 
     private RespFrame incrementBy(String key, long delta) throws Exception {

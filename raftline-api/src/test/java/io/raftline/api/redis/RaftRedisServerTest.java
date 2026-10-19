@@ -154,6 +154,135 @@ public class RaftRedisServerTest {
         }
     }
 
+    @Test
+    void testRedisHashes() throws Exception {
+        try (Socket socket = new Socket("localhost", redisPort);
+             BufferedOutputStream out = new BufferedOutputStream(socket.getOutputStream());
+             BufferedInputStream in = new BufferedInputStream(socket.getInputStream())) {
+
+            sendCommand(out, "AUTH", "secret123");
+            assertThat(RespParser.parse(in)).isInstanceOf(RespFrame.SimpleString.class);
+
+            // 1. HSET user:100 name Alice role Admin
+            sendCommand(out, "HSET", "user:100", "name", "Alice", "role", "Admin");
+            RespFrame frame = RespParser.parse(in);
+            assertThat(frame).isInstanceOf(RespFrame.IntegerFrame.class);
+            assertThat(((RespFrame.IntegerFrame) frame).value()).isEqualTo(2L);
+
+            // 2. HGET user:100 name
+            sendCommand(out, "HGET", "user:100", "name");
+            frame = RespParser.parse(in);
+            assertThat(frame).isInstanceOf(RespFrame.BulkString.class);
+            assertThat(((RespFrame.BulkString) frame).asString()).isEqualTo("Alice");
+
+            // 3. HLEN user:100
+            sendCommand(out, "HLEN", "user:100");
+            frame = RespParser.parse(in);
+            assertThat(frame).isInstanceOf(RespFrame.IntegerFrame.class);
+            assertThat(((RespFrame.IntegerFrame) frame).value()).isEqualTo(2L);
+
+            // 4. HDEL user:100 role
+            sendCommand(out, "HDEL", "user:100", "role");
+            frame = RespParser.parse(in);
+            assertThat(frame).isInstanceOf(RespFrame.IntegerFrame.class);
+            assertThat(((RespFrame.IntegerFrame) frame).value()).isEqualTo(1L);
+
+            // 5. HGETALL user:100
+            sendCommand(out, "HGETALL", "user:100");
+            frame = RespParser.parse(in);
+            assertThat(frame).isInstanceOf(RespFrame.Array.class);
+            assertThat(((RespFrame.Array) frame).elements()).hasSize(2);
+        }
+    }
+
+    @Test
+    void testRedisSets() throws Exception {
+        try (Socket socket = new Socket("localhost", redisPort);
+             BufferedOutputStream out = new BufferedOutputStream(socket.getOutputStream());
+             BufferedInputStream in = new BufferedInputStream(socket.getInputStream())) {
+
+            sendCommand(out, "AUTH", "secret123");
+            assertThat(RespParser.parse(in)).isInstanceOf(RespFrame.SimpleString.class);
+
+            // 1. SADD tags AI Consensus Database
+            sendCommand(out, "SADD", "tags", "AI", "Consensus", "Database");
+            RespFrame frame = RespParser.parse(in);
+            assertThat(frame).isInstanceOf(RespFrame.IntegerFrame.class);
+            assertThat(((RespFrame.IntegerFrame) frame).value()).isEqualTo(3L);
+
+            // 2. SCARD tags
+            sendCommand(out, "SCARD", "tags");
+            frame = RespParser.parse(in);
+            assertThat(frame).isInstanceOf(RespFrame.IntegerFrame.class);
+            assertThat(((RespFrame.IntegerFrame) frame).value()).isEqualTo(3L);
+
+            // 3. SISMEMBER tags AI
+            sendCommand(out, "SISMEMBER", "tags", "AI");
+            frame = RespParser.parse(in);
+            assertThat(frame).isInstanceOf(RespFrame.IntegerFrame.class);
+            assertThat(((RespFrame.IntegerFrame) frame).value()).isEqualTo(1L);
+
+            // 4. SREM tags Database
+            sendCommand(out, "SREM", "tags", "Database");
+            frame = RespParser.parse(in);
+            assertThat(frame).isInstanceOf(RespFrame.IntegerFrame.class);
+            assertThat(((RespFrame.IntegerFrame) frame).value()).isEqualTo(1L);
+
+            // 5. SMEMBERS tags
+            sendCommand(out, "SMEMBERS", "tags");
+            frame = RespParser.parse(in);
+            assertThat(frame).isInstanceOf(RespFrame.Array.class);
+            assertThat(((RespFrame.Array) frame).elements()).hasSize(2);
+        }
+    }
+
+    @Test
+    void testRedisAtomicListsAndQueues() throws Exception {
+        try (Socket socket = new Socket("localhost", redisPort);
+             BufferedOutputStream out = new BufferedOutputStream(socket.getOutputStream());
+             BufferedInputStream in = new BufferedInputStream(socket.getInputStream())) {
+
+            sendCommand(out, "AUTH", "secret123");
+            assertThat(RespParser.parse(in)).isInstanceOf(RespFrame.SimpleString.class);
+
+            // 1. RPUSH queue job1 job2 job3
+            sendCommand(out, "RPUSH", "queue", "job1", "job2", "job3");
+            RespFrame frame = RespParser.parse(in);
+            assertThat(frame).isInstanceOf(RespFrame.IntegerFrame.class);
+            assertThat(((RespFrame.IntegerFrame) frame).value()).isEqualTo(3L);
+
+            // 2. LPUSH queue job0
+            sendCommand(out, "LPUSH", "queue", "job0");
+            frame = RespParser.parse(in);
+            assertThat(frame).isInstanceOf(RespFrame.IntegerFrame.class);
+            assertThat(((RespFrame.IntegerFrame) frame).value()).isEqualTo(4L);
+
+            // 3. LLEN queue
+            sendCommand(out, "LLEN", "queue");
+            frame = RespParser.parse(in);
+            assertThat(frame).isInstanceOf(RespFrame.IntegerFrame.class);
+            assertThat(((RespFrame.IntegerFrame) frame).value()).isEqualTo(4L);
+
+            // 4. LPOP queue -> job0
+            sendCommand(out, "LPOP", "queue");
+            frame = RespParser.parse(in);
+            assertThat(frame).isInstanceOf(RespFrame.BulkString.class);
+            assertThat(((RespFrame.BulkString) frame).asString()).isEqualTo("job0");
+
+            // 5. RPOP queue -> job3
+            sendCommand(out, "RPOP", "queue");
+            frame = RespParser.parse(in);
+            assertThat(frame).isInstanceOf(RespFrame.BulkString.class);
+            assertThat(((RespFrame.BulkString) frame).asString()).isEqualTo("job3");
+
+            // 6. LRANGE queue 0 -1 -> job1, job2
+            sendCommand(out, "LRANGE", "queue", "0", "-1");
+            frame = RespParser.parse(in);
+            assertThat(frame).isInstanceOf(RespFrame.Array.class);
+            assertThat(((RespFrame.Array) frame).elements()).hasSize(2);
+        }
+    }
+
     private void sendCommand(BufferedOutputStream out, String... args) throws IOException {
         RespFrame[] elements = new RespFrame[args.length];
         for (int i = 0; i < args.length; i++) {
