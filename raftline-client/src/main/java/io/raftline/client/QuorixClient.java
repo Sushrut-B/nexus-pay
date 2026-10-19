@@ -14,6 +14,7 @@ import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -788,6 +789,196 @@ public class QuorixClient implements Closeable {
         String outboxKey = "__sys:outbox:" + aggregateType + ":" + aggregateId + ":" + System.nanoTime();
         put(outboxKey, eventPayload);
         return true;
+    }
+
+    public static record WebhookInfo(
+            String id,
+            String targetUrl,
+            String prefixFilter,
+            List<String> operations,
+            boolean hasSecret,
+            int maxRetries,
+            long createdEpochMs,
+            long deliveredCount,
+            long failedCount
+    ) {}
+
+    public static record DeadLetterRecord(
+            String deadLetterId,
+            String subscriptionId,
+            String targetUrl,
+            String failureReason,
+            int attempts,
+            long failedAt,
+            ClientCdcEvent event
+    ) {}
+
+    /**
+     * Registers a webhook subscription with key prefix filtering and optional secret signing.
+     */
+    public WebhookInfo registerWebhook(String targetUrl, String destinationUrl, String prefix, String secret) throws IOException, InterruptedException {
+        return registerWebhook(targetUrl, destinationUrl, prefix, List.of(), secret, 3);
+    }
+
+    /**
+     * Registers a webhook subscription with key prefix, operation filter, HMAC secret signing, and max retries.
+     */
+    public WebhookInfo registerWebhook(String targetUrl, String destinationUrl, String prefix, List<String> operations, String secret, int maxRetries) throws IOException, InterruptedException {
+        String base = (targetUrl != null && !targetUrl.isBlank()) ? targetUrl : (cachedLeaderUrl != null ? cachedLeaderUrl : seedUrls.get(0));
+        Map<String, Object> body = new HashMap<>();
+        body.put("targetUrl", destinationUrl);
+        if (prefix != null && !prefix.isBlank()) body.put("prefix", prefix);
+        if (operations != null && !operations.isEmpty()) body.put("operations", operations);
+        if (secret != null && !secret.isBlank()) body.put("secret", secret);
+        body.put("maxRetries", maxRetries);
+
+        byte[] payload = json.writeValueAsBytes(body);
+        HttpRequest request = newRequestBuilder(URI.create(base + "/v1/cdc/webhooks"))
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofByteArray(payload))
+                .timeout(Duration.ofSeconds(5))
+                .build();
+        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+        if (response.statusCode() == 307) {
+            String redirectUrl = response.headers().firstValue("Location").orElse(null);
+            if (redirectUrl != null) {
+                request = newRequestBuilder(URI.create(redirectUrl))
+                        .header("Content-Type", "application/json")
+                        .POST(HttpRequest.BodyPublishers.ofByteArray(payload))
+                        .timeout(Duration.ofSeconds(5))
+                        .build();
+                response = httpClient.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+            }
+        }
+
+        if (response.statusCode() == 201) {
+            JsonNode root = json.readTree(response.body());
+            JsonNode w = root.get("webhook");
+            List<String> ops = new ArrayList<>();
+            if (w.has("operations")) {
+                for (JsonNode opNode : w.get("operations")) ops.add(opNode.asText());
+            }
+            return new WebhookInfo(
+                    w.get("id").asText(),
+                    w.get("targetUrl").asText(),
+                    w.get("prefixFilter").asText(),
+                    ops,
+                    w.get("hasSecret").asBoolean(),
+                    w.get("maxRetries").asInt(),
+                    w.get("createdEpochMs").asLong(),
+                    w.get("deliveredCount").asLong(),
+                    w.get("failedCount").asLong()
+            );
+        }
+        throw new IOException("Failed to register webhook: status=" + response.statusCode() + ", body=" + response.body());
+    }
+
+    /**
+     * Lists all registered webhooks and their delivery metrics.
+     */
+    public List<WebhookInfo> listWebhooks(String targetUrl) throws IOException, InterruptedException {
+        String base = (targetUrl != null && !targetUrl.isBlank()) ? targetUrl : (cachedLeaderUrl != null ? cachedLeaderUrl : seedUrls.get(0));
+        HttpRequest request = newRequestBuilder(URI.create(base + "/v1/cdc/webhooks"))
+                .GET()
+                .timeout(Duration.ofSeconds(5))
+                .build();
+        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+        if (response.statusCode() == 200) {
+            JsonNode root = json.readTree(response.body());
+            List<WebhookInfo> result = new ArrayList<>();
+            if (root.has("webhooks")) {
+                for (JsonNode w : root.get("webhooks")) {
+                    List<String> ops = new ArrayList<>();
+                    if (w.has("operations")) {
+                        for (JsonNode opNode : w.get("operations")) ops.add(opNode.asText());
+                    }
+                    result.add(new WebhookInfo(
+                            w.get("id").asText(),
+                            w.get("targetUrl").asText(),
+                            w.get("prefixFilter").asText(),
+                            ops,
+                            w.get("hasSecret").asBoolean(),
+                            w.get("maxRetries").asInt(),
+                            w.get("createdEpochMs").asLong(),
+                            w.get("deliveredCount").asLong(),
+                            w.get("failedCount").asLong()
+                    ));
+                }
+            }
+            return result;
+        }
+        throw new IOException("Failed to list webhooks: status=" + response.statusCode() + ", body=" + response.body());
+    }
+
+    /**
+     * Unregisters a webhook subscription.
+     */
+    public boolean deleteWebhook(String targetUrl, String subscriptionId) throws IOException, InterruptedException {
+        String base = (targetUrl != null && !targetUrl.isBlank()) ? targetUrl : (cachedLeaderUrl != null ? cachedLeaderUrl : seedUrls.get(0));
+        HttpRequest request = newRequestBuilder(URI.create(base + "/v1/cdc/webhooks?id=" + subscriptionId))
+                .DELETE()
+                .timeout(Duration.ofSeconds(5))
+                .build();
+        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+        return response.statusCode() == 200;
+    }
+
+    /**
+     * Retrieves dead-letter queue records for failed webhook deliveries.
+     */
+    public List<DeadLetterRecord> getDeadLetterQueue(String targetUrl, int limit) throws IOException, InterruptedException {
+        String base = (targetUrl != null && !targetUrl.isBlank()) ? targetUrl : (cachedLeaderUrl != null ? cachedLeaderUrl : seedUrls.get(0));
+        HttpRequest request = newRequestBuilder(URI.create(base + "/v1/cdc/dlq?limit=" + limit))
+                .GET()
+                .timeout(Duration.ofSeconds(5))
+                .build();
+        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+        if (response.statusCode() == 200) {
+            JsonNode root = json.readTree(response.body());
+            List<DeadLetterRecord> list = new ArrayList<>();
+            if (root.has("records")) {
+                for (JsonNode r : root.get("records")) {
+                    ClientCdcEvent evt = null;
+                    if (r.has("event") && !r.get("event").isNull()) {
+                        JsonNode n = r.get("event");
+                        evt = new ClientCdcEvent(
+                                n.get("eventId").asLong(),
+                                n.get("logIndex").asLong(),
+                                n.get("logTerm").asLong(),
+                                n.get("operation").asText(),
+                                n.get("key").asText(),
+                                n.get("payload").asText(),
+                                n.get("version").asLong(),
+                                n.get("timestamp").asLong()
+                        );
+                    }
+                    list.add(new DeadLetterRecord(
+                            r.get("deadLetterId").asText(),
+                            r.get("subscriptionId").asText(),
+                            r.get("targetUrl").asText(),
+                            r.get("failureReason").asText(),
+                            r.get("attempts").asInt(),
+                            r.get("failedAt").asLong(),
+                            evt
+                    ));
+                }
+            }
+            return list;
+        }
+        throw new IOException("Failed to get DLQ: status=" + response.statusCode() + ", body=" + response.body());
+    }
+
+    /**
+     * Clears all dead-letter records from the queue.
+     */
+    public boolean clearDeadLetterQueue(String targetUrl) throws IOException, InterruptedException {
+        String base = (targetUrl != null && !targetUrl.isBlank()) ? targetUrl : (cachedLeaderUrl != null ? cachedLeaderUrl : seedUrls.get(0));
+        HttpRequest request = newRequestBuilder(URI.create(base + "/v1/cdc/dlq"))
+                .DELETE()
+                .timeout(Duration.ofSeconds(5))
+                .build();
+        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+        return response.statusCode() == 200;
     }
 
     public String getClientId() {

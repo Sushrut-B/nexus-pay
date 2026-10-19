@@ -21,9 +21,11 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executors;
@@ -104,6 +106,8 @@ public class RaftHttpServer implements Closeable {
         server.createContext("/v1/agent/watch", new AgentWatchHandler());
         server.createContext("/v1/cdc/events", new CdcEventsHandler());
         server.createContext("/v1/cdc/ack", new CdcAckHandler());
+        server.createContext("/v1/cdc/webhooks", new CdcWebhooksHandler());
+        server.createContext("/v1/cdc/dlq", new CdcDlqHandler());
     }
 
     private class TxnHandler implements HttpHandler {
@@ -652,6 +656,172 @@ public class RaftHttpServer implements Closeable {
                 log.error("Failed to acknowledge CDC watermark", e);
                 sendJson(exchange, 500, Map.of("error", e.getMessage()));
             }
+        }
+    }
+
+    private class CdcWebhooksHandler implements HttpHandler {
+        @Override
+        public void handle(HttpExchange exchange) throws IOException {
+            if (!isAuthorized(exchange)) {
+                sendJson(exchange, 401, Map.of("error", "Unauthorized: Valid API Key required"));
+                return;
+            }
+
+            if (raftNode == null) {
+                sendJson(exchange, 501, Map.of("error", "RaftNode is not initialized on this instance"));
+                return;
+            }
+
+            String method = exchange.getRequestMethod().toUpperCase();
+            if ("GET".equals(method)) {
+                List<io.raftline.core.webhook.WebhookSubscription> subs = raftNode.getWebhookDispatcher().getAllSubscriptions();
+                List<Map<String, Object>> subsList = new ArrayList<>(subs.size());
+                for (var s : subs) {
+                    subsList.add(s.toMap());
+                }
+                sendJson(exchange, 200, Map.of(
+                        "status", "OK",
+                        "count", subsList.size(),
+                        "webhooks", subsList
+                ));
+                return;
+            }
+
+            if ("POST".equals(method)) {
+                try {
+                    Map<String, Object> body = json.readValue(exchange.getRequestBody(), Map.class);
+                    String targetUrl = (String) body.get("targetUrl");
+                    if (targetUrl == null || targetUrl.isBlank()) {
+                        sendJson(exchange, 400, Map.of("error", "targetUrl is required"));
+                        return;
+                    }
+
+                    String id = (String) body.get("id");
+                    if (id == null || id.isBlank()) {
+                        id = "webhook-" + UUID.randomUUID();
+                    }
+
+                    String prefix = (String) body.getOrDefault("prefix", "");
+                    String secret = (String) body.get("secret");
+                    int maxRetries = 3;
+                    if (body.containsKey("maxRetries")) {
+                        try {
+                            maxRetries = ((Number) body.get("maxRetries")).intValue();
+                        } catch (Exception ignored) {}
+                    }
+
+                    Set<io.raftline.core.cdc.CdcEvent.OperationType> ops = new HashSet<>();
+                    if (body.containsKey("operations")) {
+                        Object opsObj = body.get("operations");
+                        if (opsObj instanceof List<?> list) {
+                            for (Object item : list) {
+                                try {
+                                    ops.add(io.raftline.core.cdc.CdcEvent.OperationType.valueOf(item.toString().toUpperCase()));
+                                } catch (IllegalArgumentException ignored) {}
+                            }
+                        }
+                    }
+
+                    io.raftline.core.webhook.WebhookSubscription sub = new io.raftline.core.webhook.WebhookSubscription(
+                            id, targetUrl, prefix, ops, secret, maxRetries
+                    );
+                    raftNode.getWebhookDispatcher().registerSubscription(sub);
+
+                    sendJson(exchange, 201, Map.of(
+                            "status", "REGISTERED",
+                            "webhook", sub.toMap()
+                    ));
+                } catch (Exception e) {
+                    log.error("Failed to register webhook subscription", e);
+                    sendJson(exchange, 500, Map.of("error", e.getMessage()));
+                }
+                return;
+            }
+
+            if ("DELETE".equals(method)) {
+                String subId = null;
+                Map<String, String> q = parseQueryParams(exchange.getRequestURI().getQuery());
+                if (q.containsKey("id")) {
+                    subId = q.get("id");
+                } else {
+                    try {
+                        byte[] reqBytes = exchange.getRequestBody().readAllBytes();
+                        if (reqBytes.length > 0) {
+                            Map<String, Object> body = json.readValue(reqBytes, Map.class);
+                            subId = (String) body.get("id");
+                        }
+                    } catch (Exception ignored) {}
+                }
+
+                if (subId == null || subId.isBlank()) {
+                    sendJson(exchange, 400, Map.of("error", "Subscription id is required as ?id={id} or JSON body"));
+                    return;
+                }
+
+                boolean removed = raftNode.getWebhookDispatcher().unregisterSubscription(subId);
+                if (removed) {
+                    sendJson(exchange, 200, Map.of(
+                            "status", "UNREGISTERED",
+                            "id", subId
+                    ));
+                } else {
+                    sendJson(exchange, 404, Map.of(
+                            "error", "Webhook subscription not found: " + subId
+                    ));
+                }
+                return;
+            }
+
+            sendJson(exchange, 405, Map.of("error", "Method not allowed: " + method));
+        }
+    }
+
+    private class CdcDlqHandler implements HttpHandler {
+        @Override
+        public void handle(HttpExchange exchange) throws IOException {
+            if (!isAuthorized(exchange)) {
+                sendJson(exchange, 401, Map.of("error", "Unauthorized: Valid API Key required"));
+                return;
+            }
+
+            if (raftNode == null) {
+                sendJson(exchange, 501, Map.of("error", "RaftNode is not initialized on this instance"));
+                return;
+            }
+
+            String method = exchange.getRequestMethod().toUpperCase();
+            if ("GET".equals(method)) {
+                Map<String, String> query = parseQueryParams(exchange.getRequestURI().getQuery());
+                int limit = 100;
+                if (query.containsKey("limit")) {
+                    try {
+                        limit = Integer.parseInt(query.get("limit"));
+                    } catch (NumberFormatException ignored) {}
+                }
+
+                List<io.raftline.core.webhook.DeadLetterEvent> rawRecords = raftNode.getWebhookDispatcher().getDeadLetterQueue(limit);
+                List<Map<String, Object>> records = new ArrayList<>(rawRecords.size());
+                for (var r : rawRecords) {
+                    records.add(r.toMap());
+                }
+
+                sendJson(exchange, 200, Map.of(
+                        "status", "OK",
+                        "count", records.size(),
+                        "records", records
+                ));
+                return;
+            }
+
+            if ("DELETE".equals(method)) {
+                raftNode.getWebhookDispatcher().clearDeadLetterQueue();
+                sendJson(exchange, 200, Map.of(
+                        "status", "CLEARED"
+                ));
+                return;
+            }
+
+            sendJson(exchange, 405, Map.of("error", "Method not allowed: " + method));
         }
     }
 

@@ -66,6 +66,9 @@ public class RaftNode implements RaftRpcHandler, Closeable {
     // Embedded Change Data Capture (CDC) and Transactional Outbox Engine
     private final io.raftline.core.cdc.CdcLogEngine cdcEngine = new io.raftline.core.cdc.CdcLogEngine();
 
+    // Native Webhook Dispatcher and External Sink Router
+    private final io.raftline.core.webhook.WebhookDispatcher webhookDispatcher = new io.raftline.core.webhook.WebhookDispatcher();
+
     // Timers
     private ScheduledFuture<?> electionTimeoutTask;
     private ScheduledFuture<?> heartbeatTask;
@@ -762,7 +765,7 @@ public class RaftNode implements RaftRpcHandler, Closeable {
                         watchEngine.publishEvent(eventType, cmd.getKey(), result.getValue(), result.getVersion(), indexToApply);
                     }
 
-                    // Record in CDC log engine if successful mutation
+                    // Record in CDC log engine and dispatch to webhook subscribers if successful mutation
                     if (result.isSuccess()) {
                         io.raftline.core.cdc.CdcEvent.OperationType opType = switch (cmd.getType()) {
                             case PUT -> cmd.getKey().startsWith("__sys:outbox:") ? io.raftline.core.cdc.CdcEvent.OperationType.OUTBOX : io.raftline.core.cdc.CdcEvent.OperationType.PUT;
@@ -771,7 +774,8 @@ public class RaftNode implements RaftRpcHandler, Closeable {
                             default -> null;
                         };
                         if (opType != null) {
-                            cdcEngine.recordEvent(indexToApply, entry.getTerm(), opType, cmd.getKey(), result.getValue(), result.getVersion());
+                            io.raftline.core.cdc.CdcEvent cdcEvent = cdcEngine.recordEvent(indexToApply, entry.getTerm(), opType, cmd.getKey(), result.getValue(), result.getVersion());
+                            webhookDispatcher.dispatch(cdcEvent);
                         }
                     }
                 }
@@ -1171,6 +1175,10 @@ public class RaftNode implements RaftRpcHandler, Closeable {
         return cdcEngine;
     }
 
+    public io.raftline.core.webhook.WebhookDispatcher getWebhookDispatcher() {
+        return webhookDispatcher;
+    }
+
     @Override
     public void close() throws IOException {
         if (running.compareAndSet(true, false)) {
@@ -1186,6 +1194,7 @@ public class RaftNode implements RaftRpcHandler, Closeable {
 
             watchEngine.close();
             cdcEngine.close();
+            webhookDispatcher.close();
             wal.close();
             transport.close();
         }
