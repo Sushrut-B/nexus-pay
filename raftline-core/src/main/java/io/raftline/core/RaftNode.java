@@ -69,6 +69,9 @@ public class RaftNode implements RaftRpcHandler, Closeable {
     // Native Webhook Dispatcher and External Sink Router
     private final io.raftline.core.webhook.WebhookDispatcher webhookDispatcher = new io.raftline.core.webhook.WebhookDispatcher();
 
+    // Secondary Indexing and Document Filter Engine
+    private final io.raftline.core.index.SecondaryIndexEngine indexEngine = new io.raftline.core.index.SecondaryIndexEngine();
+
     // Timers
     private ScheduledFuture<?> electionTimeoutTask;
     private ScheduledFuture<?> heartbeatTask;
@@ -777,6 +780,9 @@ public class RaftNode implements RaftRpcHandler, Closeable {
                             io.raftline.core.cdc.CdcEvent cdcEvent = cdcEngine.recordEvent(indexToApply, entry.getTerm(), opType, cmd.getKey(), result.getValue(), result.getVersion());
                             webhookDispatcher.dispatch(cdcEvent);
                         }
+
+                        // Maintain secondary index mappings for JSON documents
+                        indexEngine.onCommittedMutation(cmd.getKey(), null, result.getValue(), cmd.getType());
                     }
                 }
             }
@@ -1179,6 +1185,10 @@ public class RaftNode implements RaftRpcHandler, Closeable {
         return webhookDispatcher;
     }
 
+    public io.raftline.core.index.SecondaryIndexEngine getIndexEngine() {
+        return indexEngine;
+    }
+
     @Override
     public void close() throws IOException {
         if (running.compareAndSet(true, false)) {
@@ -1195,6 +1205,7 @@ public class RaftNode implements RaftRpcHandler, Closeable {
             watchEngine.close();
             cdcEngine.close();
             webhookDispatcher.close();
+            indexEngine.close();
             wal.close();
             transport.close();
         }

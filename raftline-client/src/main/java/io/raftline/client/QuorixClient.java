@@ -981,6 +981,152 @@ public class QuorixClient implements Closeable {
         return response.statusCode() == 200;
     }
 
+    public static record ClientIndexInfo(
+            String name,
+            String keyPrefix,
+            String field,
+            String type,
+            long createdEpochMs,
+            int indexedKeysCount,
+            int uniqueValuesCount
+    ) {}
+
+    public static record ClientDocumentMatch(String key, JsonNode value) {}
+
+    public static record ClientQueryResult(
+            int totalMatched,
+            int returnedCount,
+            boolean usedIndex,
+            long executionTimeMs,
+            List<ClientDocumentMatch> results
+    ) {}
+
+    /**
+     * Registers a secondary index on a JSON field.
+     */
+    public ClientIndexInfo createIndex(String targetUrl, String name, String keyPrefix, String field, String type) throws IOException, InterruptedException {
+        String base = (targetUrl != null && !targetUrl.isBlank()) ? targetUrl : (cachedLeaderUrl != null ? cachedLeaderUrl : seedUrls.get(0));
+        Map<String, Object> body = Map.of(
+                "name", name,
+                "prefix", (keyPrefix != null) ? keyPrefix : "",
+                "field", field,
+                "type", (type != null) ? type.toUpperCase() : "STRING"
+        );
+        byte[] payload = json.writeValueAsBytes(body);
+        HttpRequest request = newRequestBuilder(URI.create(base + "/v1/index"))
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofByteArray(payload))
+                .timeout(Duration.ofSeconds(5))
+                .build();
+        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+        if (response.statusCode() == 201) {
+            JsonNode root = json.readTree(response.body());
+            JsonNode idx = root.get("index");
+            return new ClientIndexInfo(
+                    idx.get("name").asText(),
+                    idx.get("keyPrefix").asText(),
+                    idx.get("field").asText(),
+                    idx.get("type").asText(),
+                    idx.get("createdEpochMs").asLong(),
+                    idx.get("indexedKeysCount").asInt(),
+                    idx.get("uniqueValuesCount").asInt()
+            );
+        }
+        throw new IOException("Failed to create index: status=" + response.statusCode() + ", body=" + response.body());
+    }
+
+    /**
+     * Lists all registered secondary indexes and statistics.
+     */
+    public List<ClientIndexInfo> listIndexes(String targetUrl) throws IOException, InterruptedException {
+        String base = (targetUrl != null && !targetUrl.isBlank()) ? targetUrl : (cachedLeaderUrl != null ? cachedLeaderUrl : seedUrls.get(0));
+        HttpRequest request = newRequestBuilder(URI.create(base + "/v1/index"))
+                .GET()
+                .timeout(Duration.ofSeconds(5))
+                .build();
+        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+        if (response.statusCode() == 200) {
+            JsonNode root = json.readTree(response.body());
+            List<ClientIndexInfo> list = new ArrayList<>();
+            if (root.has("indexes")) {
+                for (JsonNode idx : root.get("indexes")) {
+                    list.add(new ClientIndexInfo(
+                            idx.get("name").asText(),
+                            idx.get("keyPrefix").asText(),
+                            idx.get("field").asText(),
+                            idx.get("type").asText(),
+                            idx.get("createdEpochMs").asLong(),
+                            idx.get("indexedKeysCount").asInt(),
+                            idx.get("uniqueValuesCount").asInt()
+                    ));
+                }
+            }
+            return list;
+        }
+        throw new IOException("Failed to list indexes: status=" + response.statusCode() + ", body=" + response.body());
+    }
+
+    /**
+     * Drops a secondary index by name.
+     */
+    public boolean dropIndex(String targetUrl, String indexName) throws IOException, InterruptedException {
+        String base = (targetUrl != null && !targetUrl.isBlank()) ? targetUrl : (cachedLeaderUrl != null ? cachedLeaderUrl : seedUrls.get(0));
+        HttpRequest request = newRequestBuilder(URI.create(base + "/v1/index?name=" + indexName))
+                .DELETE()
+                .timeout(Duration.ofSeconds(5))
+                .build();
+        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+        return response.statusCode() == 200;
+    }
+
+    /**
+     * Queries documents using JSON criteria, filter predicates, and secondary indexes.
+     */
+    public ClientQueryResult queryDocuments(String targetUrl, Map<String, Object> queryMap) throws IOException, InterruptedException {
+        String base = (targetUrl != null && !targetUrl.isBlank()) ? targetUrl : (cachedLeaderUrl != null ? cachedLeaderUrl : seedUrls.get(0));
+        byte[] payload = json.writeValueAsBytes(queryMap);
+        HttpRequest request = newRequestBuilder(URI.create(base + "/v1/query"))
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofByteArray(payload))
+                .timeout(Duration.ofSeconds(5))
+                .build();
+        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+        if (response.statusCode() == 200) {
+            JsonNode root = json.readTree(response.body());
+            int total = root.get("totalMatched").asInt();
+            int returned = root.get("returnedCount").asInt();
+            boolean usedIdx = root.get("usedIndex").asBoolean();
+            long timeMs = root.get("executionTimeMs").asLong();
+
+            List<ClientDocumentMatch> matches = new ArrayList<>();
+            if (root.has("results")) {
+                for (JsonNode item : root.get("results")) {
+                    matches.add(new ClientDocumentMatch(
+                            item.get("key").asText(),
+                            item.has("value") ? item.get("value") : null
+                    ));
+                }
+            }
+            return new ClientQueryResult(total, returned, usedIdx, timeMs, matches);
+        }
+        throw new IOException("Failed to query documents: status=" + response.statusCode() + ", body=" + response.body());
+    }
+
+    /**
+     * Convenience query matching a single field predicate.
+     */
+    public ClientQueryResult queryByField(String targetUrl, String prefix, String field, String op, Object value, boolean includeValues) throws IOException, InterruptedException {
+        Map<String, Object> query = new HashMap<>();
+        query.put("prefix", prefix != null ? prefix : "");
+        query.put("filter", Map.of(
+                "field", field,
+                "op", op != null ? op : "EQ",
+                "value", value
+        ));
+        query.put("includeValues", includeValues);
+        return queryDocuments(targetUrl, query);
+    }
+
     public String getClientId() {
         return clientId;
     }

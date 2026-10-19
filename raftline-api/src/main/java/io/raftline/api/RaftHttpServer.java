@@ -108,6 +108,8 @@ public class RaftHttpServer implements Closeable {
         server.createContext("/v1/cdc/ack", new CdcAckHandler());
         server.createContext("/v1/cdc/webhooks", new CdcWebhooksHandler());
         server.createContext("/v1/cdc/dlq", new CdcDlqHandler());
+        server.createContext("/v1/index", new IndexHandler());
+        server.createContext("/v1/query", new QueryHandler());
     }
 
     private class TxnHandler implements HttpHandler {
@@ -822,6 +824,136 @@ public class RaftHttpServer implements Closeable {
             }
 
             sendJson(exchange, 405, Map.of("error", "Method not allowed: " + method));
+        }
+    }
+
+    private class IndexHandler implements HttpHandler {
+        @Override
+        public void handle(HttpExchange exchange) throws IOException {
+            if (!isAuthorized(exchange)) {
+                sendJson(exchange, 401, Map.of("error", "Unauthorized: Valid API Key required"));
+                return;
+            }
+
+            if (raftNode == null) {
+                sendJson(exchange, 501, Map.of("error", "RaftNode is not initialized on this instance"));
+                return;
+            }
+
+            String method = exchange.getRequestMethod().toUpperCase();
+            if ("GET".equals(method)) {
+                List<io.raftline.core.index.SecondaryIndex> indexes = raftNode.getIndexEngine().getAllIndexes();
+                List<Map<String, Object>> list = new ArrayList<>(indexes.size());
+                for (var idx : indexes) {
+                    list.add(idx.stats());
+                }
+                sendJson(exchange, 200, Map.of(
+                        "status", "OK",
+                        "count", list.size(),
+                        "indexes", list
+                ));
+                return;
+            }
+
+            if ("POST".equals(method)) {
+                try {
+                    Map<String, Object> body = json.readValue(exchange.getRequestBody(), Map.class);
+                    String name = (String) body.get("name");
+                    String field = (String) body.get("field");
+                    if (name == null || name.isBlank() || field == null || field.isBlank()) {
+                        sendJson(exchange, 400, Map.of("error", "name and field are required"));
+                        return;
+                    }
+
+                    String prefix = (String) body.getOrDefault("prefix", body.getOrDefault("keyPrefix", ""));
+                    String typeStr = (String) body.getOrDefault("type", "STRING");
+                    io.raftline.core.index.IndexFieldType type;
+                    try {
+                        type = io.raftline.core.index.IndexFieldType.valueOf(typeStr.toUpperCase());
+                    } catch (IllegalArgumentException e) {
+                        type = io.raftline.core.index.IndexFieldType.STRING;
+                    }
+
+                    io.raftline.core.index.IndexDefinition def = new io.raftline.core.index.IndexDefinition(name, prefix, field, type);
+                    io.raftline.core.index.SecondaryIndex registered = raftNode.getIndexEngine().registerIndex(def, raftNode.getStateMachine());
+
+                    sendJson(exchange, 201, Map.of(
+                            "status", "CREATED",
+                            "index", registered.stats()
+                    ));
+                } catch (Exception e) {
+                    log.error("Failed to create secondary index", e);
+                    sendJson(exchange, 500, Map.of("error", e.getMessage()));
+                }
+                return;
+            }
+
+            if ("DELETE".equals(method)) {
+                String indexName = null;
+                Map<String, String> q = parseQueryParams(exchange.getRequestURI().getQuery());
+                if (q.containsKey("name")) {
+                    indexName = q.get("name");
+                } else {
+                    try {
+                        byte[] reqBytes = exchange.getRequestBody().readAllBytes();
+                        if (reqBytes.length > 0) {
+                            Map<String, Object> body = json.readValue(reqBytes, Map.class);
+                            indexName = (String) body.get("name");
+                        }
+                    } catch (Exception ignored) {}
+                }
+
+                if (indexName == null || indexName.isBlank()) {
+                    sendJson(exchange, 400, Map.of("error", "Index name is required as ?name={name} or JSON body"));
+                    return;
+                }
+
+                boolean dropped = raftNode.getIndexEngine().dropIndex(indexName);
+                if (dropped) {
+                    sendJson(exchange, 200, Map.of(
+                            "status", "DROPPED",
+                            "name", indexName
+                    ));
+                } else {
+                    sendJson(exchange, 404, Map.of(
+                            "error", "Index not found: " + indexName
+                    ));
+                }
+                return;
+            }
+
+            sendJson(exchange, 405, Map.of("error", "Method not allowed: " + method));
+        }
+    }
+
+    private class QueryHandler implements HttpHandler {
+        @Override
+        public void handle(HttpExchange exchange) throws IOException {
+            if (!isAuthorized(exchange)) {
+                sendJson(exchange, 401, Map.of("error", "Unauthorized: Valid API Key required"));
+                return;
+            }
+
+            if (raftNode == null) {
+                sendJson(exchange, 501, Map.of("error", "RaftNode is not initialized on this instance"));
+                return;
+            }
+
+            if (!"POST".equalsIgnoreCase(exchange.getRequestMethod())) {
+                sendJson(exchange, 405, Map.of("error", "Document query must use POST"));
+                return;
+            }
+
+            try {
+                Map<String, Object> body = json.readValue(exchange.getRequestBody(), Map.class);
+                io.raftline.core.index.QueryRequest queryReq = io.raftline.core.index.QueryRequest.fromMap(body);
+                io.raftline.core.index.QueryResult result = raftNode.getIndexEngine().executeQuery(queryReq, raftNode.getStateMachine());
+
+                sendJson(exchange, 200, result.toMap());
+            } catch (Exception e) {
+                log.error("Failed to execute document query", e);
+                sendJson(exchange, 500, Map.of("error", e.getMessage()));
+            }
         }
     }
 
