@@ -965,6 +965,43 @@ public class RaftNode implements RaftRpcHandler, Closeable {
     }
 
     /**
+     * Executes an atomic Compare-And-Swap (CAS) mutation through Raft consensus.
+     */
+    public CompletableFuture<ApplyResult> compareAndSwap(String key, long expectedVersion, byte[] newValue, String clientId, long sequenceNumber) {
+        Command cmd = Command.cas(key, expectedVersion, newValue, clientId, sequenceNumber);
+        return execute(cmd);
+    }
+
+    /**
+     * Linearizable Versioned Read via Leader Lease / ReadIndex (§6.4).
+     */
+    public CompletableFuture<io.raftline.storage.state.VersionedValue> readLinearizableVersioned(String key) {
+        stateLock.lock();
+        try {
+            if (role != Role.LEADER) {
+                CompletableFuture<io.raftline.storage.state.VersionedValue> failed = new CompletableFuture<>();
+                failed.completeExceptionally(new NotLeaderException(currentLeaderId));
+                return failed;
+            }
+
+            if (isLeaderLeaseValid()) {
+                return CompletableFuture.completedFuture(stateMachine.getVersioned(key));
+            }
+
+            return confirmLeadershipQuorum().thenApply(v -> stateMachine.getVersioned(key));
+        } finally {
+            stateLock.unlock();
+        }
+    }
+
+    /**
+     * Stale versioned read directly from local state machine (for follower reads).
+     */
+    public io.raftline.storage.state.VersionedValue readStaleVersioned(String key) {
+        return stateMachine.getVersioned(key);
+    }
+
+    /**
      * Stale read directly from local state machine (for follower reads).
      */
     public byte[] readStale(String key) {

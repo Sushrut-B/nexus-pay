@@ -15,33 +15,43 @@ public final class Command {
     private final byte[] value;
     private final String clientId;
     private final long sequenceNumber;
+    private final long expectedVersion;
 
     public Command(CommandType type, String key, byte[] value, String clientId, long sequenceNumber) {
+        this(type, key, value, clientId, sequenceNumber, -1L);
+    }
+
+    public Command(CommandType type, String key, byte[] value, String clientId, long sequenceNumber, long expectedVersion) {
         this.type = Objects.requireNonNull(type, "type cannot be null");
         this.key = key;
         this.value = value != null ? value : new byte[0];
         this.clientId = clientId != null ? clientId : "";
         this.sequenceNumber = sequenceNumber;
+        this.expectedVersion = expectedVersion;
     }
 
     public static Command put(String key, byte[] value, String clientId, long sequenceNumber) {
-        return new Command(CommandType.PUT, key, value, clientId, sequenceNumber);
+        return new Command(CommandType.PUT, key, value, clientId, sequenceNumber, -1L);
     }
 
     public static Command put(String key, byte[] value) {
-        return new Command(CommandType.PUT, key, value, "", 0L);
+        return new Command(CommandType.PUT, key, value, "", 0L, -1L);
     }
 
     public static Command delete(String key, String clientId, long sequenceNumber) {
-        return new Command(CommandType.DELETE, key, new byte[0], clientId, sequenceNumber);
+        return new Command(CommandType.DELETE, key, new byte[0], clientId, sequenceNumber, -1L);
     }
 
     public static Command delete(String key) {
-        return new Command(CommandType.DELETE, key, new byte[0], "", 0L);
+        return new Command(CommandType.DELETE, key, new byte[0], "", 0L, -1L);
+    }
+
+    public static Command cas(String key, long expectedVersion, byte[] newValue, String clientId, long sequenceNumber) {
+        return new Command(CommandType.CAS, key, newValue, clientId, sequenceNumber, expectedVersion);
     }
 
     public static Command noop() {
-        return new Command(CommandType.NOOP, "", new byte[0], "", 0L);
+        return new Command(CommandType.NOOP, "", new byte[0], "", 0L, -1L);
     }
 
     public CommandType getType() {
@@ -64,6 +74,10 @@ public final class Command {
         return sequenceNumber;
     }
 
+    public long getExpectedVersion() {
+        return expectedVersion;
+    }
+
     public byte[] serialize() {
         byte[] keyBytes = (key != null) ? key.getBytes(StandardCharsets.UTF_8) : new byte[0];
         byte[] clientBytes = clientId.getBytes(StandardCharsets.UTF_8);
@@ -71,14 +85,16 @@ public final class Command {
         // Format:
         // [1 byte: type]
         // [8 bytes: sequenceNumber]
+        // [8 bytes: expectedVersion]
         // [4 bytes: clientId length] + clientBytes
         // [4 bytes: key length] + keyBytes
         // [4 bytes: value length] + value
-        int totalSize = 1 + 8 + 4 + clientBytes.length + 4 + keyBytes.length + 4 + value.length;
+        int totalSize = 1 + 8 + 8 + 4 + clientBytes.length + 4 + keyBytes.length + 4 + value.length;
         ByteBuffer buffer = ByteBuffer.allocate(totalSize);
 
         buffer.put(type.getCode());
         buffer.putLong(sequenceNumber);
+        buffer.putLong(expectedVersion);
 
         buffer.putInt(clientBytes.length);
         buffer.put(clientBytes);
@@ -96,6 +112,7 @@ public final class Command {
         byte typeCode = buffer.get();
         CommandType type = CommandType.fromCode(typeCode);
         long sequenceNumber = buffer.getLong();
+        long expectedVersion = buffer.getLong();
 
         int clientLen = buffer.getInt();
         byte[] clientBytes = new byte[clientLen];
@@ -111,7 +128,7 @@ public final class Command {
         byte[] valBytes = new byte[valLen];
         buffer.get(valBytes);
 
-        return new Command(type, key, valBytes, clientId, sequenceNumber);
+        return new Command(type, key, valBytes, clientId, sequenceNumber, expectedVersion);
     }
 
     @Override
@@ -120,6 +137,7 @@ public final class Command {
         if (o == null || getClass() != o.getClass()) return false;
         Command command = (Command) o;
         return sequenceNumber == command.sequenceNumber &&
+                expectedVersion == command.expectedVersion &&
                 type == command.type &&
                 Objects.equals(key, command.key) &&
                 Arrays.equals(value, command.value) &&
@@ -128,7 +146,7 @@ public final class Command {
 
     @Override
     public int hashCode() {
-        int result = Objects.hash(type, key, clientId, sequenceNumber);
+        int result = Objects.hash(type, key, clientId, sequenceNumber, expectedVersion);
         result = 31 * result + Arrays.hashCode(value);
         return result;
     }
@@ -138,6 +156,7 @@ public final class Command {
         return "Command{" +
                 "type=" + type +
                 ", key='" + key + '\'' +
+                ", expectedVersion=" + expectedVersion +
                 ", valueLen=" + (value != null ? value.length : 0) +
                 ", clientId='" + clientId + '\'' +
                 ", sequenceNumber=" + sequenceNumber +

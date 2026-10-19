@@ -508,6 +508,89 @@ public class QuorixClient implements Closeable {
         return null;
     }
 
+    public static record CasResult(boolean success, long version, String currentValue, int statusCode) {}
+
+    public static record AgentState(String key, String value, long version) {}
+
+    /**
+     * Executes atomic Compare-And-Swap on a key.
+     *
+     * @param targetUrl Target HTTP URL (or null for auto leader)
+     * @param key Key to update
+     * @param expectedVersion Expected monotonic version (0 if expecting key not to exist)
+     * @param newValue String value to store
+     * @param agentId Unique agent ID
+     * @return CasResult indicating success or version mismatch
+     */
+    public CasResult compareAndSwap(String targetUrl, String key, long expectedVersion, String newValue, String agentId) throws IOException, InterruptedException {
+        String base = (targetUrl != null && !targetUrl.isBlank()) ? targetUrl : (cachedLeaderUrl != null ? cachedLeaderUrl : seedUrls.get(0));
+        Map<String, Object> body = Map.of(
+                "key", key,
+                "expectedVersion", expectedVersion,
+                "value", newValue,
+                "agentId", agentId != null ? agentId : clientId
+        );
+        byte[] payload = json.writeValueAsBytes(body);
+        HttpRequest request = newRequestBuilder(URI.create(base + "/v1/agent/cas"))
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofByteArray(payload))
+                .timeout(Duration.ofSeconds(5))
+                .build();
+        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+        if (response.statusCode() == 307) {
+            String redirectUrl = response.headers().firstValue("Location").orElse(null);
+            if (redirectUrl != null) {
+                cachedLeaderUrl = redirectUrl.substring(0, redirectUrl.indexOf("/v1/"));
+                request = newRequestBuilder(URI.create(redirectUrl))
+                        .header("Content-Type", "application/json")
+                        .POST(HttpRequest.BodyPublishers.ofByteArray(payload))
+                        .timeout(Duration.ofSeconds(5))
+                        .build();
+                response = httpClient.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+            }
+        }
+
+        if (response.statusCode() == 200) {
+            JsonNode node = json.readTree(response.body());
+            return new CasResult(true, node.get("version").asLong(), newValue, 200);
+        } else if (response.statusCode() == 409) {
+            JsonNode node = json.readTree(response.body());
+            long actualVersion = node.has("actualVersion") ? node.get("actualVersion").asLong() : 0L;
+            String curVal = node.has("currentValue") ? node.get("currentValue").asText() : "";
+            return new CasResult(false, actualVersion, curVal, 409);
+        }
+        return new CasResult(false, -1, response.body(), response.statusCode());
+    }
+
+    /**
+     * Reads agent shared memory key with its monotonic version.
+     */
+    public AgentState getAgentState(String targetUrl, String key) throws IOException, InterruptedException {
+        String base = (targetUrl != null && !targetUrl.isBlank()) ? targetUrl : (cachedLeaderUrl != null ? cachedLeaderUrl : seedUrls.get(0));
+        String encodedKey = java.net.URLEncoder.encode(key, StandardCharsets.UTF_8);
+        HttpRequest request = newRequestBuilder(URI.create(base + "/v1/agent/state?key=" + encodedKey))
+                .GET()
+                .timeout(Duration.ofSeconds(5))
+                .build();
+        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+        if (response.statusCode() == 307) {
+            String redirectUrl = response.headers().firstValue("Location").orElse(null);
+            if (redirectUrl != null) {
+                request = newRequestBuilder(URI.create(redirectUrl))
+                        .GET()
+                        .timeout(Duration.ofSeconds(5))
+                        .build();
+                response = httpClient.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+            }
+        }
+
+        if (response.statusCode() == 200) {
+            JsonNode node = json.readTree(response.body());
+            return new AgentState(node.get("key").asText(), node.get("value").asText(), node.get("version").asLong());
+        }
+        return null;
+    }
+
     public String getClientId() {
         return clientId;
     }

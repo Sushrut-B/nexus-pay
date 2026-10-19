@@ -3,7 +3,8 @@ package io.raftline.storage.model;
 public enum CommandType {
     PUT((byte) 1),
     DELETE((byte) 2),
-    NOOP((byte) 3);
+    NOOP((byte) 3),
+    CAS((byte) 4);
 
     private final byte code;
 

@@ -23,6 +23,14 @@ public interface StateMachine {
     byte[] get(String key);
 
     /**
+     * Reads a value by key along with its monotonic consensus version stamp.
+     */
+    default VersionedValue getVersioned(String key) {
+        byte[] v = get(key);
+        return (v != null) ? new VersionedValue(v, 1L) : null;
+    }
+
+    /**
      * Scans a range of keys [fromKey, toKey] up to limit entries in lexicographical order.
      */
     java.util.Map<String, byte[]> scan(String fromKey, String toKey, int limit);

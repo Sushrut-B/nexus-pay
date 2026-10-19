@@ -27,13 +27,18 @@ public class KeyValueStore implements StateMachine {
     private static final int SNAPSHOT_MAGIC = 0x52414654; // "RAFT"
 
     private final ConcurrentNavigableMap<String, byte[]> data = new ConcurrentSkipListMap<>();
+    private final ConcurrentMap<String, Long> versions = new ConcurrentHashMap<>();
     private final ConcurrentMap<String, SessionRecord> sessions = new ConcurrentHashMap<>();
     private final ReentrantReadWriteLock rwLock = new ReentrantReadWriteLock();
 
     private volatile long lastAppliedIndex = 0;
     private volatile long lastAppliedTerm = 0;
 
-    public static record SessionRecord(long sequenceNumber, byte[] lastResult) {}
+    public static record SessionRecord(long sequenceNumber, byte[] lastResult, long version) {
+        public SessionRecord(long sequenceNumber, byte[] lastResult) {
+            this(sequenceNumber, lastResult, 0L);
+        }
+    }
 
     @Override
     public ApplyResult apply(LogEntry entry) {
@@ -60,15 +65,45 @@ public class KeyValueStore implements StateMachine {
             }
 
             byte[] resultBytes = new byte[0];
+            long resultVersion = 0;
+            boolean casFailed = false;
+
             switch (command.getType()) {
-                case PUT:
+                case PUT: {
+                    long currentVer = versions.getOrDefault(command.getKey(), 0L);
+                    long newVer = currentVer + 1;
+                    versions.put(command.getKey(), newVer);
                     data.put(command.getKey(), command.getValue());
                     resultBytes = command.getValue();
+                    resultVersion = newVer;
                     break;
-                case DELETE:
+                }
+                case CAS: {
+                    long currentVer = versions.getOrDefault(command.getKey(), 0L);
+                    long expectedVer = command.getExpectedVersion();
+                    byte[] currentVal = data.get(command.getKey());
+
+                    if (currentVer != expectedVer) {
+                        // Conflict / version mismatch
+                        casFailed = true;
+                        resultBytes = currentVal != null ? currentVal.clone() : new byte[0];
+                        resultVersion = currentVer;
+                    } else {
+                        long newVer = currentVer + 1;
+                        versions.put(command.getKey(), newVer);
+                        data.put(command.getKey(), command.getValue());
+                        resultBytes = command.getValue();
+                        resultVersion = newVer;
+                    }
+                    break;
+                }
+                case DELETE: {
                     byte[] previous = data.remove(command.getKey());
+                    versions.remove(command.getKey());
                     resultBytes = previous != null ? previous : new byte[0];
+                    resultVersion = 0;
                     break;
+                }
                 case NOOP:
                     // Heartbeat or leader establishment entry
                     break;
@@ -76,13 +111,16 @@ public class KeyValueStore implements StateMachine {
 
             // Update session cache
             if (clientId != null && !clientId.isEmpty()) {
-                sessions.put(clientId, new SessionRecord(seqNum, resultBytes));
+                sessions.put(clientId, new SessionRecord(seqNum, resultBytes, resultVersion));
             }
 
             this.lastAppliedIndex = entry.getIndex();
             this.lastAppliedTerm = entry.getTerm();
 
-            return ApplyResult.ok(resultBytes);
+            if (casFailed) {
+                return ApplyResult.casMismatch(resultVersion, resultBytes);
+            }
+            return ApplyResult.ok(resultBytes, resultVersion);
         } finally {
             rwLock.writeLock().unlock();
         }
@@ -94,6 +132,18 @@ public class KeyValueStore implements StateMachine {
         try {
             byte[] value = data.get(key);
             return value != null ? value.clone() : null;
+        } finally {
+            rwLock.readLock().unlock();
+        }
+    }
+
+    @Override
+    public VersionedValue getVersioned(String key) {
+        rwLock.readLock().lock();
+        try {
+            byte[] value = data.get(key);
+            long ver = versions.getOrDefault(key, 0L);
+            return new VersionedValue(value != null ? value.clone() : null, ver);
         } finally {
             rwLock.readLock().unlock();
         }
@@ -165,7 +215,7 @@ public class KeyValueStore implements StateMachine {
                 out.writeLong(snapshotIndex);
                 out.writeLong(snapshotTerm);
 
-                // Key-Value data
+                // Key-Value data with versions
                 out.writeInt(data.size());
                 for (Map.Entry<String, byte[]> entry : data.entrySet()) {
                     byte[] keyBytes = entry.getKey().getBytes(StandardCharsets.UTF_8);
@@ -175,6 +225,9 @@ public class KeyValueStore implements StateMachine {
                     byte[] valBytes = entry.getValue();
                     out.writeInt(valBytes.length);
                     out.write(valBytes);
+
+                    long ver = versions.getOrDefault(entry.getKey(), 0L);
+                    out.writeLong(ver);
                 }
 
                 // Session deduplication table
@@ -188,6 +241,7 @@ public class KeyValueStore implements StateMachine {
                     out.writeLong(rec.sequenceNumber());
                     out.writeInt(rec.lastResult().length);
                     out.write(rec.lastResult());
+                    out.writeLong(rec.version());
                 }
 
                 out.flush();
@@ -222,6 +276,7 @@ public class KeyValueStore implements StateMachine {
 
                 // Clear current state
                 data.clear();
+                versions.clear();
                 sessions.clear();
 
                 // Read KV pairs
@@ -236,23 +291,41 @@ public class KeyValueStore implements StateMachine {
                     byte[] valBytes = new byte[valLen];
                     in.readFully(valBytes);
 
+                    long ver = 0L;
+                    // If stream still has available bytes for version or backward-compatible
+                    try {
+                        ver = in.readLong();
+                    } catch (EOFException e) {
+                        ver = 1L;
+                    }
+
                     data.put(key, valBytes);
+                    versions.put(key, ver);
                 }
 
                 // Read sessions
-                int sessionCount = in.readInt();
-                for (int i = 0; i < sessionCount; i++) {
-                    int clientLen = in.readInt();
-                    byte[] clientBytes = new byte[clientLen];
-                    in.readFully(clientBytes);
-                    String client = new String(clientBytes, StandardCharsets.UTF_8);
+                if (in.available() > 0) {
+                    int sessionCount = in.readInt();
+                    for (int i = 0; i < sessionCount; i++) {
+                        int clientLen = in.readInt();
+                        byte[] clientBytes = new byte[clientLen];
+                        in.readFully(clientBytes);
+                        String client = new String(clientBytes, StandardCharsets.UTF_8);
 
-                    long seqNum = in.readLong();
-                    int resLen = in.readInt();
-                    byte[] resBytes = new byte[resLen];
-                    in.readFully(resBytes);
+                        long seqNum = in.readLong();
+                        int resLen = in.readInt();
+                        byte[] resBytes = new byte[resLen];
+                        in.readFully(resBytes);
 
-                    sessions.put(client, new SessionRecord(seqNum, resBytes));
+                        long ver = 0L;
+                        if (in.available() >= 8) {
+                            try {
+                                ver = in.readLong();
+                            } catch (EOFException ignored) {}
+                        }
+
+                        sessions.put(client, new SessionRecord(seqNum, resBytes, ver));
+                    }
                 }
 
                 this.lastAppliedIndex = snapshotIndex;

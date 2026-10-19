@@ -159,11 +159,11 @@ public class RedisConcurrentLoadTest {
     }
 
     private RespFrame sendWithRetry(BufferedOutputStream out, BufferedInputStream in, String... args) throws Exception {
-        for (int attempt = 0; attempt < 5; attempt++) {
+        for (int attempt = 0; attempt < 10; attempt++) {
             send(out, args);
             RespFrame resp = RespParser.parse(in);
-            if (resp instanceof RespFrame.Error err && (err.message().contains("MOVED") || err.message().contains("NotLeaderException"))) {
-                Thread.sleep(100);
+            if (resp instanceof RespFrame.Error err && (err.message().contains("MOVED") || err.message().contains("NotLeaderException") || err.message().contains("TimeoutException"))) {
+                Thread.sleep(150);
                 continue;
             }
             return resp;

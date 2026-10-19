@@ -39,6 +39,7 @@ public class RaftHttpServer implements Closeable {
     private final io.raftline.core.shard.MultiRaftManager multiRaftManager;
     private final io.raftline.core.shard.txn.TwoPhaseCommitCoordinator txnCoordinator;
     private final io.raftline.core.agent.AgentLockManager agentLockManager;
+    private final io.raftline.core.agent.AgentSharedMemoryManager agentSharedMemoryManager;
     private final Map<String, Integer> peerHttpPorts;
     private final String apiKey;
     private final HttpServer server;
@@ -57,6 +58,7 @@ public class RaftHttpServer implements Closeable {
         this.multiRaftManager = multiRaftManager;
         this.txnCoordinator = (multiRaftManager != null) ? new io.raftline.core.shard.txn.TwoPhaseCommitCoordinator(multiRaftManager) : null;
         this.agentLockManager = (raftNode != null) ? new io.raftline.core.agent.AgentLockManager(raftNode) : null;
+        this.agentSharedMemoryManager = (raftNode != null) ? new io.raftline.core.agent.AgentSharedMemoryManager(raftNode) : null;
         this.peerHttpPorts = peerHttpPorts != null ? peerHttpPorts : Map.of();
         this.apiKey = (apiKey != null && !apiKey.isBlank()) ? apiKey.trim() : null;
 
@@ -97,6 +99,8 @@ public class RaftHttpServer implements Closeable {
         server.createContext("/v1/metrics", new MetricsHandler());
         server.createContext("/v1/admin/snapshot", new AdminSnapshotHandler());
         server.createContext("/v1/agent/lock", new AgentLockHandler());
+        server.createContext("/v1/agent/cas", new AgentCasHandler());
+        server.createContext("/v1/agent/state", new AgentStateHandler());
     }
 
     private class TxnHandler implements HttpHandler {
@@ -283,6 +287,162 @@ public class RaftHttpServer implements Closeable {
                     sendJson(exchange, 307, Map.of("error", "Node is not the leader", "leaderHint", nle.getLeaderHint() != null ? nle.getLeaderHint() : "unknown", "redirectUrl", redirectUrl != null ? redirectUrl : ""));
                 } else {
                     log.error("AgentLockHandler failure", e);
+                    sendJson(exchange, 500, Map.of("error", cause.getMessage() != null ? cause.getMessage() : e.getMessage()));
+                }
+            }
+        }
+    }
+
+    private class AgentCasHandler implements HttpHandler {
+        @Override
+        public void handle(HttpExchange exchange) throws IOException {
+            if (!isAuthorized(exchange)) {
+                sendJson(exchange, 401, Map.of("error", "Unauthorized: Valid API Key required"));
+                return;
+            }
+
+            if (!"POST".equalsIgnoreCase(exchange.getRequestMethod())) {
+                sendJson(exchange, 405, Map.of("error", "CAS requests must use POST"));
+                return;
+            }
+
+            if (raftNode == null) {
+                sendJson(exchange, 501, Map.of("error", "RaftNode is not initialized on this instance"));
+                return;
+            }
+
+            String path = exchange.getRequestURI().getPath();
+            try {
+                Map<String, Object> body = json.readValue(exchange.getRequestBody(), Map.class);
+                String key = (String) body.get("key");
+                if (key == null || key.isBlank()) {
+                    sendJson(exchange, 400, Map.of("error", "Missing required field: key"));
+                    return;
+                }
+
+                if (!body.containsKey("expectedVersion")) {
+                    sendJson(exchange, 400, Map.of("error", "Missing required field: expectedVersion"));
+                    return;
+                }
+                long expectedVersion = ((Number) body.get("expectedVersion")).longValue();
+
+                Object valueObj = body.get("value");
+                byte[] valueBytes = new byte[0];
+                if (valueObj != null) {
+                    if (valueObj instanceof String str) {
+                        valueBytes = str.getBytes(StandardCharsets.UTF_8);
+                    } else {
+                        valueBytes = json.writeValueAsBytes(valueObj);
+                    }
+                }
+
+                String agentId = (String) body.getOrDefault("agentId", "agent-anonymous");
+                long seqNum = System.nanoTime();
+
+                ApplyResult result = raftNode.compareAndSwap(key, expectedVersion, valueBytes, "agent:" + agentId, seqNum)
+                        .get(5, TimeUnit.SECONDS);
+
+                if (result.isSuccess()) {
+                    sendJson(exchange, 200, Map.of(
+                            "status", "COMMITTED",
+                            "key", key,
+                            "version", result.getVersion()
+                    ));
+                } else if ("CAS_VERSION_MISMATCH".equals(result.getError())) {
+                    String actualValStr = (result.getValue() != null && result.getValue().length > 0)
+                            ? new String(result.getValue(), StandardCharsets.UTF_8)
+                            : null;
+                    sendJson(exchange, 409, Map.of(
+                            "status", "VERSION_MISMATCH",
+                            "error", "Compare-And-Swap version mismatch",
+                            "key", key,
+                            "expectedVersion", expectedVersion,
+                            "actualVersion", result.getVersion(),
+                            "currentValue", actualValStr != null ? actualValStr : ""
+                    ));
+                } else {
+                    sendJson(exchange, 500, Map.of("error", "Failed to apply CAS command", "details", result.getError() != null ? result.getError() : "Unknown error"));
+                }
+            } catch (Exception e) {
+                Throwable cause = (e instanceof ExecutionException) ? e.getCause() : e;
+                if (cause instanceof RuntimeException && cause.getCause() != null) {
+                    cause = cause.getCause();
+                }
+                if (cause instanceof ExecutionException && cause.getCause() != null) {
+                    cause = cause.getCause();
+                }
+                if (cause instanceof NotLeaderException nle) {
+                    Integer leaderPort = peerHttpPorts.get(nle.getLeaderHint());
+                    String redirectUrl = (leaderPort != null) ? "http://localhost:" + leaderPort + path : null;
+                    if (redirectUrl != null) {
+                        exchange.getResponseHeaders().set("Location", redirectUrl);
+                    }
+                    sendJson(exchange, 307, Map.of("error", "Node is not the leader", "leaderHint", nle.getLeaderHint() != null ? nle.getLeaderHint() : "unknown", "redirectUrl", redirectUrl != null ? redirectUrl : ""));
+                } else {
+                    log.error("AgentCasHandler failure", e);
+                    sendJson(exchange, 500, Map.of("error", cause.getMessage() != null ? cause.getMessage() : e.getMessage()));
+                }
+            }
+        }
+    }
+
+    private class AgentStateHandler implements HttpHandler {
+        @Override
+        public void handle(HttpExchange exchange) throws IOException {
+            if (!isAuthorized(exchange)) {
+                sendJson(exchange, 401, Map.of("error", "Unauthorized: Valid API Key required"));
+                return;
+            }
+
+            if (!"GET".equalsIgnoreCase(exchange.getRequestMethod())) {
+                sendJson(exchange, 405, Map.of("error", "State reads must use GET"));
+                return;
+            }
+
+            if (raftNode == null) {
+                sendJson(exchange, 501, Map.of("error", "RaftNode is not initialized on this instance"));
+                return;
+            }
+
+            String path = exchange.getRequestURI().getPath();
+            try {
+                Map<String, String> query = parseQueryParams(exchange.getRequestURI().getQuery());
+                String key = query.get("key");
+                if (key == null || key.isBlank()) {
+                    sendJson(exchange, 400, Map.of("error", "Query parameter 'key' is required"));
+                    return;
+                }
+
+                io.raftline.storage.state.VersionedValue vv = raftNode.readLinearizableVersioned(key).get(5, TimeUnit.SECONDS);
+                if (vv == null || vv.version() == 0 || vv.value() == null) {
+                    sendJson(exchange, 404, Map.of("status", "NOT_FOUND", "key", key, "version", 0));
+                    return;
+                }
+
+                String valStr = new String(vv.value(), StandardCharsets.UTF_8);
+                sendJson(exchange, 200, Map.of(
+                        "status", "FOUND",
+                        "key", key,
+                        "value", valStr,
+                        "version", vv.version()
+                ));
+            } catch (Exception e) {
+                Throwable cause = (e instanceof ExecutionException) ? e.getCause() : e;
+                if (cause instanceof RuntimeException && cause.getCause() != null) {
+                    cause = cause.getCause();
+                }
+                if (cause instanceof ExecutionException && cause.getCause() != null) {
+                    cause = cause.getCause();
+                }
+                if (cause instanceof NotLeaderException nle) {
+                    Integer leaderPort = peerHttpPorts.get(nle.getLeaderHint());
+                    String redirectUrl = (leaderPort != null) ? "http://localhost:" + leaderPort + path + (exchange.getRequestURI().getQuery() != null ? "?" + exchange.getRequestURI().getQuery() : "") : null;
+                    if (redirectUrl != null) {
+                        exchange.getResponseHeaders().set("Location", redirectUrl);
+                    }
+                    sendJson(exchange, 307, Map.of("error", "Node is not the leader", "leaderHint", nle.getLeaderHint() != null ? nle.getLeaderHint() : "unknown", "redirectUrl", redirectUrl != null ? redirectUrl : ""));
+                } else {
+                    log.error("AgentStateHandler failure", e);
                     sendJson(exchange, 500, Map.of("error", cause.getMessage() != null ? cause.getMessage() : e.getMessage()));
                 }
             }

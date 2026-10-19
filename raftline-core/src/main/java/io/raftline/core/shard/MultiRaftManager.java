@@ -104,6 +104,29 @@ public class MultiRaftManager implements Closeable {
         return group.readLinearizable(key);
     }
 
+    /**
+     * Performs a linearizable versioned read by routing the key to the responsible local shard group.
+     */
+    public CompletableFuture<io.raftline.storage.state.VersionedValue> readLinearizableVersioned(String key) {
+        Objects.requireNonNull(key, "key");
+        Optional<ShardInfo> shardOpt = router.findShardForKey(key);
+        if (shardOpt.isEmpty()) {
+            CompletableFuture<io.raftline.storage.state.VersionedValue> f = new CompletableFuture<>();
+            f.completeExceptionally(new NoSuchElementException("No shard found covering key: " + key));
+            return f;
+        }
+
+        String shardId = shardOpt.get().shardId();
+        RaftNode group = activeGroups.get(shardId);
+        if (group == null) {
+            CompletableFuture<io.raftline.storage.state.VersionedValue> f = new CompletableFuture<>();
+            f.completeExceptionally(new IllegalStateException("Local node " + localNodeId + " does not host replica for shard " + shardId));
+            return f;
+        }
+
+        return group.readLinearizableVersioned(key);
+    }
+
     @Override
     public synchronized void close() throws IOException {
         log.info("Closing MultiRaftManager on node {}", localNodeId);
