@@ -7,6 +7,7 @@ import com.sun.net.httpserver.HttpHandler;
 import com.sun.net.httpserver.HttpServer;
 import io.raftline.core.NotLeaderException;
 import io.raftline.core.RaftNode;
+import io.raftline.core.payment.*;
 import io.raftline.storage.model.Command;
 import io.raftline.storage.state.ApplyResult;
 import org.slf4j.Logger;
@@ -25,6 +26,7 @@ import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ExecutionException;
@@ -115,6 +117,18 @@ public class RaftHttpServer implements Closeable {
         server.createContext("/v1/chaos/heal", new ChaosHealHandler());
         server.createContext("/v1/chaos/status", new ChaosStatusHandler());
         server.createContext("/v1/chaos/verify", new ChaosVerifyHandler());
+        server.createContext("/v1/dbaas/tenants", new DbaasTenantsHandler());
+        server.createContext("/v1/dbaas/backup", new DbaasBackupHandler());
+        server.createContext("/v1/dbaas/backups", new DbaasBackupsListHandler());
+        // Real-Time Payment Settlement & Idempotency Switch
+        server.createContext("/v1/payments/settle", new PaymentSettleHandler());
+        server.createContext("/v1/payments/authorize", new PaymentAuthorizeHandler());
+        server.createContext("/v1/payments/capture", new PaymentCaptureHandler());
+        server.createContext("/v1/payments/void", new PaymentVoidHandler());
+        server.createContext("/v1/payments/accounts", new PaymentAccountsHandler());
+        server.createContext("/v1/payments/account", new PaymentAccountDetailHandler());
+        server.createContext("/v1/payments/transactions", new PaymentTransactionsHandler());
+        server.createContext("/v1/payments/metrics", new PaymentMetricsHandler());
         DashboardHandler dashboardHandler = new DashboardHandler();
         server.createContext("/dashboard", dashboardHandler);
         server.createContext("/ui", dashboardHandler);
@@ -1110,6 +1124,22 @@ public class RaftHttpServer implements Closeable {
         }
     }
 
+    private void handleNotLeader(HttpExchange exchange, String leaderHint) throws IOException {
+        Integer leaderPort = peerHttpPorts.get(leaderHint);
+        String redirectUrl = (leaderPort != null)
+                ? "http://localhost:" + leaderPort + exchange.getRequestURI().toString()
+                : null;
+
+        if (redirectUrl != null) {
+            exchange.getResponseHeaders().set("Location", redirectUrl);
+        }
+        sendJson(exchange, 307, Map.of(
+                "error", "Node is not the leader",
+                "leaderHint", leaderHint != null ? leaderHint : "unknown",
+                "redirectUrl", redirectUrl != null ? redirectUrl : ""
+        ));
+    }
+
     private Map<String, String> parseQueryParams(String query) {
         if (query == null || query.isBlank()) return Collections.emptyMap();
         Map<String, String> map = new java.util.LinkedHashMap<>();
@@ -1130,6 +1160,29 @@ public class RaftHttpServer implements Closeable {
             if (!isAuthorized(exchange)) {
                 sendJson(exchange, 401, Map.of("error", "Unauthorized: Valid API Key required"));
                 return;
+            }
+
+            // Tenant resolution & token-bucket rate limiting
+            String tenantId = exchange.getRequestHeaders().getFirst("X-Tenant-Id");
+            if (tenantId == null || tenantId.isBlank()) {
+                Map<String, String> q = parseQueryParams(exchange.getRequestURI().getQuery());
+                tenantId = q.get("tenantId");
+            }
+            if (tenantId != null && !tenantId.isBlank() && raftNode != null && raftNode.getTenantManager() != null) {
+                var tenantOpt = raftNode.getTenantManager().getTenant(tenantId);
+                if (tenantOpt.isEmpty()) {
+                    sendJson(exchange, 404, Map.of("error", "Tenant not found: " + tenantId));
+                    return;
+                }
+                if (!raftNode.getTenantManager().tryAcquire(tenantId)) {
+                    exchange.getResponseHeaders().set("Retry-After", "1");
+                    sendJson(exchange, 429, Map.of(
+                            "error", "Too Many Requests: Rate limit exceeded for tenant " + tenantId,
+                            "tenantId", tenantId,
+                            "status", 429
+                    ));
+                    return;
+                }
             }
 
             String path = exchange.getRequestURI().getPath();
@@ -1157,6 +1210,7 @@ public class RaftHttpServer implements Closeable {
                     List<Command> commands = new ArrayList<>();
                     long baseSeq = System.nanoTime();
                     int idx = 0;
+                    int batchBytes = 0;
                     for (JsonNode opNode : root) {
                         String op = opNode.has("op") ? opNode.get("op").asText().toUpperCase() : "PUT";
                         String opKey = opNode.has("key") ? opNode.get("key").asText() : null;
@@ -1165,11 +1219,17 @@ public class RaftHttpServer implements Closeable {
                             return;
                         }
 
+                        String effectiveOpKey = (tenantId != null && !tenantId.isBlank() && raftNode != null && raftNode.getTenantManager() != null)
+                                ? raftNode.getTenantManager().toTenantKey(tenantId, opKey)
+                                : opKey;
+
                         if ("PUT".equals(op)) {
                             String val = opNode.has("value") ? opNode.get("value").asText() : "";
-                            commands.add(Command.put(opKey, val.getBytes(StandardCharsets.UTF_8), clientId, baseSeq + idx));
+                            byte[] valBytes = val.getBytes(StandardCharsets.UTF_8);
+                            batchBytes += valBytes.length;
+                            commands.add(Command.put(effectiveOpKey, valBytes, clientId, baseSeq + idx));
                         } else if ("DELETE".equals(op)) {
-                            commands.add(Command.delete(opKey, clientId, baseSeq + idx));
+                            commands.add(Command.delete(effectiveOpKey, clientId, baseSeq + idx));
                         } else {
                             sendJson(exchange, 400, Map.of("error", "Unsupported batch operation: " + op));
                             return;
@@ -1178,6 +1238,9 @@ public class RaftHttpServer implements Closeable {
                     }
 
                     List<ApplyResult> results = raftNode.executeBatch(commands).get(15, TimeUnit.SECONDS);
+                    if (tenantId != null && !tenantId.isBlank() && raftNode != null && raftNode.getTenantManager() != null) {
+                        raftNode.getTenantManager().recordOp(tenantId, batchBytes);
+                    }
                     sendJson(exchange, 200, Map.of(
                             "status", "COMMITTED",
                             "count", results.size()
@@ -1207,17 +1270,32 @@ public class RaftHttpServer implements Closeable {
                 int limit = qMap.containsKey("limit") ? Integer.parseInt(qMap.get("limit")) : 100;
                 boolean stale = "true".equalsIgnoreCase(qMap.get("stale"));
 
+                String effectiveFrom = (tenantId != null && !tenantId.isBlank() && raftNode != null && raftNode.getTenantManager() != null)
+                        ? raftNode.getTenantManager().toTenantKey(tenantId, from != null ? from : "")
+                        : from;
+                String effectiveTo = (tenantId != null && !tenantId.isBlank() && raftNode != null && raftNode.getTenantManager() != null)
+                        ? raftNode.getTenantManager().toTenantKey(tenantId, to != null ? to : "\uffff")
+                        : to;
+
                 try {
                     Map<String, byte[]> scanResults;
                     if (stale) {
-                        scanResults = raftNode.scanStale(from, to, limit);
+                        scanResults = raftNode.scanStale(effectiveFrom, effectiveTo, limit);
                     } else {
-                        scanResults = raftNode.scanLinearizable(from, to, limit).get(5, TimeUnit.SECONDS);
+                        scanResults = raftNode.scanLinearizable(effectiveFrom, effectiveTo, limit).get(5, TimeUnit.SECONDS);
                     }
 
                     Map<String, String> stringResults = new java.util.LinkedHashMap<>();
+                    int totalBytes = 0;
                     for (Map.Entry<String, byte[]> e : scanResults.entrySet()) {
-                        stringResults.put(e.getKey(), new String(e.getValue(), StandardCharsets.UTF_8));
+                        String userKey = (tenantId != null && !tenantId.isBlank() && raftNode != null && raftNode.getTenantManager() != null)
+                                ? raftNode.getTenantManager().fromTenantKey(tenantId, e.getKey())
+                                : e.getKey();
+                        stringResults.put(userKey, new String(e.getValue(), StandardCharsets.UTF_8));
+                        totalBytes += e.getValue().length;
+                    }
+                    if (tenantId != null && !tenantId.isBlank() && raftNode != null && raftNode.getTenantManager() != null) {
+                        raftNode.getTenantManager().recordOp(tenantId, totalBytes);
                     }
 
                     sendJson(exchange, 200, Map.of(
@@ -1247,6 +1325,9 @@ public class RaftHttpServer implements Closeable {
             }
 
             String key = path.substring(prefix.length());
+            String effectiveKey = (tenantId != null && !tenantId.isBlank() && raftNode != null && raftNode.getTenantManager() != null)
+                    ? raftNode.getTenantManager().toTenantKey(tenantId, key)
+                    : key;
 
             String clientId = exchange.getRequestHeaders().getFirst("X-Client-Id");
             if (clientId == null || clientId.isBlank()) {
@@ -1259,17 +1340,23 @@ public class RaftHttpServer implements Closeable {
             try {
                 if ("PUT".equalsIgnoreCase(method)) {
                     byte[] valueBytes = exchange.getRequestBody().readAllBytes();
-                    Command cmd = Command.put(key, valueBytes, clientId, seqNum);
+                    Command cmd = Command.put(effectiveKey, valueBytes, clientId, seqNum);
 
                     ApplyResult result = raftNode.execute(cmd).get(10, TimeUnit.SECONDS);
+                    if (tenantId != null && !tenantId.isBlank() && raftNode.getTenantManager() != null) {
+                        raftNode.getTenantManager().recordOp(tenantId, valueBytes.length);
+                    }
                     sendJson(exchange, 200, Map.of(
                             "status", "COMMITTED",
                             "key", key,
                             "duplicate", result.isDuplicate()
                     ));
                 } else if ("DELETE".equalsIgnoreCase(method)) {
-                    Command cmd = Command.delete(key, clientId, seqNum);
+                    Command cmd = Command.delete(effectiveKey, clientId, seqNum);
                     ApplyResult result = raftNode.execute(cmd).get(10, TimeUnit.SECONDS);
+                    if (tenantId != null && !tenantId.isBlank() && raftNode.getTenantManager() != null) {
+                        raftNode.getTenantManager().recordOp(tenantId, 0);
+                    }
                     sendJson(exchange, 200, Map.of(
                             "status", "COMMITTED",
                             "key", key,
@@ -1281,9 +1368,13 @@ public class RaftHttpServer implements Closeable {
 
                     byte[] valueBytes;
                     if (stale) {
-                        valueBytes = raftNode.readStale(key);
+                        valueBytes = raftNode.readStale(effectiveKey);
                     } else {
-                        valueBytes = raftNode.readLinearizable(key).get(5, TimeUnit.SECONDS);
+                        valueBytes = raftNode.readLinearizable(effectiveKey).get(5, TimeUnit.SECONDS);
+                    }
+
+                    if (tenantId != null && !tenantId.isBlank() && raftNode.getTenantManager() != null) {
+                        raftNode.getTenantManager().recordOp(tenantId, valueBytes != null ? valueBytes.length : 0);
                     }
 
                     if (valueBytes == null) {
@@ -1312,22 +1403,6 @@ public class RaftHttpServer implements Closeable {
                 log.error("Internal server error", e);
                 sendJson(exchange, 500, Map.of("error", e.getMessage()));
             }
-        }
-
-        private void handleNotLeader(HttpExchange exchange, String leaderHint) throws IOException {
-            Integer leaderPort = peerHttpPorts.get(leaderHint);
-            String redirectUrl = (leaderPort != null)
-                    ? "http://localhost:" + leaderPort + exchange.getRequestURI().toString()
-                    : null;
-
-            if (redirectUrl != null) {
-                exchange.getResponseHeaders().set("Location", redirectUrl);
-            }
-            sendJson(exchange, 307, Map.of(
-                    "error", "Node is not the leader",
-                    "leaderHint", leaderHint != null ? leaderHint : "unknown",
-                    "redirectUrl", redirectUrl != null ? redirectUrl : ""
-            ));
         }
     }
 
@@ -1665,6 +1740,31 @@ public class RaftHttpServer implements Closeable {
                 overview.put("chaos", chaos);
             } catch (Exception ignored) {}
 
+            // DBaaS and Tenant info
+            try {
+                if (raftNode.getTenantManager() != null) {
+                    Map<String, Object> dbaas = new LinkedHashMap<>();
+                    var tenants = raftNode.getTenantManager().getAllTenants();
+                    List<Map<String, Object>> tenantList = new ArrayList<>();
+                    for (var t : tenants) {
+                        tenantList.add(raftNode.getTenantManager().getTenantSummary(t.tenantId()));
+                    }
+                    dbaas.put("totalTenants", tenants.size());
+                    dbaas.put("tenants", tenantList);
+
+                    if (raftNode.getBackupEngine() != null) {
+                        var backups = raftNode.getBackupEngine().listBackups();
+                        List<Map<String, Object>> backupList = new ArrayList<>();
+                        for (var b : backups) {
+                            backupList.add(b.toMap());
+                        }
+                        dbaas.put("totalBackups", backups.size());
+                        dbaas.put("backups", backupList);
+                    }
+                    overview.put("dbaas", dbaas);
+                }
+            } catch (Exception ignored) {}
+
             sendJson(exchange, 200, overview);
         }
     }
@@ -1793,6 +1893,571 @@ public class RaftHttpServer implements Closeable {
                 log.error("Error verifying chaos health", e);
                 sendJson(exchange, 500, Map.of("error", e.getMessage() != null ? e.getMessage() : "Internal error"));
             }
+        }
+    }
+
+    private class DbaasTenantsHandler implements HttpHandler {
+        @Override
+        public void handle(HttpExchange exchange) throws IOException {
+            if (!isAuthorized(exchange)) {
+                sendJson(exchange, 401, Map.of("error", "Unauthorized: Valid API Key required"));
+                return;
+            }
+            if (raftNode == null || raftNode.getTenantManager() == null) {
+                sendJson(exchange, 501, Map.of("error", "DBaaS TenantManager is not initialized on this node"));
+                return;
+            }
+
+            String path = exchange.getRequestURI().getPath();
+            String method = exchange.getRequestMethod().toUpperCase();
+            String prefix = "/v1/dbaas/tenants/";
+
+            if ("GET".equals(method)) {
+                if (path.length() > prefix.length()) {
+                    String tenantId = path.substring(prefix.length());
+                    var tenantOpt = raftNode.getTenantManager().getTenant(tenantId);
+                    if (tenantOpt.isPresent()) {
+                        sendJson(exchange, 200, raftNode.getTenantManager().getTenantSummary(tenantId));
+                    } else {
+                        sendJson(exchange, 404, Map.of("error", "Tenant not found: " + tenantId));
+                    }
+                    return;
+                }
+
+                // List all tenants
+                var tenants = raftNode.getTenantManager().getAllTenants();
+                List<Map<String, Object>> list = new ArrayList<>(tenants.size());
+                for (var t : tenants) {
+                    list.add(raftNode.getTenantManager().getTenantSummary(t.tenantId()));
+                }
+                sendJson(exchange, 200, Map.of(
+                        "status", "OK",
+                        "count", list.size(),
+                        "tenants", list
+                ));
+                return;
+            }
+
+            if ("POST".equals(method)) {
+                try {
+                    Map<String, Object> body = json.readValue(exchange.getRequestBody(), Map.class);
+                    String tenantId = (String) body.get("tenantId");
+                    if (tenantId == null || tenantId.isBlank()) {
+                        sendJson(exchange, 400, Map.of("error", "tenantId is required"));
+                        return;
+                    }
+                    String name = (String) body.getOrDefault("name", tenantId);
+                    String tier = (String) body.getOrDefault("tier", "STARTER");
+                    io.raftline.core.dbaas.Tenant tenant = io.raftline.core.dbaas.Tenant.create(tenantId, name, tier);
+                    if (body.containsKey("maxOpsPerSec")) {
+                        int rps = ((Number) body.get("maxOpsPerSec")).intValue();
+                        long keys = body.containsKey("maxKeys") ? ((Number) body.get("maxKeys")).longValue() : tenant.maxKeys();
+                        long bytes = body.containsKey("maxStorageBytes") ? ((Number) body.get("maxStorageBytes")).longValue() : tenant.maxStorageBytes();
+                        tenant = new io.raftline.core.dbaas.Tenant(tenantId, name, tier.toUpperCase(), rps, keys, bytes, System.currentTimeMillis(), "ACTIVE");
+                    }
+                    raftNode.getTenantManager().registerTenant(tenant);
+                    sendJson(exchange, 201, Map.of(
+                            "status", "CREATED",
+                            "tenant", raftNode.getTenantManager().getTenantSummary(tenantId)
+                    ));
+                } catch (Exception e) {
+                    log.error("Failed to register tenant", e);
+                    sendJson(exchange, 500, Map.of("error", e.getMessage()));
+                }
+                return;
+            }
+
+            if ("DELETE".equals(method)) {
+                String tenantId = null;
+                if (path.length() > prefix.length()) {
+                    tenantId = path.substring(prefix.length());
+                } else {
+                    Map<String, String> q = parseQueryParams(exchange.getRequestURI().getQuery());
+                    tenantId = q.get("tenantId");
+                }
+
+                if (tenantId == null || tenantId.isBlank()) {
+                    sendJson(exchange, 400, Map.of("error", "tenantId is required in URL or query parameter"));
+                    return;
+                }
+
+                if ("default".equalsIgnoreCase(tenantId)) {
+                    sendJson(exchange, 400, Map.of("error", "Cannot delete default workspace tenant"));
+                    return;
+                }
+
+                boolean deleted = raftNode.getTenantManager().deleteTenant(tenantId);
+                if (deleted) {
+                    sendJson(exchange, 200, Map.of("status", "DELETED", "tenantId", tenantId));
+                } else {
+                    sendJson(exchange, 404, Map.of("error", "Tenant not found: " + tenantId));
+                }
+                return;
+            }
+
+            sendJson(exchange, 405, Map.of("error", "Method not allowed: " + method));
+        }
+    }
+
+    private class DbaasBackupHandler implements HttpHandler {
+        @Override
+        public void handle(HttpExchange exchange) throws IOException {
+            if (!isAuthorized(exchange)) {
+                sendJson(exchange, 401, Map.of("error", "Unauthorized: Valid API Key required"));
+                return;
+            }
+            if (raftNode == null || raftNode.getBackupEngine() == null) {
+                sendJson(exchange, 501, Map.of("error", "CloudBackupEngine is not initialized on this node"));
+                return;
+            }
+
+            String method = exchange.getRequestMethod().toUpperCase();
+            if ("POST".equals(method)) {
+                String bucket = "s3://raftline-backups";
+                try {
+                    byte[] bytes = exchange.getRequestBody().readAllBytes();
+                    if (bytes.length > 0) {
+                        Map<String, Object> req = json.readValue(bytes, Map.class);
+                        if (req.containsKey("bucket")) bucket = (String) req.get("bucket");
+                        if (req.containsKey("targetBucket")) bucket = (String) req.get("targetBucket");
+                    }
+                } catch (Exception ignored) {}
+
+                var manifest = raftNode.getBackupEngine().exportBackup(bucket);
+                sendJson(exchange, 201, Map.of(
+                        "status", "CREATED",
+                        "backup", manifest.toMap()
+                ));
+                return;
+            }
+
+            if ("GET".equals(method)) {
+                var backups = raftNode.getBackupEngine().listBackups();
+                List<Map<String, Object>> list = new ArrayList<>(backups.size());
+                for (var b : backups) {
+                    list.add(b.toMap());
+                }
+                sendJson(exchange, 200, Map.of(
+                        "status", "OK",
+                        "count", list.size(),
+                        "backups", list
+                ));
+                return;
+            }
+
+            sendJson(exchange, 405, Map.of("error", "Method not allowed: " + method));
+        }
+    }
+
+    private class DbaasBackupsListHandler implements HttpHandler {
+        @Override
+        public void handle(HttpExchange exchange) throws IOException {
+            new DbaasBackupHandler().handle(exchange);
+        }
+    }
+
+    // =========================================================================
+    // Real-Time Payment Settlement & Idempotency Switch HTTP Handlers
+    // =========================================================================
+
+    private class PaymentSettleHandler implements HttpHandler {
+        @Override
+        public void handle(HttpExchange exchange) throws IOException {
+            if (!isAuthorized(exchange)) {
+                sendJson(exchange, 401, Map.of("error", "Unauthorized: Valid API Key required"));
+                return;
+            }
+            if (raftNode == null || raftNode.getPaymentEngine() == null) {
+                sendJson(exchange, 501, Map.of("error", "PaymentSettlementEngine is not initialized on this node"));
+                return;
+            }
+            if (!"POST".equalsIgnoreCase(exchange.getRequestMethod())) {
+                sendJson(exchange, 405, Map.of("error", "Payment settlement requires POST"));
+                return;
+            }
+
+            try {
+                byte[] body = exchange.getRequestBody().readAllBytes();
+                if (body.length == 0) {
+                    sendJson(exchange, 400, Map.of("error", "Empty payment instruction body"));
+                    return;
+                }
+
+                JsonNode root = json.readTree(body);
+                String idempKey = root.has("idempotencyKey") ? root.get("idempotencyKey").asText() : null;
+                if (idempKey == null || idempKey.isBlank()) {
+                    idempKey = exchange.getRequestHeaders().getFirst("Idempotency-Key");
+                    if (idempKey == null || idempKey.isBlank()) {
+                        idempKey = exchange.getRequestHeaders().getFirst("X-Idempotency-Key");
+                    }
+                }
+                if (idempKey == null || idempKey.isBlank()) {
+                    sendJson(exchange, 400, Map.of("error", "Missing required idempotencyKey (in body or Idempotency-Key header)"));
+                    return;
+                }
+
+                String railStr = root.has("rail") ? root.get("rail").asText() : "INTERNAL_BOOK";
+                PaymentRail rail = PaymentRail.fromString(railStr);
+                String sourceAcc = root.has("sourceAccountId") ? root.get("sourceAccountId").asText() : null;
+                String destAcc = root.has("destinationAccountId") ? root.get("destinationAccountId").asText() : null;
+                long amountCents = root.has("amountCents") ? root.get("amountCents").asLong() : 0L;
+                String currency = root.has("currency") ? root.get("currency").asText() : "USD";
+                String description = root.has("description") ? root.get("description").asText() : "";
+                String tenantId = root.has("tenantId") ? root.get("tenantId").asText() : exchange.getRequestHeaders().getFirst("X-Tenant-Id");
+
+                if (tenantId != null && !tenantId.isBlank() && raftNode.getTenantManager() != null) {
+                    if (!raftNode.getTenantManager().tryAcquire(tenantId)) {
+                        exchange.getResponseHeaders().set("Retry-After", "1");
+                        sendJson(exchange, 429, Map.of("error", "Rate limit exceeded for tenant " + tenantId, "status", 429));
+                        return;
+                    }
+                }
+
+                PaymentInstruction inst = new PaymentInstruction(idempKey, rail, sourceAcc, destAcc, amountCents, currency, description, tenantId, null);
+                PaymentResult result = raftNode.getPaymentEngine().settlePayment(inst).get(15, java.util.concurrent.TimeUnit.SECONDS);
+
+                exchange.getResponseHeaders().set("X-Idempotent-Replay", String.valueOf(result.isIdempotentReplay()));
+                int statusCode = (result.getStatus() == PaymentStatus.SETTLED) ? 200 : 422;
+                sendJson(exchange, statusCode, result.toMap());
+            } catch (ExecutionException e) {
+                Throwable cause = e.getCause();
+                if (cause instanceof NotLeaderException nle) {
+                    handleNotLeader(exchange, nle.getLeaderHint());
+                } else {
+                    sendJson(exchange, 500, Map.of("error", cause != null ? cause.getMessage() : e.getMessage()));
+                }
+            } catch (Exception e) {
+                sendJson(exchange, 500, Map.of("error", e.getMessage()));
+            }
+        }
+    }
+
+    private class PaymentAuthorizeHandler implements HttpHandler {
+        @Override
+        public void handle(HttpExchange exchange) throws IOException {
+            if (!isAuthorized(exchange)) {
+                sendJson(exchange, 401, Map.of("error", "Unauthorized: Valid API Key required"));
+                return;
+            }
+            if (raftNode == null || raftNode.getPaymentEngine() == null) {
+                sendJson(exchange, 501, Map.of("error", "PaymentSettlementEngine is not initialized on this node"));
+                return;
+            }
+            if (!"POST".equalsIgnoreCase(exchange.getRequestMethod())) {
+                sendJson(exchange, 405, Map.of("error", "Payment authorization requires POST"));
+                return;
+            }
+
+            try {
+                byte[] body = exchange.getRequestBody().readAllBytes();
+                JsonNode root = json.readTree(body);
+
+                String idempKey = root.has("idempotencyKey") ? root.get("idempotencyKey").asText() : null;
+                if (idempKey == null || idempKey.isBlank()) {
+                    idempKey = exchange.getRequestHeaders().getFirst("Idempotency-Key");
+                }
+                if (idempKey == null || idempKey.isBlank()) {
+                    sendJson(exchange, 400, Map.of("error", "Missing required idempotencyKey"));
+                    return;
+                }
+
+                String holdId = root.has("holdId") ? root.get("holdId").asText() : null;
+                long ttlMillis = root.has("ttlMillis") ? root.get("ttlMillis").asLong() : 86_400_000L;
+                String sourceAcc = root.has("sourceAccountId") ? root.get("sourceAccountId").asText() : null;
+                String destAcc = root.has("destinationAccountId") ? root.get("destinationAccountId").asText() : null;
+                long amountCents = root.has("amountCents") ? root.get("amountCents").asLong() : 0L;
+                String currency = root.has("currency") ? root.get("currency").asText() : "USD";
+                String description = root.has("description") ? root.get("description").asText() : "";
+                String tenantId = root.has("tenantId") ? root.get("tenantId").asText() : exchange.getRequestHeaders().getFirst("X-Tenant-Id");
+
+                PaymentInstruction inst = new PaymentInstruction(idempKey, PaymentRail.INTERNAL_BOOK, sourceAcc, destAcc, amountCents, currency, description, tenantId, null);
+                PaymentResult result = raftNode.getPaymentEngine().authorizeHold(inst, holdId, ttlMillis).get(15, java.util.concurrent.TimeUnit.SECONDS);
+
+                exchange.getResponseHeaders().set("X-Idempotent-Replay", String.valueOf(result.isIdempotentReplay()));
+                int statusCode = (result.getStatus() == PaymentStatus.AUTHORIZED) ? 201 : 422;
+                sendJson(exchange, statusCode, result.toMap());
+            } catch (ExecutionException e) {
+                Throwable cause = e.getCause();
+                if (cause instanceof NotLeaderException nle) {
+                    handleNotLeader(exchange, nle.getLeaderHint());
+                } else {
+                    sendJson(exchange, 500, Map.of("error", cause != null ? cause.getMessage() : e.getMessage()));
+                }
+            } catch (Exception e) {
+                sendJson(exchange, 500, Map.of("error", e.getMessage()));
+            }
+        }
+    }
+
+    private class PaymentCaptureHandler implements HttpHandler {
+        @Override
+        public void handle(HttpExchange exchange) throws IOException {
+            if (!isAuthorized(exchange)) {
+                sendJson(exchange, 401, Map.of("error", "Unauthorized: Valid API Key required"));
+                return;
+            }
+            if (raftNode == null || raftNode.getPaymentEngine() == null) {
+                sendJson(exchange, 501, Map.of("error", "PaymentSettlementEngine is not initialized on this node"));
+                return;
+            }
+            if (!"POST".equalsIgnoreCase(exchange.getRequestMethod())) {
+                sendJson(exchange, 405, Map.of("error", "Payment capture requires POST"));
+                return;
+            }
+
+            try {
+                byte[] body = exchange.getRequestBody().readAllBytes();
+                JsonNode root = json.readTree(body);
+                String holdId = root.has("holdId") ? root.get("holdId").asText() : null;
+                if (holdId == null || holdId.isBlank()) {
+                    sendJson(exchange, 400, Map.of("error", "Missing required field: holdId"));
+                    return;
+                }
+                String idempKey = root.has("idempotencyKey") ? root.get("idempotencyKey").asText() : exchange.getRequestHeaders().getFirst("Idempotency-Key");
+                String tenantId = root.has("tenantId") ? root.get("tenantId").asText() : exchange.getRequestHeaders().getFirst("X-Tenant-Id");
+
+                PaymentResult result = raftNode.getPaymentEngine().captureHold(holdId, tenantId, idempKey).get(15, java.util.concurrent.TimeUnit.SECONDS);
+                sendJson(exchange, 200, result.toMap());
+            } catch (ExecutionException e) {
+                Throwable cause = e.getCause();
+                if (cause instanceof NotLeaderException nle) {
+                    handleNotLeader(exchange, nle.getLeaderHint());
+                } else {
+                    sendJson(exchange, 500, Map.of("error", cause != null ? cause.getMessage() : e.getMessage()));
+                }
+            } catch (Exception e) {
+                sendJson(exchange, 500, Map.of("error", e.getMessage()));
+            }
+        }
+    }
+
+    private class PaymentVoidHandler implements HttpHandler {
+        @Override
+        public void handle(HttpExchange exchange) throws IOException {
+            if (!isAuthorized(exchange)) {
+                sendJson(exchange, 401, Map.of("error", "Unauthorized: Valid API Key required"));
+                return;
+            }
+            if (raftNode == null || raftNode.getPaymentEngine() == null) {
+                sendJson(exchange, 501, Map.of("error", "PaymentSettlementEngine is not initialized on this node"));
+                return;
+            }
+            if (!"POST".equalsIgnoreCase(exchange.getRequestMethod())) {
+                sendJson(exchange, 405, Map.of("error", "Payment void requires POST"));
+                return;
+            }
+
+            try {
+                byte[] body = exchange.getRequestBody().readAllBytes();
+                JsonNode root = json.readTree(body);
+                String holdId = root.has("holdId") ? root.get("holdId").asText() : null;
+                if (holdId == null || holdId.isBlank()) {
+                    sendJson(exchange, 400, Map.of("error", "Missing required field: holdId"));
+                    return;
+                }
+                String tenantId = root.has("tenantId") ? root.get("tenantId").asText() : exchange.getRequestHeaders().getFirst("X-Tenant-Id");
+
+                boolean voided = raftNode.getPaymentEngine().voidHold(holdId, tenantId).get(15, java.util.concurrent.TimeUnit.SECONDS);
+                sendJson(exchange, 200, Map.of("status", voided ? "VOIDED" : "ALREADY_RESOLVED", "holdId", holdId));
+            } catch (ExecutionException e) {
+                Throwable cause = e.getCause();
+                if (cause instanceof NotLeaderException nle) {
+                    handleNotLeader(exchange, nle.getLeaderHint());
+                } else {
+                    sendJson(exchange, 500, Map.of("error", cause != null ? cause.getMessage() : e.getMessage()));
+                }
+            } catch (Exception e) {
+                sendJson(exchange, 500, Map.of("error", e.getMessage()));
+            }
+        }
+    }
+
+    private class PaymentAccountsHandler implements HttpHandler {
+        @Override
+        public void handle(HttpExchange exchange) throws IOException {
+            if (!isAuthorized(exchange)) {
+                sendJson(exchange, 401, Map.of("error", "Unauthorized: Valid API Key required"));
+                return;
+            }
+            if (raftNode == null || raftNode.getPaymentEngine() == null) {
+                sendJson(exchange, 501, Map.of("error", "PaymentSettlementEngine is not initialized on this node"));
+                return;
+            }
+
+            String method = exchange.getRequestMethod().toUpperCase();
+            String tenantId = exchange.getRequestHeaders().getFirst("X-Tenant-Id");
+            if (tenantId == null || tenantId.isBlank()) {
+                Map<String, String> q = parseQueryParams(exchange.getRequestURI().getQuery());
+                tenantId = q.get("tenantId");
+            }
+            if (tenantId == null || tenantId.isBlank()) tenantId = "default";
+
+            if ("POST".equals(method)) {
+                try {
+                    byte[] bytes = exchange.getRequestBody().readAllBytes();
+                    JsonNode root = json.readTree(bytes);
+                    String accountId = root.has("accountId") ? root.get("accountId").asText() : null;
+                    if (accountId == null || accountId.isBlank()) {
+                        sendJson(exchange, 400, Map.of("error", "Missing required field: accountId"));
+                        return;
+                    }
+                    String currency = root.has("currency") ? root.get("currency").asText() : "USD";
+                    long initialBal = root.has("initialBalanceCents") ? root.get("initialBalanceCents").asLong() : 0L;
+                    Map<String, String> meta = new HashMap<>();
+                    if (root.has("metadata") && root.get("metadata").isObject()) {
+                        root.get("metadata").fields().forEachRemaining(entry -> meta.put(entry.getKey(), entry.getValue().asText()));
+                    }
+
+                    PaymentAccount created = raftNode.getPaymentEngine().createAccount(accountId, tenantId, currency, initialBal, meta).get(15, java.util.concurrent.TimeUnit.SECONDS);
+                    sendJson(exchange, 201, created.toMap());
+                } catch (ExecutionException e) {
+                    Throwable cause = e.getCause();
+                    if (cause instanceof NotLeaderException nle) {
+                        handleNotLeader(exchange, nle.getLeaderHint());
+                    } else {
+                        sendJson(exchange, 500, Map.of("error", cause != null ? cause.getMessage() : e.getMessage()));
+                    }
+                } catch (Exception e) {
+                    sendJson(exchange, 500, Map.of("error", e.getMessage()));
+                }
+                return;
+            }
+
+            if ("GET".equals(method)) {
+                List<PaymentAccount> accounts = raftNode.getPaymentEngine().listAccounts(tenantId);
+                List<Map<String, Object>> list = new ArrayList<>(accounts.size());
+                for (PaymentAccount acc : accounts) {
+                    list.add(acc.toMap());
+                }
+                sendJson(exchange, 200, Map.of("tenantId", tenantId, "count", list.size(), "accounts", list));
+                return;
+            }
+
+            sendJson(exchange, 405, Map.of("error", "Method not allowed: " + method));
+        }
+    }
+
+    private class PaymentAccountDetailHandler implements HttpHandler {
+        @Override
+        public void handle(HttpExchange exchange) throws IOException {
+            if (!isAuthorized(exchange)) {
+                sendJson(exchange, 401, Map.of("error", "Unauthorized: Valid API Key required"));
+                return;
+            }
+            if (raftNode == null || raftNode.getPaymentEngine() == null) {
+                sendJson(exchange, 501, Map.of("error", "PaymentSettlementEngine is not initialized on this node"));
+                return;
+            }
+
+            String path = exchange.getRequestURI().getPath();
+            String method = exchange.getRequestMethod().toUpperCase();
+            String tenantId = exchange.getRequestHeaders().getFirst("X-Tenant-Id");
+            if (tenantId == null || tenantId.isBlank()) {
+                Map<String, String> q = parseQueryParams(exchange.getRequestURI().getQuery());
+                tenantId = q.get("tenantId");
+            }
+            if (tenantId == null || tenantId.isBlank()) tenantId = "default";
+
+            if (path.endsWith("/fund") && "POST".equals(method)) {
+                try {
+                    byte[] bytes = exchange.getRequestBody().readAllBytes();
+                    JsonNode root = json.readTree(bytes);
+                    String accountId = root.has("accountId") ? root.get("accountId").asText() : null;
+                    long amountCents = root.has("amountCents") ? root.get("amountCents").asLong() : 0L;
+                    String idempKey = root.has("idempotencyKey") ? root.get("idempotencyKey").asText() : exchange.getRequestHeaders().getFirst("Idempotency-Key");
+                    if (accountId == null || amountCents <= 0) {
+                        sendJson(exchange, 400, Map.of("error", "Missing accountId or invalid amountCents"));
+                        return;
+                    }
+
+                    PaymentAccount funded = raftNode.getPaymentEngine().fundAccount(accountId, tenantId, amountCents, idempKey).get(15, java.util.concurrent.TimeUnit.SECONDS);
+                    sendJson(exchange, 200, funded.toMap());
+                } catch (ExecutionException e) {
+                    Throwable cause = e.getCause();
+                    if (cause instanceof NotLeaderException nle) {
+                        handleNotLeader(exchange, nle.getLeaderHint());
+                    } else {
+                        sendJson(exchange, 500, Map.of("error", cause != null ? cause.getMessage() : e.getMessage()));
+                    }
+                } catch (Exception e) {
+                    sendJson(exchange, 500, Map.of("error", e.getMessage()));
+                }
+                return;
+            }
+
+            if ("GET".equals(method)) {
+                Map<String, String> query = parseQueryParams(exchange.getRequestURI().getQuery());
+                String accountId = query.get("id");
+                if (accountId == null || accountId.isBlank()) {
+                    sendJson(exchange, 400, Map.of("error", "Missing query parameter 'id'"));
+                    return;
+                }
+                try {
+                    PaymentAccount acc = raftNode.getPaymentEngine().getAccount(accountId, tenantId).get(5, java.util.concurrent.TimeUnit.SECONDS);
+                    if (acc != null) {
+                        sendJson(exchange, 200, acc.toMap());
+                    } else {
+                        sendJson(exchange, 404, Map.of("error", "Account not found: " + accountId));
+                    }
+                } catch (Exception e) {
+                    sendJson(exchange, 500, Map.of("error", e.getMessage()));
+                }
+                return;
+            }
+
+            sendJson(exchange, 405, Map.of("error", "Method not allowed: " + method));
+        }
+    }
+
+    private class PaymentTransactionsHandler implements HttpHandler {
+        @Override
+        public void handle(HttpExchange exchange) throws IOException {
+            if (!isAuthorized(exchange)) {
+                sendJson(exchange, 401, Map.of("error", "Unauthorized: Valid API Key required"));
+                return;
+            }
+            if (raftNode == null || raftNode.getPaymentEngine() == null) {
+                sendJson(exchange, 501, Map.of("error", "PaymentSettlementEngine is not initialized on this node"));
+                return;
+            }
+
+            Map<String, String> query = parseQueryParams(exchange.getRequestURI().getQuery());
+            String tenantId = query.getOrDefault("tenantId", "default");
+            String ref = query.get("ref");
+
+            if (ref != null && !ref.isBlank()) {
+                Optional<PaymentResult> result = raftNode.getPaymentEngine().getTransaction(ref, tenantId);
+                if (result.isPresent()) {
+                    sendJson(exchange, 200, result.get().toMap());
+                } else {
+                    sendJson(exchange, 404, Map.of("error", "Transaction not found: " + ref));
+                }
+                return;
+            }
+
+            int limit = 50;
+            if (query.containsKey("limit")) {
+                try { limit = Integer.parseInt(query.get("limit")); } catch (Exception ignored) {}
+            }
+            List<PaymentResult> list = raftNode.getPaymentEngine().listTransactions(tenantId, limit);
+            List<Map<String, Object>> resList = new ArrayList<>(list.size());
+            for (PaymentResult pr : list) {
+                resList.add(pr.toMap());
+            }
+            sendJson(exchange, 200, Map.of("tenantId", tenantId, "count", resList.size(), "transactions", resList));
+        }
+    }
+
+    private class PaymentMetricsHandler implements HttpHandler {
+        @Override
+        public void handle(HttpExchange exchange) throws IOException {
+            if (raftNode == null || raftNode.getPaymentEngine() == null) {
+                sendJson(exchange, 501, Map.of("error", "PaymentSettlementEngine is not initialized on this node"));
+                return;
+            }
+            Map<String, String> query = parseQueryParams(exchange.getRequestURI().getQuery());
+            String tenantId = query.getOrDefault("tenantId", "default");
+            sendJson(exchange, 200, raftNode.getPaymentEngine().getMetrics(tenantId));
         }
     }
 

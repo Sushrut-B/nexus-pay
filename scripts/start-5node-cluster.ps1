@@ -1,3 +1,7 @@
+param(
+    [switch]$KeepAlive
+)
+
 # Starts 5 independent Raftline processes locally with isolated data directories and ports
 
 $baseDir = Split-Path -Parent $PSScriptRoot
@@ -41,9 +45,10 @@ foreach ($node in $nodes) {
     }
     $peersArg = $peerList -join ","
 
-    $cmdArgs = "-jar `"$jarPath`" --id=$id --http-port=$httpPort --grpc-port=$grpcPort --data-dir=`"$dataDir`" --peers=$peersArg"
+    $redisPort = $httpPort - 8001 + 6379
+    $cmdArgs = "-jar `"$jarPath`" --id=$id --http-port=$httpPort --grpc-port=$grpcPort --redis-port=$redisPort --data-dir=`"$dataDir`" --peers=$peersArg"
 
-    Write-Host "Launching $id [HTTP: $httpPort, gRPC: $grpcPort] ..." -ForegroundColor Green
+    Write-Host "Launching $id [HTTP: $httpPort, gRPC: $grpcPort, Redis: $redisPort] ..." -ForegroundColor Green
     $proc = Start-Process -FilePath "java" -ArgumentList $cmdArgs `
         -RedirectStandardOutput "$dataDir\stdout.log" `
         -RedirectStandardError "$dataDir\stderr.log" `
@@ -68,4 +73,11 @@ try {
     Write-Host "Cluster Leader: $($status.leaderId) (Term: $($status.term))" -ForegroundColor Cyan
 } catch {
     Write-Host "Leader election in progress. Querying again in 1s..."
+}
+
+if ($KeepAlive) {
+    Write-Host "Cluster is active and running in background. Monitoring cluster health..." -ForegroundColor Green
+    while ($true) {
+        Start-Sleep -Seconds 10
+    }
 }

@@ -76,6 +76,13 @@ public class RaftNode implements RaftRpcHandler, Closeable {
     private final io.raftline.core.chaos.ChaosEngine chaosEngine;
     private volatile boolean paused = false;
 
+    // Cloud DBaaS Control Plane & Multi-Tenant Isolation
+    private final io.raftline.core.dbaas.TenantManager tenantManager = new io.raftline.core.dbaas.TenantManager();
+    private final io.raftline.core.dbaas.CloudBackupEngine backupEngine;
+
+    // Real-Time Payment Settlement & Idempotency Switch (FedNow, SEPA Instant, UPI)
+    private final io.raftline.core.payment.PaymentSettlementEngine paymentEngine;
+
     // Timers
     private ScheduledFuture<?> electionTimeoutTask;
     private ScheduledFuture<?> heartbeatTask;
@@ -97,6 +104,8 @@ public class RaftNode implements RaftRpcHandler, Closeable {
         this.commitIndex = wal.getSnapshotIndex();
         this.lastApplied = stateMachine.getLastAppliedIndex();
         this.chaosEngine = new io.raftline.core.chaos.ChaosEngine(this);
+        this.backupEngine = new io.raftline.core.dbaas.CloudBackupEngine(this);
+        this.paymentEngine = new io.raftline.core.payment.PaymentSettlementEngine(this);
 
         this.scheduler = Executors.newScheduledThreadPool(2, r -> {
             Thread t = new Thread(r, "raft-" + config.getLocalNodeId() + "-timer");
@@ -1218,6 +1227,18 @@ public class RaftNode implements RaftRpcHandler, Closeable {
         return chaosEngine;
     }
 
+    public io.raftline.core.dbaas.TenantManager getTenantManager() {
+        return tenantManager;
+    }
+
+    public io.raftline.core.dbaas.CloudBackupEngine getBackupEngine() {
+        return backupEngine;
+    }
+
+    public io.raftline.core.payment.PaymentSettlementEngine getPaymentEngine() {
+        return paymentEngine;
+    }
+
     public RaftTransport getTransport() {
         return transport;
     }
@@ -1277,6 +1298,8 @@ public class RaftNode implements RaftRpcHandler, Closeable {
             pendingClientRequests.clear();
 
             chaosEngine.close();
+            backupEngine.close();
+            paymentEngine.close();
             watchEngine.close();
             cdcEngine.close();
             webhookDispatcher.close();

@@ -99,6 +99,12 @@ public class RaftServerMain {
         long currentPid = ProcessHandle.current().pid();
         java.nio.file.Files.writeString(new File(dataDir, "node.pid").toPath(), String.valueOf(currentPid));
         log.info("Raftline node '{}' (PID: {}, Redis: {}) initialized successfully.", nodeId, currentPid, redisPort);
+
+        try {
+            Thread.currentThread().join();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
     }
 
     private static Map<String, String> parseArgs(String[] args) {
