@@ -586,6 +586,9 @@
         </div>
 
         <div class="header-actions">
+            <a href="/portal" class="btn-action" style="text-decoration:none;display:inline-flex;align-items:center;gap:6px;background:rgba(16,185,129,0.15);border:1px solid #10b981;color:#34d399;font-weight:600;">
+                <span>⚡</span> Customer Pay Portal
+            </a>
             <div id="leaderPill" class="pill-badge leader">
                 <span class="status-dot"></span>
                 <span id="leaderStatusText">CONNECTING...</span>
@@ -642,6 +645,10 @@
 
         <!-- Tabs Navigation -->
         <nav class="tabs-nav">
+            <button class="tab-btn" onclick="window.location.href='/portal'" style="color:#34d399;border-color:rgba(16,185,129,0.3);">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+                Customer Pay Portal (FedNow / UPI)
+            </button>
             <button class="tab-btn active" onclick="switchTab('topology')">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="5" r="3"/><circle cx="5" cy="19" r="3"/><circle cx="19" cy="19" r="3"/><line x1="12" y1="8" x2="5" y2="16"/><line x1="12" y1="8" x2="19" y2="16"/></svg>
                 Topology & Interconnects

@@ -1101,6 +1101,10 @@ public class RaftNode implements RaftRpcHandler, Closeable {
         return role;
     }
 
+    public boolean isLeader() {
+        return role == Role.LEADER;
+    }
+
     public long getCurrentTerm() {
         return metaStorage.getCurrentTerm();
     }

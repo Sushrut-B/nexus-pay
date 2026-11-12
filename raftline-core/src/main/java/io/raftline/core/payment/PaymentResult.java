@@ -167,6 +167,53 @@ public class PaymentResult {
         }
     }
 
+    public String toIso20022Xml() {
+        String isoTime = java.time.Instant.ofEpochMilli(settledAt > 0 ? settledAt : System.currentTimeMillis()).toString();
+        double amt = amountCents / 100.0;
+        String formattedAmt = String.format(java.util.Locale.US, "%.2f", amt);
+        String railCode = (rail != null) ? rail.name() : "FEDNOW";
+
+        return String.format(java.util.Locale.US,
+                "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n" +
+                "<Document xmlns=\"urn:iso:std:iso:20022:tech:xsd:pacs.008.001.08\">\n" +
+                "  <FIToFICstmrCdtTrf>\n" +
+                "    <GrpHdr>\n" +
+                "      <MsgId>MSG-%s</MsgId>\n" +
+                "      <CreDtTm>%s</CreDtTm>\n" +
+                "      <NbOfTxs>1</NbOfTxs>\n" +
+                "      <SttlmInf>\n" +
+                "        <SttlmMtd>CLRG</SttlmMtd>\n" +
+                "        <ClrSys>\n" +
+                "          <Prtry>%s</Prtry>\n" +
+                "        </ClrSys>\n" +
+                "      </SttlmInf>\n" +
+                "    </GrpHdr>\n" +
+                "    <CdtTrfTxInf>\n" +
+                "      <PmtId>\n" +
+                "        <EndToEndId>%s</EndToEndId>\n" +
+                "        <TxId>%s</TxId>\n" +
+                "        <ClrSysRef>RAFT-LOG-IDX-%d</ClrSysRef>\n" +
+                "      </PmtId>\n" +
+                "      <IntrBkSttlmAmt Ccy=\"%s\">%s</IntrBkSttlmAmt>\n" +
+                "      <Dbtr>\n" +
+                "        <Nm>%s</Nm>\n" +
+                "      </Dbtr>\n" +
+                "      <Cdtr>\n" +
+                "        <Nm>%s</Nm>\n" +
+                "      </Cdtr>\n" +
+                "      <RmtInf>\n" +
+                "        <Ustrd>Raftline Real-Time Settlement [%s]</Ustrd>\n" +
+                "      </RmtInf>\n" +
+                "    </CdtTrfTxInf>\n" +
+                "  </FIToFICstmrCdtTrf>\n" +
+                "</Document>",
+                paymentRef, isoTime, railCode, idempotencyKey, paymentRef, raftLogIndex,
+                currency != null ? currency : "USD", formattedAmt,
+                sourceAccountId != null ? sourceAccountId : "UNKNOWN",
+                destinationAccountId != null ? destinationAccountId : "UNKNOWN",
+                status != null ? status.name() : "SETTLED");
+    }
+
     public static PaymentResult fromJsonBytes(byte[] bytes) throws IOException {
         return json.readValue(bytes, PaymentResult.class);
     }

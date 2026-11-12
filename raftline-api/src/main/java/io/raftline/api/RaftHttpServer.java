@@ -125,6 +125,9 @@ public class RaftHttpServer implements Closeable {
         server.createContext("/v1/payments/authorize", new PaymentAuthorizeHandler());
         server.createContext("/v1/payments/capture", new PaymentCaptureHandler());
         server.createContext("/v1/payments/void", new PaymentVoidHandler());
+        server.createContext("/v1/payments/holds", new PaymentHoldsHandler());
+        server.createContext("/v1/payments/iso20022", new PaymentIso20022Handler());
+        server.createContext("/v1/payments/seed", new PaymentSeedHandler());
         server.createContext("/v1/payments/accounts", new PaymentAccountsHandler());
         server.createContext("/v1/payments/account", new PaymentAccountDetailHandler());
         server.createContext("/v1/payments/transactions", new PaymentTransactionsHandler());
@@ -132,6 +135,9 @@ public class RaftHttpServer implements Closeable {
         DashboardHandler dashboardHandler = new DashboardHandler();
         server.createContext("/dashboard", dashboardHandler);
         server.createContext("/ui", dashboardHandler);
+        server.createContext("/portal", dashboardHandler);
+        server.createContext("/payments", dashboardHandler);
+        server.createContext("/app", dashboardHandler);
         server.createContext("/", dashboardHandler);
     }
 
@@ -2325,6 +2331,12 @@ public class RaftHttpServer implements Closeable {
 
             if ("GET".equals(method)) {
                 List<PaymentAccount> accounts = raftNode.getPaymentEngine().listAccounts(tenantId);
+                if (accounts.isEmpty() && raftNode.isLeader()) {
+                    try {
+                        raftNode.getPaymentEngine().seedDefaultAccountsIfEmpty(tenantId).get(5, java.util.concurrent.TimeUnit.SECONDS);
+                        accounts = raftNode.getPaymentEngine().listAccounts(tenantId);
+                    } catch (Exception ignored) {}
+                }
                 List<Map<String, Object>> list = new ArrayList<>(accounts.size());
                 for (PaymentAccount acc : accounts) {
                     list.add(acc.toMap());
@@ -2461,34 +2473,128 @@ public class RaftHttpServer implements Closeable {
         }
     }
 
+    private class PaymentHoldsHandler implements HttpHandler {
+        @Override
+        public void handle(HttpExchange exchange) throws IOException {
+            if (!isAuthorized(exchange)) {
+                sendJson(exchange, 401, Map.of("error", "Unauthorized: Valid API Key required"));
+                return;
+            }
+            if (raftNode == null || raftNode.getPaymentEngine() == null) {
+                sendJson(exchange, 501, Map.of("error", "PaymentSettlementEngine is not initialized on this node"));
+                return;
+            }
+            Map<String, String> query = parseQueryParams(exchange.getRequestURI().getQuery());
+            String tenantId = query.getOrDefault("tenantId", "default");
+            List<PaymentHold> holds = raftNode.getPaymentEngine().listHolds(tenantId);
+            List<Map<String, Object>> list = new ArrayList<>(holds.size());
+            for (PaymentHold h : holds) {
+                list.add(h.toMap());
+            }
+            sendJson(exchange, 200, Map.of("tenantId", tenantId, "count", list.size(), "holds", list));
+        }
+    }
+
+    private class PaymentIso20022Handler implements HttpHandler {
+        @Override
+        public void handle(HttpExchange exchange) throws IOException {
+            if (raftNode == null || raftNode.getPaymentEngine() == null) {
+                sendJson(exchange, 501, Map.of("error", "PaymentSettlementEngine is not initialized on this node"));
+                return;
+            }
+            Map<String, String> query = parseQueryParams(exchange.getRequestURI().getQuery());
+            String tenantId = query.getOrDefault("tenantId", "default");
+            String ref = query.get("ref");
+            if (ref == null || ref.isBlank()) {
+                sendJson(exchange, 400, Map.of("error", "Missing query parameter 'ref'"));
+                return;
+            }
+            Optional<PaymentResult> res = raftNode.getPaymentEngine().getTransaction(ref, tenantId);
+            if (res.isEmpty()) {
+                sendJson(exchange, 404, Map.of("error", "Payment reference not found: " + ref));
+                return;
+            }
+            String xml = res.get().toIso20022Xml();
+            String accept = exchange.getRequestHeaders().getFirst("Accept");
+            if (accept != null && accept.contains("application/json")) {
+                sendJson(exchange, 200, Map.of("paymentRef", ref, "xml", xml));
+            } else {
+                byte[] bytes = xml.getBytes(StandardCharsets.UTF_8);
+                exchange.getResponseHeaders().set("Content-Type", "application/xml; charset=utf-8");
+                exchange.sendResponseHeaders(200, bytes.length);
+                try (OutputStream os = exchange.getResponseBody()) {
+                    os.write(bytes);
+                }
+            }
+        }
+    }
+
+    private class PaymentSeedHandler implements HttpHandler {
+        @Override
+        public void handle(HttpExchange exchange) throws IOException {
+            if (!isAuthorized(exchange)) {
+                sendJson(exchange, 401, Map.of("error", "Unauthorized: Valid API Key required"));
+                return;
+            }
+            if (raftNode == null || raftNode.getPaymentEngine() == null) {
+                sendJson(exchange, 501, Map.of("error", "PaymentSettlementEngine is not initialized on this node"));
+                return;
+            }
+            Map<String, String> query = parseQueryParams(exchange.getRequestURI().getQuery());
+            String tenantId = query.getOrDefault("tenantId", "default");
+            try {
+                raftNode.getPaymentEngine().seedDefaultAccountsIfEmpty(tenantId).get(10, java.util.concurrent.TimeUnit.SECONDS);
+                sendJson(exchange, 200, Map.of("status", "SEEDED", "tenantId", tenantId, "accounts", raftNode.getPaymentEngine().listAccounts(tenantId).size()));
+            } catch (Exception e) {
+                sendJson(exchange, 500, Map.of("error", e.getMessage()));
+            }
+        }
+    }
+
     private class DashboardHandler implements HttpHandler {
-        private final byte[] htmlBytes;
+        private final byte[] indexHtmlBytes;
+        private final byte[] portalHtmlBytes;
 
         public DashboardHandler() {
-            byte[] bytes = null;
+            byte[] idxBytes = null;
             try (var is = getClass().getResourceAsStream("/web/index.html")) {
                 if (is != null) {
-                    bytes = is.readAllBytes();
+                    idxBytes = is.readAllBytes();
                 }
             } catch (Exception ignored) {}
-
-            if (bytes == null || bytes.length == 0) {
-                bytes = ("<!DOCTYPE html><html><head><title>Raftline Dashboard</title></head><body style=\"background:#080c14;color:#fff;\"><h1>Raftline Visual Web Dashboard</h1></body></html>").getBytes(StandardCharsets.UTF_8);
+            if (idxBytes == null || idxBytes.length == 0) {
+                idxBytes = ("<!DOCTYPE html><html><head><title>Raftline Dashboard</title></head><body style=\"background:#080c14;color:#fff;\"><h1>Raftline Visual Web Dashboard</h1></body></html>").getBytes(StandardCharsets.UTF_8);
             }
-            this.htmlBytes = bytes;
+            this.indexHtmlBytes = idxBytes;
+
+            byte[] ptlBytes = null;
+            try (var is = getClass().getResourceAsStream("/web/portal.html")) {
+                if (is != null) {
+                    ptlBytes = is.readAllBytes();
+                }
+            } catch (Exception ignored) {}
+            if (ptlBytes == null || ptlBytes.length == 0) {
+                ptlBytes = idxBytes; // fallback to index if portal not bundled
+            }
+            this.portalHtmlBytes = ptlBytes;
         }
 
         @Override
         public void handle(HttpExchange exchange) throws IOException {
             String path = exchange.getRequestURI().getPath();
-            if (!"/".equals(path) && !"/dashboard".equals(path) && !"/ui".equals(path)) {
+            boolean isPortal = "/portal".equals(path) || "/payments".equals(path) || "/app".equals(path);
+            boolean isIndex = "/".equals(path) || "/dashboard".equals(path) || "/ui".equals(path);
+
+            if (!isPortal && !isIndex) {
                 sendJson(exchange, 404, Map.of("error", "Not found: " + path));
                 return;
             }
+
+            byte[] toServe = isPortal ? portalHtmlBytes : indexHtmlBytes;
             exchange.getResponseHeaders().set("Content-Type", "text/html; charset=utf-8");
-            exchange.sendResponseHeaders(200, htmlBytes.length);
+            exchange.sendResponseHeaders(200, toServe.length);
             try (OutputStream os = exchange.getResponseBody()) {
-                os.write(htmlBytes);
+                os.write(toServe);
             }
         }
     }

@@ -418,6 +418,70 @@ public class PaymentSettlementEngine implements Closeable {
     }
 
     /**
+     * Lists active or recent authorization holds under a tenant.
+     */
+    public List<PaymentHold> listHolds(String tenantId) {
+        String effectiveTenant = (tenantId != null && !tenantId.isBlank()) ? tenantId : "default";
+        String prefix = "pay:hold:" + effectiveTenant + ":";
+        Map<String, byte[]> scan = raftNode.getStateMachine().scan(prefix, prefix + "\uffff", 200);
+        List<PaymentHold> list = new ArrayList<>();
+        for (byte[] b : scan.values()) {
+            try {
+                list.add(PaymentHold.fromJsonBytes(b));
+            } catch (Exception ignored) {}
+        }
+        return list;
+    }
+
+    /**
+     * Retrieves an authorization hold by its ID.
+     */
+    public Optional<PaymentHold> getHold(String holdId, String tenantId) {
+        String effectiveTenant = (tenantId != null && !tenantId.isBlank()) ? tenantId : "default";
+        byte[] bytes = readState(holdKey(effectiveTenant, holdId));
+        if (bytes != null && bytes.length > 0) {
+            try {
+                return Optional.of(PaymentHold.fromJsonBytes(bytes));
+            } catch (Exception ignored) {}
+        }
+        return Optional.empty();
+    }
+
+    /**
+     * Seeds initial demo accounts if the account registry is empty.
+     */
+    public CompletableFuture<Void> seedDefaultAccountsIfEmpty(String tenantId) {
+        String effectiveTenant = (tenantId != null && !tenantId.isBlank()) ? tenantId : "default";
+        List<PaymentAccount> existing = listAccounts(effectiveTenant);
+        if (!existing.isEmpty()) {
+            return CompletableFuture.completedFuture(null);
+        }
+
+        return CompletableFuture.runAsync(() -> {
+            try {
+                createAccount("acc_alice_fednow", effectiveTenant, "USD", 100_000,
+                        Map.of("holder", "Alice Smith", "type", "Consumer Checking", "routingNumber", "121000358")).get(5, TimeUnit.SECONDS);
+
+                createAccount("acc_bob_fednow", effectiveTenant, "USD", 25_000,
+                        Map.of("holder", "Bob Jones Corp", "type", "Merchant Operating", "routingNumber", "021000021")).get(5, TimeUnit.SECONDS);
+
+                createAccount("acc_charlie_sepa", effectiveTenant, "EUR", 250_000,
+                        Map.of("holder", "Charlie Dupont SARL", "type", "European Supplier", "iban", "FR7630006000011234567890189")).get(5, TimeUnit.SECONDS);
+
+                createAccount("acc_deepak_upi", effectiveTenant, "INR", 7_500_000,
+                        Map.of("holder", "Deepak Patel Ltd", "type", "Tech Enterprise", "vpa", "deepak@okicici")).get(5, TimeUnit.SECONDS);
+
+                createAccount("acc_acme_corp", effectiveTenant, "USD", 5_000_000,
+                        Map.of("holder", "Acme Global Treasury", "type", "Institutional Clearing", "routingNumber", "111000025")).get(5, TimeUnit.SECONDS);
+
+                log.info("Successfully seeded demo FinTech accounts for tenant {}", effectiveTenant);
+            } catch (Exception e) {
+                log.warn("Account auto-seed had partial issue: {}", e.getMessage());
+            }
+        });
+    }
+
+    /**
      * Retrieves an immutable payment receipt by transaction reference or idempotency key.
      */
     public Optional<PaymentResult> getTransaction(String refOrIdempKey, String tenantId) {

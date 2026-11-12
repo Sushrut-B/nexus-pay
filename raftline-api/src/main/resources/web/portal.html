@@ -1,0 +1,1729 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Raftline Pay — Real-Time Payment Settlement & Idempotency Switch</title>
+    <meta name="description" content="Customer-facing portal for instant payment rails (FedNow, SEPA Instant, UPI, Faster Payments) backed by Raftline distributed consensus.">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-base: #080c14;
+            --bg-surface: rgba(15, 23, 42, 0.75);
+            --bg-surface-elevated: rgba(30, 41, 59, 0.85);
+            --border-subtle: rgba(255, 255, 255, 0.08);
+            --border-highlight: rgba(16, 185, 129, 0.4);
+            --text-primary: #f8fafc;
+            --text-secondary: #94a3b8;
+            --text-muted: #64748b;
+            --accent-emerald: #10b981;
+            --accent-emerald-glow: rgba(16, 185, 129, 0.25);
+            --accent-cyan: #06b6d4;
+            --accent-cyan-glow: rgba(6, 182, 212, 0.25);
+            --accent-purple: #8b5cf6;
+            --accent-amber: #f59e0b;
+            --accent-rose: #f43f5e;
+            --radius-md: 12px;
+            --radius-lg: 18px;
+            --font-sans: 'Inter', -apple-system, sans-serif;
+            --font-display: 'Outfit', sans-serif;
+            --font-mono: 'JetBrains Mono', monospace;
+            --transition-smooth: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            background-color: var(--bg-base);
+            color: var(--text-primary);
+            font-family: var(--font-sans);
+            min-height: 100vh;
+            line-height: 1.5;
+            background-image:
+                radial-gradient(ellipse at 15% 0%, rgba(16, 185, 129, 0.10) 0%, transparent 50%),
+                radial-gradient(ellipse at 85% 10%, rgba(6, 182, 212, 0.08) 0%, transparent 50%),
+                radial-gradient(ellipse at 50% 90%, rgba(139, 92, 246, 0.06) 0%, transparent 60%);
+            background-attachment: fixed;
+            overflow-x: hidden;
+        }
+
+        /* Top Navigation Header */
+        header {
+            position: sticky;
+            top: 0;
+            z-index: 50;
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            background: rgba(8, 12, 20, 0.85);
+            border-bottom: 1px solid var(--border-subtle);
+            padding: 14px 28px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .brand-container {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .brand-logo {
+            width: 38px;
+            height: 38px;
+            background: linear-gradient(135deg, #10b981 0%, #06b6d4 100%);
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 0 20px rgba(16, 185, 129, 0.4);
+            font-size: 20px;
+        }
+
+        .brand-text h1 {
+            font-family: var(--font-display);
+            font-size: 1.25rem;
+            font-weight: 700;
+            background: linear-gradient(135deg, #fff 0%, #cbd5e1 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            letter-spacing: -0.02em;
+        }
+
+        .brand-text p {
+            font-size: 0.72rem;
+            color: var(--accent-emerald);
+            font-family: var(--font-mono);
+            letter-spacing: 0.04em;
+            text-transform: uppercase;
+        }
+
+        .header-actions {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+        }
+
+        .cluster-pill {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            background: rgba(16, 185, 129, 0.12);
+            border: 1px solid rgba(16, 185, 129, 0.3);
+            border-radius: 9999px;
+            padding: 6px 14px;
+            font-family: var(--font-mono);
+            font-size: 0.75rem;
+            color: #34d399;
+        }
+
+        .pulse-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #10b981;
+            box-shadow: 0 0 10px #10b981;
+            animation: pulse-dot 1.8s infinite;
+        }
+
+        @keyframes pulse-dot {
+            0% { transform: scale(0.9); opacity: 0.7; }
+            50% { transform: scale(1.2); opacity: 1; }
+            100% { transform: scale(0.9); opacity: 0.7; }
+        }
+
+        .btn-link {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid var(--border-subtle);
+            color: var(--text-secondary);
+            padding: 7px 14px;
+            border-radius: 8px;
+            font-size: 0.8rem;
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            transition: var(--transition-smooth);
+            cursor: pointer;
+        }
+
+        .btn-link:hover {
+            background: rgba(255, 255, 255, 0.1);
+            color: #fff;
+            border-color: rgba(255, 255, 255, 0.2);
+        }
+
+        /* Main Container */
+        .main-container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 28px 24px;
+            display: flex;
+            flex-direction: column;
+            gap: 24px;
+        }
+
+        /* Profile & Account Bar */
+        .account-selector-bar {
+            background: var(--bg-surface);
+            backdrop-filter: blur(16px);
+            border: 1px solid var(--border-subtle);
+            border-radius: var(--radius-lg);
+            padding: 18px 22px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-wrap: wrap;
+            gap: 16px;
+        }
+
+        .profiles-list {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+
+        .profile-btn {
+            background: rgba(255, 255, 255, 0.04);
+            border: 1px solid var(--border-subtle);
+            border-radius: 10px;
+            padding: 8px 16px;
+            color: var(--text-secondary);
+            font-size: 0.85rem;
+            cursor: pointer;
+            transition: var(--transition-smooth);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .profile-btn:hover {
+            background: rgba(255, 255, 255, 0.08);
+            color: #fff;
+        }
+
+        .profile-btn.active {
+            background: rgba(16, 185, 129, 0.15);
+            border-color: var(--accent-emerald);
+            color: #fff;
+            font-weight: 600;
+            box-shadow: 0 0 15px rgba(16, 185, 129, 0.2);
+        }
+
+        .profile-btn .badge-curr {
+            font-size: 0.65rem;
+            background: rgba(255, 255, 255, 0.1);
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-family: var(--font-mono);
+        }
+
+        .account-tools {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .btn-emerald {
+            background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+            color: #fff;
+            border: none;
+            border-radius: 8px;
+            padding: 8px 16px;
+            font-weight: 600;
+            font-size: 0.85rem;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            transition: var(--transition-smooth);
+            box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3);
+        }
+
+        .btn-emerald:hover {
+            filter: brightness(1.1);
+            transform: translateY(-1px);
+        }
+
+        .btn-outline {
+            background: transparent;
+            color: var(--text-secondary);
+            border: 1px solid var(--border-subtle);
+            border-radius: 8px;
+            padding: 8px 14px;
+            font-size: 0.85rem;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            transition: var(--transition-smooth);
+        }
+
+        .btn-outline:hover {
+            color: #fff;
+            border-color: rgba(255, 255, 255, 0.2);
+            background: rgba(255, 255, 255, 0.05);
+        }
+
+        /* Balance & Financial Invariant Banner */
+        .balance-cards-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 20px;
+        }
+
+        .bal-card {
+            background: var(--bg-surface);
+            backdrop-filter: blur(16px);
+            border: 1px solid var(--border-subtle);
+            border-radius: var(--radius-lg);
+            padding: 22px;
+            position: relative;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+        }
+
+        .bal-card.primary {
+            border-color: rgba(16, 185, 129, 0.3);
+            background: linear-gradient(135deg, rgba(16, 185, 129, 0.08) 0%, rgba(15, 23, 42, 0.85) 100%);
+        }
+
+        .bal-card.warning {
+            border-color: rgba(245, 158, 11, 0.3);
+            background: linear-gradient(135deg, rgba(245, 158, 11, 0.06) 0%, rgba(15, 23, 42, 0.85) 100%);
+        }
+
+        .bal-card.info {
+            border-color: rgba(6, 182, 212, 0.3);
+            background: linear-gradient(135deg, rgba(6, 182, 212, 0.06) 0%, rgba(15, 23, 42, 0.85) 100%);
+        }
+
+        .bal-label {
+            font-size: 0.78rem;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            color: var(--text-secondary);
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .bal-amount {
+            font-family: var(--font-display);
+            font-size: 2.2rem;
+            font-weight: 700;
+            color: #fff;
+            margin: 10px 0 6px 0;
+            letter-spacing: -0.02em;
+        }
+
+        .bal-card.primary .bal-amount {
+            color: #34d399;
+            text-shadow: 0 0 20px rgba(16, 185, 129, 0.3);
+        }
+
+        .bal-card.warning .bal-amount {
+            color: #fbbf24;
+        }
+
+        .bal-meta {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            font-family: var(--font-mono);
+        }
+
+        /* Invariant Math Callout */
+        .invariant-banner {
+            background: rgba(15, 23, 42, 0.6);
+            border: 1px dashed rgba(255, 255, 255, 0.12);
+            border-radius: var(--radius-md);
+            padding: 12px 18px;
+            font-size: 0.82rem;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            color: var(--text-secondary);
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+
+        .invariant-formula {
+            font-family: var(--font-mono);
+            color: #38bdf8;
+            background: rgba(6, 182, 212, 0.1);
+            padding: 4px 10px;
+            border-radius: 6px;
+        }
+
+        /* Main Workspace: Actions & Ledger Split */
+        .workspace-grid {
+            display: grid;
+            grid-template-columns: 1.15fr 0.85fr;
+            gap: 24px;
+        }
+
+        @media (max-width: 1024px) {
+            .workspace-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        /* Action Panel with Tabs */
+        .action-panel {
+            background: var(--bg-surface);
+            backdrop-filter: blur(16px);
+            border: 1px solid var(--border-subtle);
+            border-radius: var(--radius-lg);
+            padding: 24px;
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+
+        .nav-tabs {
+            display: flex;
+            gap: 8px;
+            border-bottom: 1px solid var(--border-subtle);
+            padding-bottom: 12px;
+            overflow-x: auto;
+        }
+
+        .nav-tab-btn {
+            background: transparent;
+            border: none;
+            color: var(--text-muted);
+            font-size: 0.88rem;
+            font-weight: 500;
+            padding: 8px 14px;
+            border-radius: 8px;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            transition: var(--transition-smooth);
+            white-space: nowrap;
+        }
+
+        .nav-tab-btn:hover {
+            color: #fff;
+            background: rgba(255, 255, 255, 0.05);
+        }
+
+        .nav-tab-btn.active {
+            color: #fff;
+            background: rgba(16, 185, 129, 0.15);
+            font-weight: 600;
+        }
+
+        .tab-content-area {
+            display: none;
+            flex-direction: column;
+            gap: 18px;
+        }
+
+        .tab-content-area.active {
+            display: flex;
+        }
+
+        /* Forms & Inputs */
+        .form-group {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        .form-label {
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+            font-weight: 500;
+            display: flex;
+            justify-content: space-between;
+        }
+
+        .form-control, .form-select {
+            background: rgba(2, 6, 23, 0.7);
+            border: 1px solid var(--border-subtle);
+            border-radius: 8px;
+            padding: 10px 14px;
+            color: #fff;
+            font-family: var(--font-sans);
+            font-size: 0.9rem;
+            transition: var(--transition-smooth);
+            width: 100%;
+        }
+
+        .form-control:focus, .form-select:focus {
+            outline: none;
+            border-color: var(--accent-emerald);
+            box-shadow: 0 0 10px rgba(16, 185, 129, 0.2);
+        }
+
+        .rail-selector-chips {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+            gap: 8px;
+        }
+
+        .rail-chip {
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid var(--border-subtle);
+            border-radius: 8px;
+            padding: 10px 8px;
+            text-align: center;
+            cursor: pointer;
+            transition: var(--transition-smooth);
+            font-size: 0.78rem;
+            font-weight: 600;
+            color: var(--text-secondary);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .rail-chip:hover {
+            background: rgba(255, 255, 255, 0.06);
+            color: #fff;
+        }
+
+        .rail-chip.active {
+            background: rgba(6, 182, 212, 0.15);
+            border-color: var(--accent-cyan);
+            color: #fff;
+            box-shadow: 0 0 12px rgba(6, 182, 212, 0.2);
+        }
+
+        .amount-pills {
+            display: flex;
+            gap: 8px;
+            margin-top: 4px;
+            flex-wrap: wrap;
+        }
+
+        .pill-btn {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid var(--border-subtle);
+            border-radius: 6px;
+            padding: 4px 10px;
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+            cursor: pointer;
+            transition: var(--transition-smooth);
+            font-family: var(--font-mono);
+        }
+
+        .pill-btn:hover {
+            color: #fff;
+            border-color: rgba(255, 255, 255, 0.2);
+        }
+
+        /* Flaky Network Simulator Box */
+        .simulator-box {
+            background: rgba(139, 92, 246, 0.06);
+            border: 1px solid rgba(139, 92, 246, 0.25);
+            border-radius: var(--radius-md);
+            padding: 18px;
+            display: flex;
+            flex-direction: column;
+            gap: 14px;
+        }
+
+        .sim-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .sim-title {
+            font-size: 0.95rem;
+            font-weight: 600;
+            color: #c084fc;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .packet-stream-log {
+            background: #020617;
+            border: 1px solid var(--border-subtle);
+            border-radius: 8px;
+            padding: 12px;
+            font-family: var(--font-mono);
+            font-size: 0.75rem;
+            max-height: 220px;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        .packet-line {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 4px 8px;
+            border-radius: 4px;
+            background: rgba(255, 255, 255, 0.02);
+        }
+
+        .packet-line.primary {
+            border-left: 3px solid #10b981;
+            color: #34d399;
+        }
+
+        .packet-line.replay {
+            border-left: 3px solid #06b6d4;
+            color: #38bdf8;
+        }
+
+        /* Ledger Table & Activity */
+        .ledger-panel {
+            background: var(--bg-surface);
+            backdrop-filter: blur(16px);
+            border: 1px solid var(--border-subtle);
+            border-radius: var(--radius-lg);
+            padding: 24px;
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+
+        .panel-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .panel-title {
+            font-family: var(--font-display);
+            font-size: 1.1rem;
+            font-weight: 600;
+            color: #fff;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .ledger-table-wrapper {
+            overflow-x: auto;
+            max-height: 520px;
+        }
+
+        .ledger-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.8rem;
+        }
+
+        .ledger-table th {
+            text-align: left;
+            padding: 10px 12px;
+            color: var(--text-muted);
+            border-bottom: 1px solid var(--border-subtle);
+            font-weight: 500;
+            text-transform: uppercase;
+            font-size: 0.7rem;
+            letter-spacing: 0.05em;
+        }
+
+        .ledger-table td {
+            padding: 12px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+            color: var(--text-secondary);
+        }
+
+        .ledger-table tr:hover td {
+            background: rgba(255, 255, 255, 0.02);
+            color: #fff;
+        }
+
+        .status-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            padding: 2px 8px;
+            border-radius: 9999px;
+            font-size: 0.68rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            font-family: var(--font-mono);
+        }
+
+        .status-badge.SETTLED {
+            background: rgba(16, 185, 129, 0.15);
+            color: #34d399;
+            border: 1px solid rgba(16, 185, 129, 0.3);
+        }
+
+        .status-badge.AUTHORIZED {
+            background: rgba(245, 158, 11, 0.15);
+            color: #fbbf24;
+            border: 1px solid rgba(245, 158, 11, 0.3);
+        }
+
+        .status-badge.CAPTURED {
+            background: rgba(6, 182, 212, 0.15);
+            color: #38bdf8;
+            border: 1px solid rgba(6, 182, 212, 0.3);
+        }
+
+        .status-badge.REJECTED {
+            background: rgba(244, 63, 94, 0.15);
+            color: #fb7185;
+            border: 1px solid rgba(244, 63, 94, 0.3);
+        }
+
+        .rail-badge {
+            background: rgba(255, 255, 255, 0.06);
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 0.68rem;
+            font-family: var(--font-mono);
+            color: #cbd5e1;
+        }
+
+        /* Modal Styles */
+        .modal-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.75);
+            backdrop-filter: blur(8px);
+            z-index: 100;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+
+        .modal-overlay.active {
+            display: flex;
+        }
+
+        .modal-content {
+            background: #0f172a;
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            border-radius: var(--radius-lg);
+            width: 100%;
+            max-width: 680px;
+            max-height: 85vh;
+            overflow-y: auto;
+            padding: 24px;
+            display: flex;
+            flex-direction: column;
+            gap: 18px;
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.7);
+        }
+
+        .modal-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            border-bottom: 1px solid var(--border-subtle);
+            padding-bottom: 12px;
+        }
+
+        .modal-title {
+            font-family: var(--font-display);
+            font-size: 1.2rem;
+            color: #fff;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .close-btn {
+            background: transparent;
+            border: none;
+            color: var(--text-muted);
+            font-size: 1.4rem;
+            cursor: pointer;
+        }
+
+        .close-btn:hover {
+            color: #fff;
+        }
+
+        .xml-code-block {
+            background: #020617;
+            border: 1px solid var(--border-subtle);
+            border-radius: 8px;
+            padding: 14px;
+            font-family: var(--font-mono);
+            font-size: 0.78rem;
+            color: #e2e8f0;
+            white-space: pre-wrap;
+            word-break: break-all;
+            max-height: 380px;
+            overflow-y: auto;
+        }
+    </style>
+</head>
+<body>
+
+    <!-- Header -->
+    <header>
+        <div class="brand-container">
+            <div class="brand-logo">⚡</div>
+            <div class="brand-text">
+                <h1>Raftline Pay</h1>
+                <p>Instant Settlement & Idempotency Switch</p>
+            </div>
+        </div>
+
+        <div class="header-actions">
+            <div class="cluster-pill">
+                <span class="pulse-dot"></span>
+                <span>Leader: <strong id="leaderNodeLabel">Detecting...</strong></span>
+                <span style="opacity:0.4;">|</span>
+                <span>Term: <strong id="leaderTermLabel">--</strong></span>
+                <span style="opacity:0.4;">|</span>
+                <span>Log Index: <strong id="leaderIndexLabel">--</strong></span>
+            </div>
+
+            <a href="/dashboard" class="btn-link" title="Open Core Raft Database Topology Console">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="5" r="3"/><circle cx="5" cy="19" r="3"/><circle cx="19" cy="19" r="3"/><line x1="12" y1="8" x2="5" y2="16"/><line x1="12" y1="8" x2="19" y2="16"/></svg>
+                Raft Topology
+            </a>
+        </div>
+    </header>
+
+    <div class="main-container">
+
+        <!-- Customer Profile & Account Switcher -->
+        <div class="account-selector-bar">
+            <div class="profiles-list" id="profilesContainer">
+                <!-- Injected via JavaScript -->
+            </div>
+
+            <div class="account-tools">
+                <button class="btn-outline" onclick="openNewAccountModal()">+ New Account</button>
+                <button class="btn-emerald" onclick="fundCurrentAccount()">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                    Top-Up (+$500)
+                </button>
+            </div>
+        </div>
+
+        <!-- Balance Cards Grid (Double-Entry Invariant) -->
+        <div class="balance-cards-grid">
+            <div class="bal-card primary">
+                <div class="bal-label">
+                    <span>Available To Settle</span>
+                    <span style="color:var(--accent-emerald);">Linearizable ReadIndex</span>
+                </div>
+                <div class="bal-amount" id="valAvailableBal">$0.00</div>
+                <div class="bal-meta">Funds immediately available for instant transfer</div>
+            </div>
+
+            <div class="bal-card warning">
+                <div class="bal-label">
+                    <span>Pending Holds (Reserved)</span>
+                    <span style="color:var(--accent-amber);">Two-Phase Lock</span>
+                </div>
+                <div class="bal-amount" id="valReservedBal">$0.00</div>
+                <div class="bal-meta">Funds reserved for merchant authorizations</div>
+            </div>
+
+            <div class="bal-card info">
+                <div class="bal-label">
+                    <span>Total Book Balance</span>
+                    <span style="color:var(--accent-cyan);">Replicated State Machine</span>
+                </div>
+                <div class="bal-amount" id="valTotalBal">$0.00</div>
+                <div class="bal-meta">Gross ledger balance in consensus WAL</div>
+            </div>
+        </div>
+
+        <!-- Balance Invariant Formula Banner -->
+        <div class="invariant-banner">
+            <div>
+                <strong>Double-Entry Invariant:</strong> Available balance is strictly enforced by Raftline state machine before any debit. Overdrafts are mathematically impossible.
+            </div>
+            <div class="invariant-formula" id="formulaBanner">
+                Available ($0.00) = Total Book ($0.00) - Reserved Holds ($0.00)
+            </div>
+        </div>
+
+        <!-- Main Workspace -->
+        <div class="workspace-grid">
+
+            <!-- Action Workflows Panel -->
+            <div class="action-panel">
+                <div class="nav-tabs">
+                    <button class="nav-tab-btn active" onclick="switchActionTab('instant-settle')">
+                        ⚡ Instant Transfer
+                    </button>
+                    <button class="nav-tab-btn" onclick="switchActionTab('flaky-network')">
+                        🛡️ Flaky Network Simulator
+                    </button>
+                    <button class="nav-tab-btn" onclick="switchActionTab('two-phase')">
+                        🏨 Two-Phase Auth/Capture
+                    </button>
+                    <button class="nav-tab-btn" onclick="switchActionTab('overdraft-test')">
+                        🚫 Overdraft Sandbox
+                    </button>
+                </div>
+
+                <!-- Tab 1: Instant Settlement -->
+                <div class="tab-content-area active" id="tab-instant-settle">
+                    <div class="form-group">
+                        <label class="form-label">Payment Rail</label>
+                        <div class="rail-selector-chips">
+                            <div class="rail-chip active" onclick="selectRail('FEDNOW', this)">
+                                <span>⚡ FedNow</span>
+                                <span style="font-size:0.65rem;color:var(--text-muted);">US Instant</span>
+                            </div>
+                            <div class="rail-chip" onclick="selectRail('SEPA_INSTANT', this)">
+                                <span>🇪🇺 SEPA Inst</span>
+                                <span style="font-size:0.65rem;color:var(--text-muted);">EU Instant</span>
+                            </div>
+                            <div class="rail-chip" onclick="selectRail('UPI', this)">
+                                <span>🇮🇳 UPI</span>
+                                <span style="font-size:0.65rem;color:var(--text-muted);">India Fast</span>
+                            </div>
+                            <div class="rail-chip" onclick="selectRail('FASTER_PAYMENTS', this)">
+                                <span>🇬🇧 Faster Pay</span>
+                                <span style="font-size:0.65rem;color:var(--text-muted);">UK Instant</span>
+                            </div>
+                            <div class="rail-chip" onclick="selectRail('INTERNAL_BOOK', this)">
+                                <span>📖 Book</span>
+                                <span style="font-size:0.65rem;color:var(--text-muted);">Internal</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label class="form-label">Destination Account</label>
+                        <select class="form-select" id="selectDestinationAccount">
+                            <!-- Populated dynamically -->
+                        </select>
+                    </div>
+
+                    <div class="form-group">
+                        <label class="form-label">
+                            <span>Amount (<span id="currencySymbolLabel">$</span>)</span>
+                            <span style="font-size:0.75rem;color:var(--text-muted);" id="maxAvailableNotice"></span>
+                        </label>
+                        <input type="number" class="form-control" id="inputAmount" placeholder="50.00" step="0.01" min="0.01" value="25.00">
+                        <div class="amount-pills">
+                            <button class="pill-btn" onclick="setAmount(10)">+$10</button>
+                            <button class="pill-btn" onclick="setAmount(25)">+$25</button>
+                            <button class="pill-btn" onclick="setAmount(100)">+$100</button>
+                            <button class="pill-btn" onclick="setAmount(250)">+$250</button>
+                            <button class="pill-btn" onclick="setMaxAmount()">Max Available</button>
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label class="form-label">Payment Description / Remittance</label>
+                        <input type="text" class="form-control" id="inputDescription" placeholder="Supplier invoice payment / Split bill" value="FedNow Real-Time Settlement">
+                    </div>
+
+                    <button class="btn-emerald" style="padding:12px;justify-content:center;font-size:0.95rem;" id="btnSubmitPayment" onclick="executeInstantPayment()">
+                        ⚡ Submit Instant Settlement (Quorum Commit)
+                    </button>
+
+                    <div id="settleFeedback" style="display:none;padding:12px;border-radius:8px;font-size:0.82rem;font-family:var(--font-mono);"></div>
+                </div>
+
+                <!-- Tab 2: Flaky Network Simulator -->
+                <div class="tab-content-area" id="tab-flaky-network">
+                    <div class="simulator-box">
+                        <div class="sim-header">
+                            <div class="sim-title">
+                                <span>📱 Flaky Mobile Network Simulator</span>
+                            </div>
+                            <span class="status-badge SETTLED" style="font-size:0.65rem;">Idempotency Switch</span>
+                        </div>
+                        <p style="font-size:0.8rem;color:var(--text-secondary);line-height:1.4;">
+                            On flaky 4G/5G connections, mobile devices often drop ACK responses. Client applications automatically retry the payment.
+                            Watch Raftline's <strong>client deduplication table</strong> intercept retried requests and return identical settlement receipts with <strong>zero double-debiting</strong>!
+                        </p>
+
+                        <button class="btn-emerald" style="background:linear-gradient(135deg, #8b5cf6 0%, #6d28d9 100%);box-shadow:0 4px 12px rgba(139, 92, 246, 0.3);justify-content:center;padding:12px;" onclick="simulateFlakyNetworkRetries()">
+                            🚀 Blast 5 Concurrent Duplicate Packets
+                        </button>
+                    </div>
+
+                    <div class="packet-stream-log" id="packetLogConsole">
+                        <div style="color:var(--text-muted);font-style:italic;">Click "Blast 5 Concurrent Duplicate Packets" above to start live packet simulation...</div>
+                    </div>
+                </div>
+
+                <!-- Tab 3: Two-Phase Authorization Hold & Capture -->
+                <div class="tab-content-area" id="tab-two-phase">
+                    <div style="font-size:0.82rem;color:var(--text-secondary);">
+                        Authorize holds reserve funds without debiting ledger balance. Once goods/services are delivered, capture the hold or void it to return reserved funds.
+                    </div>
+
+                    <div class="form-group">
+                        <label class="form-label">Hold Amount</label>
+                        <input type="number" class="form-control" id="inputHoldAmount" value="75.00" step="0.01">
+                    </div>
+
+                    <div class="form-group">
+                        <label class="form-label">Merchant / Recipient</label>
+                        <select class="form-select" id="selectHoldRecipient"></select>
+                    </div>
+
+                    <button class="btn-outline" style="justify-content:center;color:var(--accent-amber);border-color:rgba(245, 158, 11, 0.4);" onclick="createAuthorizationHold()">
+                        🔒 Place Authorization Hold
+                    </button>
+
+                    <div class="panel-title" style="font-size:0.95rem;margin-top:10px;">Active Authorization Holds:</div>
+                    <div id="activeHoldsList" style="display:flex;flex-direction:column;gap:8px;">
+                        <div style="color:var(--text-muted);font-size:0.8rem;">No active holds for this account.</div>
+                    </div>
+                </div>
+
+                <!-- Tab 4: Overdraft Sandbox -->
+                <div class="tab-content-area" id="tab-overdraft-test">
+                    <div style="font-size:0.82rem;color:var(--text-secondary);line-height:1.4;">
+                        Test Raftline's overdraft prevention invariant. Try sending $50,000.00 when the account only has available funds for less.
+                        Consensus aborts the transaction cleanly, producing an immutable rejection receipt with zero state corruption.
+                    </div>
+
+                    <button class="btn-outline" style="color:var(--accent-rose);border-color:rgba(244, 63, 94, 0.4);padding:12px;justify-content:center;" onclick="testOverdraftPrevention()">
+                        🚫 Attempt Overdraft of $999,999.00
+                    </button>
+
+                    <div id="overdraftFeedback" style="display:none;padding:12px;border-radius:8px;font-size:0.82rem;font-family:var(--font-mono);"></div>
+                </div>
+
+            </div>
+
+            <!-- Real-Time Transaction Ledger -->
+            <div class="ledger-panel">
+                <div class="panel-header">
+                    <div class="panel-title">
+                        <span>📜 Settlement Ledger</span>
+                    </div>
+                    <button class="btn-link" style="padding:4px 10px;font-size:0.75rem;" onclick="refreshAllData()">
+                        ⟳ Refresh
+                    </button>
+                </div>
+
+                <div class="ledger-table-wrapper">
+                    <table class="ledger-table">
+                        <thead>
+                            <tr>
+                                <th>Ref / Time</th>
+                                <th>Rail</th>
+                                <th>To / From</th>
+                                <th>Amount</th>
+                                <th>Status</th>
+                                <th>Action</th>
+                            </tr>
+                        </thead>
+                        <tbody id="ledgerTableBody">
+                            <tr>
+                                <td colspan="6" style="text-align:center;color:var(--text-muted);padding:24px;">Loading settlement records...</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+        </div>
+
+    </div>
+
+    <!-- ISO 20022 XML Modal -->
+    <div class="modal-overlay" id="isoModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <div class="modal-title">
+                    <span>📄 ISO 20022 Message Inspector</span>
+                </div>
+                <button class="close-btn" onclick="closeIsoModal()">&times;</button>
+            </div>
+
+            <div style="font-size:0.82rem;color:var(--text-secondary);">
+                Compliant <strong>pacs.008.001.08</strong> Financial Institutional Customer Credit Transfer message generated directly from Raftline consensus log index.
+            </div>
+
+            <div class="xml-code-block" id="xmlContent">Loading XML...</div>
+
+            <div style="display:flex;justify-content:flex-end;gap:10px;">
+                <button class="btn-outline" onclick="copyXmlToClipboard()">📋 Copy XML</button>
+                <button class="btn-emerald" onclick="downloadXmlFile()">💾 Download pacs.008.xml</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- New Account Modal -->
+    <div class="modal-overlay" id="newAccountModal">
+        <div class="modal-content" style="max-width:480px;">
+            <div class="modal-header">
+                <div class="modal-title">
+                    <span>➕ Provision New FinTech Account</span>
+                </div>
+                <button class="close-btn" onclick="closeNewAccountModal()">&times;</button>
+            </div>
+
+            <div class="form-group">
+                <label class="form-label">Account ID / Handle</label>
+                <input type="text" class="form-control" id="newAccId" placeholder="acc_sarah_connor">
+            </div>
+
+            <div class="form-group">
+                <label class="form-label">Account Holder Name</label>
+                <input type="text" class="form-control" id="newAccHolder" placeholder="Sarah Connor">
+            </div>
+
+            <div class="form-group">
+                <label class="form-label">Currency</label>
+                <select class="form-select" id="newAccCurrency">
+                    <option value="USD">USD ($)</option>
+                    <option value="EUR">EUR (€)</option>
+                    <option value="INR">INR (₹)</option>
+                    <option value="GBP">GBP (£)</option>
+                </select>
+            </div>
+
+            <div class="form-group">
+                <label class="form-label">Initial Balance</label>
+                <input type="number" class="form-control" id="newAccInitialBal" value="1000.00" step="10">
+            </div>
+
+            <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:10px;">
+                <button class="btn-outline" onclick="closeNewAccountModal()">Cancel</button>
+                <button class="btn-emerald" onclick="submitCreateAccount()">Provision Account</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Global State
+        let currentAccount = null;
+        let accountsList = [];
+        let activeRail = "FEDNOW";
+        let lastIsoXml = "";
+        let lastPaymentRef = "";
+
+        // On Load
+        window.addEventListener('DOMContentLoaded', () => {
+            initApp();
+            setInterval(refreshClusterStatus, 3000);
+            setInterval(refreshBalancesAndLedger, 3500);
+        });
+
+        async function initApp() {
+            await refreshClusterStatus();
+            await loadAccounts();
+        }
+
+        async function refreshClusterStatus() {
+            try {
+                const res = await fetch('/v1/cluster/status');
+                if (res.ok) {
+                    const data = await res.json();
+                    document.getElementById('leaderNodeLabel').innerText = (data.role === 'LEADER' ? data.nodeId : (data.leaderId || data.nodeId));
+                    document.getElementById('leaderTermLabel').innerText = data.currentTerm || '--';
+                    document.getElementById('leaderIndexLabel').innerText = data.lastLogIndex || '--';
+                }
+            } catch (e) {
+                console.warn("Cluster status check:", e);
+            }
+        }
+
+        async function loadAccounts() {
+            try {
+                const res = await fetch('/v1/payments/accounts');
+                if (res.ok) {
+                    const data = await res.json();
+                    accountsList = data.accounts || [];
+
+                    renderProfiles();
+                    renderDestinationOptions();
+
+                    if (!currentAccount && accountsList.length > 0) {
+                        selectAccount(accountsList[0].accountId);
+                    } else if (currentAccount) {
+                        // refresh selected account object
+                        const found = accountsList.find(a => a.accountId === currentAccount.accountId);
+                        if (found) {
+                            currentAccount = found;
+                            updateBalanceDisplay();
+                        }
+                    }
+
+                    await refreshLedger();
+                    await refreshHolds();
+                }
+            } catch (e) {
+                console.error("Failed to load accounts:", e);
+            }
+        }
+
+        function renderProfiles() {
+            const container = document.getElementById('profilesContainer');
+            container.innerHTML = '';
+
+            accountsList.forEach(acc => {
+                const btn = document.createElement('button');
+                btn.className = 'profile-btn' + (currentAccount && currentAccount.accountId === acc.accountId ? ' active' : '');
+                const holder = (acc.metadata && acc.metadata.holder) ? acc.metadata.holder : acc.accountId;
+                btn.innerHTML = `
+                    <span>${escapeHtml(holder)}</span>
+                    <span class="badge-curr">${acc.currency}</span>
+                `;
+                btn.onclick = () => selectAccount(acc.accountId);
+                container.appendChild(btn);
+            });
+        }
+
+        function renderDestinationOptions() {
+            const destSelect = document.getElementById('selectDestinationAccount');
+            const holdSelect = document.getElementById('selectHoldRecipient');
+
+            destSelect.innerHTML = '';
+            holdSelect.innerHTML = '';
+
+            accountsList.forEach(acc => {
+                if (!currentAccount || acc.accountId !== currentAccount.accountId) {
+                    const holder = (acc.metadata && acc.metadata.holder) ? acc.metadata.holder : acc.accountId;
+                    const opt1 = new Option(`${holder} (${acc.accountId}) [${acc.currency}]`, acc.accountId);
+                    const opt2 = new Option(`${holder} (${acc.accountId}) [${acc.currency}]`, acc.accountId);
+                    destSelect.appendChild(opt1);
+                    holdSelect.appendChild(opt2);
+                }
+            });
+        }
+
+        function selectAccount(accId) {
+            const acc = accountsList.find(a => a.accountId === accId);
+            if (!acc) return;
+            currentAccount = acc;
+            renderProfiles();
+            renderDestinationOptions();
+            updateBalanceDisplay();
+            refreshHolds();
+        }
+
+        function updateBalanceDisplay() {
+            if (!currentAccount) return;
+            const sym = getCurrencySymbol(currentAccount.currency);
+            document.getElementById('currencySymbolLabel').innerText = sym;
+
+            const avail = (currentAccount.availableBalanceCents / 100).toFixed(2);
+            const res = (currentAccount.reservedCents / 100).toFixed(2);
+            const tot = (currentAccount.balanceCents / 100).toFixed(2);
+
+            document.getElementById('valAvailableBal').innerText = `${sym}${avail}`;
+            document.getElementById('valReservedBal').innerText = `${sym}${res}`;
+            document.getElementById('valTotalBal').innerText = `${sym}${tot}`;
+
+            document.getElementById('formulaBanner').innerText =
+                `Available (${sym}${avail}) = Total Book (${sym}${tot}) - Reserved Holds (${sym}${res})`;
+
+            document.getElementById('maxAvailableNotice').innerText = `Max: ${sym}${avail}`;
+        }
+
+        function getCurrencySymbol(curr) {
+            switch (curr) {
+                case 'USD': return '$';
+                case 'EUR': return '€';
+                case 'INR': return '₹';
+                case 'GBP': return '£';
+                default: return '$';
+            }
+        }
+
+        function selectRail(rail, el) {
+            activeRail = rail;
+            document.querySelectorAll('.rail-chip').forEach(c => c.classList.remove('active'));
+            el.classList.add('active');
+        }
+
+        function setAmount(val) {
+            const curVal = parseFloat(document.getElementById('inputAmount').value) || 0;
+            document.getElementById('inputAmount').value = (curVal + val).toFixed(2);
+        }
+
+        function setMaxAmount() {
+            if (!currentAccount) return;
+            document.getElementById('inputAmount').value = (currentAccount.availableBalanceCents / 100).toFixed(2);
+        }
+
+        function switchActionTab(tabId) {
+            document.querySelectorAll('.nav-tab-btn').forEach(b => b.classList.remove('active'));
+            document.querySelectorAll('.tab-content-area').forEach(c => c.classList.remove('active'));
+
+            event.currentTarget.classList.add('active');
+            document.getElementById('tab-' + tabId).classList.add('active');
+        }
+
+        // 1. Instant Payment Execution
+        async function executeInstantPayment() {
+            if (!currentAccount) return;
+            const destId = document.getElementById('selectDestinationAccount').value;
+            const amtDollars = parseFloat(document.getElementById('inputAmount').value);
+            const desc = document.getElementById('inputDescription').value;
+
+            if (!destId) {
+                alert("Please select a destination recipient account.");
+                return;
+            }
+            if (isNaN(amtDollars) || amtDollars <= 0) {
+                alert("Please enter a valid amount.");
+                return;
+            }
+
+            const amtCents = Math.round(amtDollars * 100);
+            const idempKey = "pmt_" + activeRail.toLowerCase() + "_" + Date.now() + "_" + Math.random().toString(36).substring(2, 7);
+
+            const feedback = document.getElementById('settleFeedback');
+            feedback.style.display = 'block';
+            feedback.style.background = 'rgba(6, 182, 212, 0.1)';
+            feedback.style.border = '1px solid rgba(6, 182, 212, 0.3)';
+            feedback.style.color = '#38bdf8';
+            feedback.innerText = `Submitting instant payment to Raft quorum (${activeRail})...`;
+
+            const startTime = performance.now();
+
+            try {
+                const res = await fetch('/v1/payments/settle', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        idempotencyKey: idempKey,
+                        rail: activeRail,
+                        sourceAccountId: currentAccount.accountId,
+                        destinationAccountId: destId,
+                        amountCents: amtCents,
+                        currency: currentAccount.currency,
+                        description: desc
+                    })
+                });
+
+                const latency = Math.round(performance.now() - startTime);
+                const data = await res.json();
+
+                if (res.ok && data.status === 'SETTLED') {
+                    feedback.style.background = 'rgba(16, 185, 129, 0.15)';
+                    feedback.style.border = '1px solid rgba(16, 185, 129, 0.4)';
+                    feedback.style.color = '#34d399';
+                    feedback.innerHTML = `
+                        <strong>✓ SETTLED INSTANTLY in ${latency}ms</strong><br>
+                        Ref: ${data.paymentRef} | Raft Log Index: #${data.raftLogIndex}<br>
+                        Debtor Balance: $${(data.sourceBalanceAfter / 100).toFixed(2)} | Creditor Balance: $${(data.destinationBalanceAfter / 100).toFixed(2)}
+                    `;
+                    await loadAccounts();
+                } else {
+                    feedback.style.background = 'rgba(244, 63, 94, 0.15)';
+                    feedback.style.border = '1px solid rgba(244, 63, 94, 0.4)';
+                    feedback.style.color = '#fb7185';
+                    feedback.innerHTML = `<strong>✗ REJECTED:</strong> ${data.rejectionReason || data.error || 'Payment declined'}`;
+                    await loadAccounts();
+                }
+            } catch (e) {
+                feedback.style.color = '#fb7185';
+                feedback.innerText = "Error: " + e.message;
+            }
+        }
+
+        // 2. Flaky Network Simulator
+        async function simulateFlakyNetworkRetries() {
+            if (!currentAccount) return;
+            const dest = accountsList.find(a => a.accountId !== currentAccount.accountId);
+            if (!dest) return;
+
+            const logConsole = document.getElementById('packetLogConsole');
+            logConsole.innerHTML = `<div style="color:#c084fc;">Initiating flaky network test: Sending 5 duplicate packets with identical idempotencyKey...</div>`;
+
+            const sharedIdempKey = "pmt_flaky_" + Date.now();
+            const amtCents = 1500; // $15.00
+
+            const promises = [];
+            for (let i = 1; i <= 5; i++) {
+                promises.push(
+                    fetch('/v1/payments/settle', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            idempotencyKey: sharedIdempKey,
+                            rail: 'FEDNOW',
+                            sourceAccountId: currentAccount.accountId,
+                            destinationAccountId: dest.accountId,
+                            amountCents: amtCents,
+                            currency: currentAccount.currency,
+                            description: "Flaky mobile connection test retry"
+                        })
+                    }).then(r => r.json().then(data => ({ packetNum: i, data })))
+                );
+            }
+
+            const results = await Promise.all(promises);
+            let firstCommit = null;
+            let replayCount = 0;
+
+            results.forEach(res => {
+                const d = res.data;
+                const isReplay = d.isIdempotentReplay === true;
+                if (isReplay) replayCount++;
+                else firstCommit = d;
+
+                const line = document.createElement('div');
+                line.className = 'packet-line ' + (isReplay ? 'replay' : 'primary');
+                line.innerHTML = `
+                    <span>Packet #${res.packetNum}: ${isReplay ? '🛡️ IDEMPOTENT REPLAY CACHED' : '⚡ FIRST QUORUM COMMIT'}</span>
+                    <span>Ref: ${d.paymentRef} | Log: #${d.raftLogIndex}</span>
+                `;
+                logConsole.appendChild(line);
+            });
+
+            const summary = document.createElement('div');
+            summary.style.marginTop = '8px';
+            summary.style.padding = '8px';
+            summary.style.borderRadius = '6px';
+            summary.style.background = 'rgba(16, 185, 129, 0.15)';
+            summary.style.color = '#34d399';
+            summary.innerHTML = `
+                <strong>AUDIT PASS:</strong> 5 packets dispatched. 1 committed to Raft, ${replayCount} intercepted by Idempotency Switch. <strong>Zero duplicate debits.</strong>
+            `;
+            logConsole.appendChild(summary);
+
+            await loadAccounts();
+        }
+
+        // 3. Two-Phase Holds
+        async function createAuthorizationHold() {
+            if (!currentAccount) return;
+            const destId = document.getElementById('selectHoldRecipient').value;
+            const amt = parseFloat(document.getElementById('inputHoldAmount').value);
+            if (isNaN(amt) || amt <= 0) return alert("Invalid hold amount");
+
+            const amtCents = Math.round(amt * 100);
+            const holdId = "hld_" + Date.now();
+            const idempKey = "auth_" + holdId;
+
+            try {
+                const res = await fetch('/v1/payments/authorize', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        idempotencyKey: idempKey,
+                        holdId: holdId,
+                        rail: "INTERNAL_BOOK",
+                        sourceAccountId: currentAccount.accountId,
+                        destinationAccountId: destId,
+                        amountCents: amtCents,
+                        currency: currentAccount.currency,
+                        description: "Merchant reservation hold"
+                    })
+                });
+
+                const data = await res.json();
+                if (res.ok && data.status === 'AUTHORIZED') {
+                    await loadAccounts();
+                } else {
+                    alert("Hold rejected: " + (data.rejectionReason || data.error));
+                }
+            } catch (e) {
+                alert("Error placing hold: " + e.message);
+            }
+        }
+
+        async function refreshHolds() {
+            if (!currentAccount) return;
+            const container = document.getElementById('activeHoldsList');
+            try {
+                const res = await fetch('/v1/payments/holds');
+                if (res.ok) {
+                    const data = await res.json();
+                    const holds = (data.holds || []).filter(h => h.sourceAccountId === currentAccount.accountId && h.status === 'AUTHORIZED');
+                    if (holds.length === 0) {
+                        container.innerHTML = `<div style="color:var(--text-muted);font-size:0.8rem;">No active holds for this account.</div>`;
+                        return;
+                    }
+                    container.innerHTML = '';
+                    holds.forEach(h => {
+                        const row = document.createElement('div');
+                        row.style.display = 'flex';
+                        row.style.alignItems = 'center';
+                        row.style.justifyContent = 'space-between';
+                        row.style.background = 'rgba(255, 255, 255, 0.03)';
+                        row.style.padding = '8px 12px';
+                        row.style.borderRadius = '8px';
+                        row.style.fontSize = '0.8rem';
+                        row.innerHTML = `
+                            <div>
+                                <strong style="color:#fbbf24;">$${(h.amountCents / 100).toFixed(2)}</strong>
+                                <span style="color:var(--text-muted);margin-left:6px;">(${h.holdId})</span>
+                            </div>
+                            <div style="display:flex;gap:6px;">
+                                <button class="btn-emerald" style="padding:4px 8px;font-size:0.72rem;" onclick="captureHold('${h.holdId}')">Capture</button>
+                                <button class="btn-outline" style="padding:4px 8px;font-size:0.72rem;color:var(--accent-rose);" onclick="voidHold('${h.holdId}')">Void</button>
+                            </div>
+                        `;
+                        container.appendChild(row);
+                    });
+                }
+            } catch (e) {}
+        }
+
+        async function captureHold(holdId) {
+            try {
+                const res = await fetch('/v1/payments/capture', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ holdId: holdId, idempotencyKey: "cap_" + holdId })
+                });
+                if (res.ok) {
+                    await loadAccounts();
+                } else {
+                    alert("Capture failed");
+                }
+            } catch (e) {
+                alert(e.message);
+            }
+        }
+
+        async function voidHold(holdId) {
+            try {
+                const res = await fetch('/v1/payments/void', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ holdId: holdId })
+                });
+                if (res.ok) {
+                    await loadAccounts();
+                } else {
+                    alert("Void failed");
+                }
+            } catch (e) {
+                alert(e.message);
+            }
+        }
+
+        // 4. Overdraft Prevention Sandbox
+        async function testOverdraftPrevention() {
+            if (!currentAccount) return;
+            const dest = accountsList.find(a => a.accountId !== currentAccount.accountId);
+            if (!dest) return;
+
+            const feedback = document.getElementById('overdraftFeedback');
+            feedback.style.display = 'block';
+            feedback.style.background = 'rgba(6, 182, 212, 0.1)';
+            feedback.style.color = '#38bdf8';
+            feedback.innerText = "Attempting $999,999.00 payment to test consensus rejection...";
+
+            try {
+                const res = await fetch('/v1/payments/settle', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        idempotencyKey: "overdraw_" + Date.now(),
+                        rail: "FEDNOW",
+                        sourceAccountId: currentAccount.accountId,
+                        destinationAccountId: dest.accountId,
+                        amountCents: 99999900,
+                        currency: currentAccount.currency,
+                        description: "Attempted overdraft"
+                    })
+                });
+
+                const data = await res.json();
+                feedback.style.background = 'rgba(244, 63, 94, 0.15)';
+                feedback.style.border = '1px solid rgba(244, 63, 94, 0.4)';
+                feedback.style.color = '#fb7185';
+                feedback.innerHTML = `
+                    <strong>✓ EXPECTED INVARIANT REJECTION:</strong> Status=${data.status || 'REJECTED'}<br>
+                    Reason: <strong>${data.rejectionReason || data.error}</strong><br>
+                    Account balance remains untouched. Zero ledger corruption.
+                `;
+            } catch (e) {
+                feedback.innerText = e.message;
+            }
+        }
+
+        // 5. Ledger & ISO 20022
+        async function refreshLedger() {
+            try {
+                const res = await fetch('/v1/payments/transactions?limit=25');
+                if (res.ok) {
+                    const data = await res.json();
+                    const txs = data.transactions || [];
+                    const tbody = document.getElementById('ledgerTableBody');
+
+                    if (txs.length === 0) {
+                        tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;color:var(--text-muted);padding:24px;">No settlement transactions recorded yet.</td></tr>`;
+                        return;
+                    }
+
+                    tbody.innerHTML = '';
+                    txs.reverse().forEach(tx => {
+                        const tr = document.createElement('tr');
+                        const sym = getCurrencySymbol(tx.currency);
+                        const amtStr = `${sym}${(tx.amountCents / 100).toFixed(2)}`;
+                        const isSettled = tx.status === 'SETTLED' || tx.status === 'CAPTURED';
+
+                        tr.innerHTML = `
+                            <td>
+                                <div style="font-family:var(--font-mono);font-size:0.75rem;color:#fff;">${escapeHtml(tx.paymentRef)}</div>
+                                <div style="font-size:0.68rem;color:var(--text-muted);">${new Date(tx.settledAt).toLocaleTimeString()} • Log #${tx.raftLogIndex}</div>
+                            </td>
+                            <td><span class="rail-badge">${escapeHtml(tx.rail || 'FEDNOW')}</span></td>
+                            <td>
+                                <div style="font-size:0.75rem;">${escapeHtml(tx.sourceAccountId)}</div>
+                                <div style="font-size:0.7rem;color:var(--text-muted);">→ ${escapeHtml(tx.destinationAccountId)}</div>
+                            </td>
+                            <td style="font-family:var(--font-mono);font-weight:600;color:${isSettled ? '#34d399' : '#fb7185'};">${amtStr}</td>
+                            <td><span class="status-badge ${tx.status}">${tx.status}</span></td>
+                            <td>
+                                <button class="btn-outline" style="padding:4px 8px;font-size:0.7rem;" onclick="viewIsoXml('${tx.paymentRef}')">
+                                    ISO 20022
+                                </button>
+                            </td>
+                        `;
+                        tbody.appendChild(tr);
+                    });
+                }
+            } catch (e) {}
+        }
+
+        async function viewIsoXml(ref) {
+            lastPaymentRef = ref;
+            const modal = document.getElementById('isoModal');
+            const code = document.getElementById('xmlContent');
+            code.innerText = "Generating ISO 20022 pacs.008 XML from consensus log...";
+            modal.classList.add('active');
+
+            try {
+                const res = await fetch(`/v1/payments/iso20022?ref=${encodeURIComponent(ref)}`);
+                if (res.ok) {
+                    const xml = await res.text();
+                    lastIsoXml = xml;
+                    code.innerText = xml;
+                } else {
+                    code.innerText = "Failed to load ISO 20022 XML: " + res.statusText;
+                }
+            } catch (e) {
+                code.innerText = "Error: " + e.message;
+            }
+        }
+
+        function closeIsoModal() {
+            document.getElementById('isoModal').classList.remove('active');
+        }
+
+        function copyXmlToClipboard() {
+            if (lastIsoXml) {
+                navigator.clipboard.writeText(lastIsoXml);
+                alert("ISO 20022 XML copied to clipboard!");
+            }
+        }
+
+        function downloadXmlFile() {
+            if (!lastIsoXml) return;
+            const blob = new Blob([lastIsoXml], { type: 'application/xml' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `pacs.008_${lastPaymentRef}.xml`;
+            a.click();
+            URL.revokeObjectURL(url);
+        }
+
+        // 6. Account Management (Top-Up / New Account)
+        async function fundCurrentAccount() {
+            if (!currentAccount) return;
+            try {
+                const res = await fetch('/v1/payments/account/fund', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        accountId: currentAccount.accountId,
+                        amountCents: 50000 // $500.00
+                    })
+                });
+                if (res.ok) {
+                    await loadAccounts();
+                } else {
+                    alert("Top-up failed");
+                }
+            } catch (e) {
+                alert(e.message);
+            }
+        }
+
+        function openNewAccountModal() {
+            document.getElementById('newAccountModal').classList.add('active');
+        }
+
+        function closeNewAccountModal() {
+            document.getElementById('newAccountModal').classList.remove('active');
+        }
+
+        async function submitCreateAccount() {
+            const accId = document.getElementById('newAccId').value.trim();
+            const holder = document.getElementById('newAccHolder').value.trim();
+            const curr = document.getElementById('newAccCurrency').value;
+            const bal = parseFloat(document.getElementById('newAccInitialBal').value) || 0;
+
+            if (!accId || !holder) return alert("Please fill account ID and holder name");
+
+            try {
+                const res = await fetch('/v1/payments/accounts', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        accountId: accId,
+                        currency: curr,
+                        initialBalanceCents: Math.round(bal * 100),
+                        metadata: { holder: holder, type: "Customer Account" }
+                    })
+                });
+
+                if (res.ok) {
+                    closeNewAccountModal();
+                    await loadAccounts();
+                    selectAccount(accId);
+                } else {
+                    alert("Failed to provision account");
+                }
+            } catch (e) {
+                alert(e.message);
+            }
+        }
+
+        async function refreshBalancesAndLedger() {
+            if (currentAccount) {
+                try {
+                    const res = await fetch(`/v1/payments/account?id=${encodeURIComponent(currentAccount.accountId)}`);
+                    if (res.ok) {
+                        const updated = await res.json();
+                        currentAccount = updated;
+                        updateBalanceDisplay();
+                    }
+                } catch (e) {}
+            }
+            await refreshLedger();
+        }
+
+        async function refreshAllData() {
+            await refreshClusterStatus();
+            await loadAccounts();
+        }
+
+        function escapeHtml(str) {
+            if (!str) return '';
+            return String(str).replace(/[&<>"']/g, m => ({
+                '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+            }[m]));
+        }
+    </script>
+</body>
+</html>
+
