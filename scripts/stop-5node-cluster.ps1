@@ -21,4 +21,23 @@ if (Test-Path "$baseDir\data\cluster-pids.csv") {
     } catch {}
     Remove-Item "$baseDir\data\cluster-pids.csv" -Force -ErrorAction SilentlyContinue
 }
-Write-Host "All Raftline cluster processes stopped." -ForegroundColor Green
+
+# Catch any surviving Raftline JVM. A duplicated launch can leave nodes running that are
+# no longer listed in the PID file; those orphans still hold the write ahead log of their
+# data directory, so they must be terminated as well.
+$orphans = Get-CimInstance Win32_Process -Filter "Name='java.exe'" -ErrorAction SilentlyContinue |
+    Where-Object { $_.CommandLine -like "*raftline-api-1.0.0-SNAPSHOT.jar*" }
+foreach ($orphan in $orphans) {
+    $nodeId = if ($orphan.CommandLine -match '--id=(\S+)') { $matches[1] } else { "unknown" }
+    Write-Host "Stopping orphaned Raftline process $nodeId (PID $($orphan.ProcessId)) ..." -ForegroundColor Yellow
+    Stop-Process -Id $orphan.ProcessId -Force -ErrorAction SilentlyContinue
+}
+
+Start-Sleep -Milliseconds 800
+$remaining = Get-CimInstance Win32_Process -Filter "Name='java.exe'" -ErrorAction SilentlyContinue |
+    Where-Object { $_.CommandLine -like "*raftline-api-1.0.0-SNAPSHOT.jar*" }
+if ($remaining) {
+    Write-Host "WARNING: $($remaining.Count) Raftline process(es) are still running." -ForegroundColor Red
+} else {
+    Write-Host "All Raftline cluster processes stopped." -ForegroundColor Green
+}

@@ -24,6 +24,32 @@ Write-Host "==========================================================" -Foregro
 Write-Host "  Starting 5-Node Raftline Distributed Cluster on Localhost" -ForegroundColor Cyan
 Write-Host "==========================================================" -ForegroundColor Cyan
 
+# Refuse to start on top of a running cluster. Two Raftline nodes writing the same write
+# ahead log would corrupt the replicated state, and a duplicate launch leaves orphans
+# behind that hold the data directory without owning the port.
+$alreadyRunning = Get-CimInstance Win32_Process -Filter "Name='java.exe'" -ErrorAction SilentlyContinue |
+    Where-Object { $_.CommandLine -like "*raftline-api-1.0.0-SNAPSHOT.jar*" }
+if ($alreadyRunning) {
+    Write-Host "A Raftline cluster is already running ($($alreadyRunning.Count) process(es))." -ForegroundColor Red
+    Write-Host "Stop it first with: .\scripts\stop-5node-cluster.ps1" -ForegroundColor Red
+    exit 1
+}
+
+# Refuse to start when the ports are taken by something else.
+$busyPorts = @()
+foreach ($node in $nodes) {
+    foreach ($port in @($node.Http, $node.Grpc)) {
+        if (Get-NetTCPConnection -State Listen -LocalPort $port -ErrorAction SilentlyContinue) {
+            $busyPorts += $port
+        }
+    }
+}
+if ($busyPorts.Count -gt 0) {
+    Write-Host "The following ports are already in use: $($busyPorts -join ', ')" -ForegroundColor Red
+    Write-Host "Free them before starting the cluster." -ForegroundColor Red
+    exit 1
+}
+
 $processList = @()
 
 foreach ($node in $nodes) {
@@ -64,8 +90,33 @@ foreach ($node in $nodes) {
 
 $processList | Export-Csv -Path "$baseDir\data\cluster-pids.csv" -NoTypeInformation
 Write-Host "All 5 nodes launched! PIDs saved to data\cluster-pids.csv" -ForegroundColor Yellow
-Write-Host "Waiting 2 seconds for leader election..."
-Start-Sleep -Seconds 2
+Write-Host "Waiting for the cluster to become healthy..."
+
+# Verify that every node actually answers before reporting success. A node that failed to
+# bind its port would otherwise only be discovered later, as a missing node in the topology.
+$deadline = (Get-Date).AddSeconds(30)
+$ready = @{}
+while ((Get-Date) -lt $deadline -and $ready.Count -lt $nodes.Count) {
+    foreach ($node in $nodes) {
+        if ($ready.ContainsKey($node.Id)) { continue }
+        try {
+            $status = Invoke-RestMethod -Uri "http://localhost:$($node.Http)/v1/cluster/status" -TimeoutSec 2
+            if ($status.nodeId -eq $node.Id) {
+                $ready[$node.Id] = $status
+            }
+        } catch {}
+    }
+    if ($ready.Count -lt $nodes.Count) { Start-Sleep -Milliseconds 500 }
+}
+
+if ($ready.Count -lt $nodes.Count) {
+    $missing = $nodes | Where-Object { -not $ready.ContainsKey($_.Id) } | ForEach-Object { $_.Id }
+    Write-Host "ERROR: these nodes did not come up: $($missing -join ', ')" -ForegroundColor Red
+    Write-Host "Check data\<node>\stderr.log for details." -ForegroundColor Red
+    exit 1
+}
+
+Write-Host "All 5 nodes are healthy." -ForegroundColor Green
 
 # Inspect leader
 try {

@@ -22,3 +22,19 @@ Thumbs.db
 .DS_Store
 *.swp
 *~
+
+# Node / Next.js (nexus-ui)
+node_modules/
+**/node_modules/
+.next/
+**/.next/
+out/
+**/out/
+npm-debug.log*
+yarn-error.log*
+.next-env.d.ts
+
+# Local environment files
+.env.local
+.env.*.local
+!.env.example

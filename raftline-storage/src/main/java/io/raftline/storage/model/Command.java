@@ -3,6 +3,7 @@ package io.raftline.storage.model;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
+import java.util.List;
 import java.util.Objects;
 
 /**
@@ -52,6 +53,40 @@ public final class Command {
 
     public static Command noop() {
         return new Command(CommandType.NOOP, "", new byte[0], "", 0L, -1L);
+    }
+
+    /**
+     * Builds an atomic multi-key mutation command.
+     *
+     * <p>All supplied entries are applied by the state machine in a single apply, and the
+     * optional guard is evaluated first under the state machine write lock. The command
+     * deliberately uses an empty {@code clientId} so that the generic session
+     * deduplication table does not mask the guard's duplicate-vs-conflict distinction.
+     */
+    public static Command multiPut(List<MultiPutPayload.Entry> entries, String guardKey, byte[] guardValue) {
+        MultiPutPayload payload = new MultiPutPayload(entries, guardKey, guardValue);
+        return new Command(CommandType.MULTI_PUT, "", payload.encode(), "", 0L, -1L);
+    }
+
+    /**
+     * Convenience overload for a plain atomic multi-key mutation without a guard.
+     */
+    public static Command multiPut(List<MultiPutPayload.Entry> entries) {
+        return multiPut(entries, "", new byte[0]);
+    }
+
+    /**
+     * Decodes a MULTI_PUT command payload. Returns {@code null} for any other command type.
+     */
+    public static MultiPutPayload decodeMultiPut(Command command) {
+        if (command == null || command.getType() != CommandType.MULTI_PUT) {
+            return null;
+        }
+        try {
+            return MultiPutPayload.decode(command.getValue());
+        } catch (java.io.IOException e) {
+            throw new IllegalStateException("Failed to decode MULTI_PUT payload", e);
+        }
     }
 
     public CommandType getType() {

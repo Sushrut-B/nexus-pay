@@ -136,6 +136,15 @@
                     <configuration>
                         <source>21</source>
                         <target>21</target>
+                        <!--
+                            The protobuf plugin regenerates its sources into
+                            target/generated-sources/protobuf on every build. The incremental
+                            compiler occasionally treats those freshly written files as stale
+                            and removes them mid-compile, which surfaces as
+                            "error reading ...Proto.java". Disabling incremental compilation
+                            keeps the generated sources intact for the whole build.
+                        -->
+                        <useIncrementalCompilation>false</useIncrementalCompilation>
                     </configuration>
                 </plugin>
                 <plugin>

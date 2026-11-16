@@ -131,6 +131,7 @@ public class RaftHttpServer implements Closeable {
         server.createContext("/v1/payments/accounts", new PaymentAccountsHandler());
         server.createContext("/v1/payments/account", new PaymentAccountDetailHandler());
         server.createContext("/v1/payments/transactions", new PaymentTransactionsHandler());
+        server.createContext("/v1/payments/idempotency", new PaymentIdempotencyHandler());
         server.createContext("/v1/payments/metrics", new PaymentMetricsHandler());
         DashboardHandler dashboardHandler = new DashboardHandler();
         server.createContext("/dashboard", dashboardHandler);
@@ -1146,6 +1147,50 @@ public class RaftHttpServer implements Closeable {
         ));
     }
 
+    /**
+     * Unwraps nested {@link java.util.concurrent.CompletionException} /
+     * {@link java.util.concurrent.ExecutionException} wrappers so that a
+     * {@link NotLeaderException} raised deep inside an asynchronous pipeline is still
+     * recognised. Without this, a write routed to a follower would surface as HTTP 500
+     * instead of a 307 redirect with a leader hint.
+     */
+    private static Throwable unwrapCause(Throwable throwable) {
+        Throwable current = throwable;
+        while (current != null
+                && (current instanceof java.util.concurrent.CompletionException
+                    || current instanceof java.util.concurrent.ExecutionException)) {
+            Throwable cause = current.getCause();
+            if (cause == null || cause == current) {
+                break;
+            }
+            current = cause;
+        }
+        return current;
+    }
+
+    /**
+     * Maps a payment receipt to its HTTP status code.
+     *
+     * <ul>
+     *   <li>200 / 201 - the operation settled or was authorized.</li>
+     *   <li>409 - the idempotency key was reused with a different payload.</li>
+     *   <li>422 - the operation was rejected by the settlement engine.</li>
+     * </ul>
+     */
+    private static int paymentStatusCode(PaymentResult result, int successCode) {
+        if (result == null) {
+            return 500;
+        }
+        if (result.getStatus() == PaymentStatus.SETTLED || result.getStatus() == PaymentStatus.AUTHORIZED
+                || result.getStatus() == PaymentStatus.CAPTURED) {
+            return successCode;
+        }
+        if (PaymentSettlementEngine.REASON_IDEMPOTENCY_CONFLICT.equals(result.getRejectionReason())) {
+            return 409;
+        }
+        return 422;
+    }
+
     private Map<String, String> parseQueryParams(String query) {
         if (query == null || query.isBlank()) return Collections.emptyMap();
         Map<String, String> map = new java.util.LinkedHashMap<>();
@@ -2123,17 +2168,21 @@ public class RaftHttpServer implements Closeable {
                 PaymentResult result = raftNode.getPaymentEngine().settlePayment(inst).get(15, java.util.concurrent.TimeUnit.SECONDS);
 
                 exchange.getResponseHeaders().set("X-Idempotent-Replay", String.valueOf(result.isIdempotentReplay()));
-                int statusCode = (result.getStatus() == PaymentStatus.SETTLED) ? 200 : 422;
+                int statusCode = paymentStatusCode(result, 200);
+                if (statusCode == 409) {
+                    exchange.getResponseHeaders().set("X-Idempotency-Conflict", "true");
+                }
                 sendJson(exchange, statusCode, result.toMap());
             } catch (ExecutionException e) {
-                Throwable cause = e.getCause();
+                Throwable cause = unwrapCause(e);
                 if (cause instanceof NotLeaderException nle) {
                     handleNotLeader(exchange, nle.getLeaderHint());
                 } else {
                     sendJson(exchange, 500, Map.of("error", cause != null ? cause.getMessage() : e.getMessage()));
                 }
             } catch (Exception e) {
-                sendJson(exchange, 500, Map.of("error", e.getMessage()));
+                Throwable cause = unwrapCause(e);
+                sendJson(exchange, 500, Map.of("error", cause != null ? cause.getMessage() : e.getMessage()));
             }
         }
     }
@@ -2180,17 +2229,21 @@ public class RaftHttpServer implements Closeable {
                 PaymentResult result = raftNode.getPaymentEngine().authorizeHold(inst, holdId, ttlMillis).get(15, java.util.concurrent.TimeUnit.SECONDS);
 
                 exchange.getResponseHeaders().set("X-Idempotent-Replay", String.valueOf(result.isIdempotentReplay()));
-                int statusCode = (result.getStatus() == PaymentStatus.AUTHORIZED) ? 201 : 422;
+                int statusCode = paymentStatusCode(result, 201);
+                if (statusCode == 409) {
+                    exchange.getResponseHeaders().set("X-Idempotency-Conflict", "true");
+                }
                 sendJson(exchange, statusCode, result.toMap());
             } catch (ExecutionException e) {
-                Throwable cause = e.getCause();
+                Throwable cause = unwrapCause(e);
                 if (cause instanceof NotLeaderException nle) {
                     handleNotLeader(exchange, nle.getLeaderHint());
                 } else {
                     sendJson(exchange, 500, Map.of("error", cause != null ? cause.getMessage() : e.getMessage()));
                 }
             } catch (Exception e) {
-                sendJson(exchange, 500, Map.of("error", e.getMessage()));
+                Throwable cause = unwrapCause(e);
+                sendJson(exchange, 500, Map.of("error", cause != null ? cause.getMessage() : e.getMessage()));
             }
         }
     }
@@ -2223,16 +2276,22 @@ public class RaftHttpServer implements Closeable {
                 String tenantId = root.has("tenantId") ? root.get("tenantId").asText() : exchange.getRequestHeaders().getFirst("X-Tenant-Id");
 
                 PaymentResult result = raftNode.getPaymentEngine().captureHold(holdId, tenantId, idempKey).get(15, java.util.concurrent.TimeUnit.SECONDS);
-                sendJson(exchange, 200, result.toMap());
+                exchange.getResponseHeaders().set("X-Idempotent-Replay", String.valueOf(result.isIdempotentReplay()));
+                int statusCode = paymentStatusCode(result, 200);
+                if (statusCode == 409) {
+                    exchange.getResponseHeaders().set("X-Idempotency-Conflict", "true");
+                }
+                sendJson(exchange, statusCode, result.toMap());
             } catch (ExecutionException e) {
-                Throwable cause = e.getCause();
+                Throwable cause = unwrapCause(e);
                 if (cause instanceof NotLeaderException nle) {
                     handleNotLeader(exchange, nle.getLeaderHint());
                 } else {
                     sendJson(exchange, 500, Map.of("error", cause != null ? cause.getMessage() : e.getMessage()));
                 }
             } catch (Exception e) {
-                sendJson(exchange, 500, Map.of("error", e.getMessage()));
+                Throwable cause = unwrapCause(e);
+                sendJson(exchange, 500, Map.of("error", cause != null ? cause.getMessage() : e.getMessage()));
             }
         }
     }
@@ -2385,14 +2444,17 @@ public class RaftHttpServer implements Closeable {
                     PaymentAccount funded = raftNode.getPaymentEngine().fundAccount(accountId, tenantId, amountCents, idempKey).get(15, java.util.concurrent.TimeUnit.SECONDS);
                     sendJson(exchange, 200, funded.toMap());
                 } catch (ExecutionException e) {
-                    Throwable cause = e.getCause();
+                    Throwable cause = unwrapCause(e);
                     if (cause instanceof NotLeaderException nle) {
                         handleNotLeader(exchange, nle.getLeaderHint());
                     } else {
-                        sendJson(exchange, 500, Map.of("error", cause != null ? cause.getMessage() : e.getMessage()));
+                        int conflict = cause != null && cause.getMessage() != null
+                                && cause.getMessage().contains(PaymentSettlementEngine.REASON_IDEMPOTENCY_CONFLICT) ? 409 : 500;
+                        sendJson(exchange, conflict, Map.of("error", cause != null ? cause.getMessage() : e.getMessage()));
                     }
                 } catch (Exception e) {
-                    sendJson(exchange, 500, Map.of("error", e.getMessage()));
+                    Throwable cause = unwrapCause(e);
+                    sendJson(exchange, 500, Map.of("error", cause != null ? cause.getMessage() : e.getMessage()));
                 }
                 return;
             }
@@ -2457,6 +2519,54 @@ public class RaftHttpServer implements Closeable {
                 resList.add(pr.toMap());
             }
             sendJson(exchange, 200, Map.of("tenantId", tenantId, "count", resList.size(), "transactions", resList));
+        }
+    }
+
+    /**
+     * Exposes the replicated idempotency ledger: one record per idempotency key, showing the
+     * original execution, the request fingerprint, the original Raft log index, the replay
+     * counter and the outcome of the most recent observation.
+     */
+    private class PaymentIdempotencyHandler implements HttpHandler {
+        @Override
+        public void handle(HttpExchange exchange) throws IOException {
+            if (!isAuthorized(exchange)) {
+                sendJson(exchange, 401, Map.of("error", "Unauthorized: Valid API Key required"));
+                return;
+            }
+            if (raftNode == null || raftNode.getPaymentEngine() == null) {
+                sendJson(exchange, 501, Map.of("error", "PaymentSettlementEngine is not initialized on this node"));
+                return;
+            }
+            if (!"GET".equalsIgnoreCase(exchange.getRequestMethod())) {
+                sendJson(exchange, 405, Map.of("error", "Idempotency ledger requires GET"));
+                return;
+            }
+
+            Map<String, String> query = parseQueryParams(exchange.getRequestURI().getQuery());
+            String tenantId = query.getOrDefault("tenantId", "default");
+            String key = query.get("key");
+
+            if (key != null && !key.isBlank()) {
+                Optional<IdempotencyRecord> record = raftNode.getPaymentEngine().getIdempotencyRecord(key, tenantId);
+                if (record.isPresent()) {
+                    sendJson(exchange, 200, record.get().toMap());
+                } else {
+                    sendJson(exchange, 404, Map.of("error", "No idempotency record for key: " + key));
+                }
+                return;
+            }
+
+            int limit = 200;
+            if (query.containsKey("limit")) {
+                try { limit = Integer.parseInt(query.get("limit")); } catch (Exception ignored) {}
+            }
+            List<IdempotencyRecord> records = raftNode.getPaymentEngine().listIdempotencyRecords(tenantId, limit);
+            List<Map<String, Object>> out = new ArrayList<>(records.size());
+            for (IdempotencyRecord record : records) {
+                out.add(record.toMap());
+            }
+            sendJson(exchange, 200, Map.of("tenantId", tenantId, "count", out.size(), "records", out));
         }
     }
 

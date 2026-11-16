@@ -107,6 +107,41 @@ public class KeyValueStore implements StateMachine {
                 case NOOP:
                     // Heartbeat or leader establishment entry
                     break;
+                case MULTI_PUT: {
+                    // Atomic multi-key mutation guarded by an idempotency precondition.
+                    // The guard is evaluated while the write lock is held, so the
+                    // "check the idempotency table, then mutate" sequence cannot be
+                    // interleaved by a concurrent command on any replica.
+                    io.raftline.storage.model.MultiPutPayload payload;
+                    try {
+                        payload = io.raftline.storage.model.MultiPutPayload.decode(command.getValue());
+                    } catch (IOException e) {
+                        this.lastAppliedIndex = entry.getIndex();
+                        this.lastAppliedTerm = entry.getTerm();
+                        return ApplyResult.error("MALFORMED_MULTI_PUT");
+                    }
+                    if (payload.hasGuard()) {
+                        byte[] existing = data.get(payload.guardKey());
+                        if (existing != null) {
+                            boolean identical = java.util.Arrays.equals(existing, payload.guardValue());
+                            this.lastAppliedIndex = entry.getIndex();
+                            this.lastAppliedTerm = entry.getTerm();
+                            return ApplyResult.error(identical
+                                    ? io.raftline.storage.model.MultiPutPayload.REJECT_DUPLICATE
+                                    : io.raftline.storage.model.MultiPutPayload.REJECT_CONFLICT);
+                        }
+                    }
+                    long maxVersion = 0L;
+                    for (io.raftline.storage.model.MultiPutPayload.Entry e : payload.entries()) {
+                        long currentVer = versions.getOrDefault(e.key(), 0L);
+                        versions.put(e.key(), currentVer + 1);
+                        data.put(e.key(), e.value());
+                        maxVersion = Math.max(maxVersion, currentVer + 1);
+                    }
+                    resultBytes = command.getValue();
+                    resultVersion = maxVersion;
+                    break;
+                }
             }
 
             // Update session cache

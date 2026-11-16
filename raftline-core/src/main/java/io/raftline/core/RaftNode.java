@@ -840,12 +840,40 @@ public class RaftNode implements RaftRpcHandler, Closeable {
      * and replicated together.
      */
     public CompletableFuture<List<ApplyResult>> executeBatch(List<Command> commands) {
-        if (commands == null || commands.isEmpty()) {
-            return CompletableFuture.completedFuture(Collections.emptyList());
+        return executeBatchTracked(commands).thenApply(BatchExecution::results);
+    }
+
+    /**
+     * Result of a tracked batch execution: the log index assigned to the first entry of the
+     * batch plus the per-entry apply results. The start index is the authoritative Raft log
+     * index that a receipt should reference.
+     */
+    public record BatchExecution(long startIndex, List<ApplyResult> results) {}
+
+    /**
+     * Executes a batch of state machine commands and reports the Raft log index that the
+     * batch was assigned. Used by the payment engine so that every consensus receipt
+     * references the exact committed log index of the mutation.
+     */
+    public CompletableFuture<BatchExecution> executeBatchTracked(List<Command> commands) {
+        return executeBatchIndexed(index -> commands);
+    }
+
+    /**
+     * Executes a batch whose commands depend on the Raft log index that the batch is
+     * assigned. The factory is invoked under the leader state lock, after the start index
+     * has been determined, so the caller can stamp consensus receipts with the exact
+     * committed log index of their own mutation.
+     *
+     * @param commandFactory receives the assigned start index and returns the commands to append
+     */
+    public CompletableFuture<BatchExecution> executeBatchIndexed(java.util.function.LongFunction<List<Command>> commandFactory) {
+        if (commandFactory == null) {
+            return CompletableFuture.completedFuture(new BatchExecution(0L, Collections.emptyList()));
         }
 
         if (paused) {
-            CompletableFuture<List<ApplyResult>> failed = new CompletableFuture<>();
+            CompletableFuture<BatchExecution> failed = new CompletableFuture<>();
             failed.completeExceptionally(new IllegalStateException("Node " + config.getLocalNodeId() + " is paused (chaos freeze)"));
             return failed;
         }
@@ -853,12 +881,17 @@ public class RaftNode implements RaftRpcHandler, Closeable {
         stateLock.lock();
         try {
             if (role != Role.LEADER) {
-                CompletableFuture<List<ApplyResult>> failed = new CompletableFuture<>();
+                CompletableFuture<BatchExecution> failed = new CompletableFuture<>();
                 failed.completeExceptionally(new NotLeaderException(currentLeaderId));
                 return failed;
             }
 
             long startIndex = wal.getLastLogIndex() + 1;
+            List<Command> commands = commandFactory.apply(startIndex);
+            if (commands == null || commands.isEmpty()) {
+                return CompletableFuture.completedFuture(new BatchExecution(startIndex, Collections.emptyList()));
+            }
+
             long term = metaStorage.getCurrentTerm();
             List<LogEntry> entries = new ArrayList<>(commands.size());
             List<CompletableFuture<ApplyResult>> individualFutures = new ArrayList<>(commands.size());
@@ -880,7 +913,7 @@ public class RaftNode implements RaftRpcHandler, Closeable {
                 for (long i = startIndex; i < startIndex + commands.size(); i++) {
                     pendingClientRequests.remove(i);
                 }
-                CompletableFuture<List<ApplyResult>> failed = new CompletableFuture<>();
+                CompletableFuture<BatchExecution> failed = new CompletableFuture<>();
                 failed.completeExceptionally(e);
                 return failed;
             }
@@ -902,7 +935,7 @@ public class RaftNode implements RaftRpcHandler, Closeable {
                 for (CompletableFuture<ApplyResult> f : individualFutures) {
                     results.add(f.join());
                 }
-                return results;
+                return new BatchExecution(startIndex, results);
             });
         } finally {
             stateLock.unlock();
