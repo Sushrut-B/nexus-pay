@@ -1,183 +1,149 @@
-# Raftline (Quorix): Distributed Consensus Key-Value Database
+<div align="center">
 
-A production-grade, fault-tolerant distributed key-value database powered by the **Raft consensus algorithm**, built with Java 21 LTS, gRPC / Protobuf inter-node replication, segmented Write-Ahead Log (WAL) with CRC32 checksums, linearizable reads via ReadIndex, point-in-time snapshotting, and client session deduplication.
+# Nexus Pay
 
----
+**Consumer payments · Social finance · Personal intelligence · Cluster operations**
 
-## 🏛️ System Architecture
+[![Stack](https://img.shields.io/badge/stack-Next.js%2015%20%7C%20React%2019%20%7C%20TypeScript-blue)](https://nextjs.org/)
+[![Ledger](https://img.shields.io/badge/ledger-Raftline%205--node-green)](#architecture)
+[![Tests](https://img.shields.io/badge/tests-53%20unit%20%7C%2046%20integration%20%7C%207%20E2E-brightgreen)](#verification)
+[![Mode](https://img.shields.io/badge/mode-SIMULATED%20SANDBOX-orange)](#sandbox-notice)
 
-```
-                                +-----------------------------------+
-                                |     Client Application / SDK      |
-                                |     (PUT / GET / DELETE / Status) |
-                                +-----------------------------------+
-                                                  |  HTTP REST (8001..8005)
-                                                  v
-     +------------------------------------------------------------------------------------------+
-     | Node 1 (Leader)                                                                          |
-     |                                                                                          |
-     |   +-----------------------+     +------------------------+     +---------------------+   |
-     |   |   HTTP REST Server    | --> |    Raft Consensus      | --> |  Segmented WAL      |   |
-     |   |   - /v1/kv/{key}      |     |    - Roles & Election  |     |  - CRC32 Checksums  |   |
-     |   |   - /v1/cluster/*     |     |    - Quorum Commit §5.4|     |  - Crash Auto-Trim  |   |
-     |   |   - /v1/metrics       |     |    - ReadIndex Engine  |     |  - Atomic Term Meta |   |
-     |   +-----------------------+     +------------------------+     +---------------------+   |
-     |                                             |                             |              |
-     |                                             v                             v              |
-     |                                 +------------------------+     +---------------------+   |
-     |                                 |   gRPC Replication     |     |   KV State Machine  |   |
-     |                                 |   - RequestVote        |     |   - Session Dedupe  |   |
-     |                                 |   - AppendEntries      |     |   - Snapshots       |   |
-     |                                 |   - InstallSnapshot    |     +---------------------+   |
-     +------------------------------------------------------------------------------------------+
-                    | (Port 9001)                | (Port 9002)              | (Port 9003..9005)
-                    | gRPC Replication           |                          |
-                    v                            v                          v
-          +-------------------+        +-------------------+      +-------------------+
-          |  Follower Node 2  |        |  Follower Node 3  | ...  | Follower Nodes 4,5|
-          |  Local Disk & WAL |        |  Local Disk & WAL |      | Local Disk & WAL  |
-          +-------------------+        +-------------------+      +-------------------+
-```
+[Overview](#overview) · [Quick start](#quick-start) · [Features](#features) · [Architecture](#architecture) · [Verification](#verification) · [Docs](#documentation)
+
+</div>
+
+> This repository contains both **Nexus Pay** (in [`nexus-pay/`](nexus-pay)) and the **Raftline** cluster. Original Raftline docs: [`RAFTLINE.md`](RAFTLINE.md).
 
 ---
 
-## 📦 Project Structure
+## Overview
 
-```
-Raftline/
-├── raftline-storage/         # Durable Write-Ahead Log, CRC32 verification, Snapshots, and Key-Value State Machine
-│   ├── wal/WriteAheadLog.java
-│   ├── meta/RaftMetaStorage.java
-│   ├── model/LogEntry.java, Command.java
-│   └── state/KeyValueStore.java, StateMachine.java
-├── raftline-core/            # Pure Raft Consensus Engine (Role, Leader Election, Commit Rule §5.4.2, ReadIndex)
-│   ├── RaftNode.java
-│   ├── Role.java
-│   ├── config/RaftConfig.java
-│   └── transport/RaftTransport.java
-├── raftline-transport/       # gRPC + Protobuf inter-node replication protocol
-│   ├── src/main/proto/raft.proto
-│   ├── GrpcRaftTransport.java
-│   └── GrpcRaftServer.java
-├── raftline-api/             # Server entrypoint and client-facing HTTP REST API
-│   ├── RaftServerMain.java
-│   └── RaftHttpServer.java
-├── raftline-client/          # Fault-tolerant Java Client SDK (Automatic redirect, retries, idempotency)
-│   └── QuorixClient.java
-├── raftline-testkit/         # Deterministic cluster simulator and fault injector
-│   ├── ClusterSimulator.java
-│   └── InProcessRaftTransport.java
-├── deployment/
-│   └── docker/
-│       ├── Dockerfile
-│       └── docker-compose.yml # 5 isolated nodes on bridge network with volume mounts
-└── scripts/
-    ├── start-5node-cluster.ps1
-    ├── stop-5node-cluster.ps1
-    └── demo-chaos-cluster.ps1
-```
+Nexus Pay is a full consumer-finance platform backed by a live five-node **Raftline** cluster. It evolved across five releases without rebuilding earlier work.
+
+| Release | Delivered |
+| --- | --- |
+| **R1** | Authentication, onboarding, PostgreSQL, wallet provisioning, Raftline adapter with dynamic leader discovery |
+| **R2** | Wallet dashboard, simulated funding, P2P transfers, receive/QR, transaction history, receipts, idempotency and recovery |
+| **R3** | Contacts, payment requests, groups, expense splitting, balances, debt simplification, verified settlements, notifications |
+| **R4** | Insights, categorization rules, budgets, savings goals, scheduled payments + durable worker, recurring detection, calendar, PDF/CSV statements |
+| **R5** | **Nexus Control** — isolated admin console, RBAC, live cluster monitoring, chaos engineering, payment reconciliation, metrics, alerts, audit |
+
+> [!IMPORTANT]
+> <a name="sandbox-notice"></a>
+> **Sandbox only.** Funding is labelled **SIMULATED SANDBOX FUNDING**. There is no bank, UPI, card or real-money integration, and no regulatory claim.
+
+<details>
+<summary><b>Core financial rules</b> (click to expand)</summary>
+
+- Raftline is the only ledger. PostgreSQL stores metadata, never authoritative balances.
+- Success requires a verified committed receipt — HTTP acceptance is not success.
+- Ambiguous outcomes stay `UNKNOWN` / `RECONCILIATION_REQUIRED`.
+- No new idempotency key after a timeout; repeated submissions reuse the original intent.
+- Analytics, budgets and savings goals are derived/tracking metadata, never a second ledger.
+
+</details>
 
 ---
 
-## 🚀 Getting Started
+## Quick start
 
-### 1. Build the Entire Project
 ```powershell
-mvn clean package -DskipTests
-```
-This generates the executable fat JAR in `raftline-api/target/raftline-api-1.0.0-SNAPSHOT.jar`.
-
-### 2. Run the 5-Node Cluster Locally
-```powershell
+# 1. Infrastructure
+docker compose up -d
+cd C:\Sushrut\projects\Raftline
 .\scripts\start-5node-cluster.ps1
-```
-This starts 5 independent Java processes:
-- `node-1`: HTTP 8001 / gRPC 9001
-- `node-2`: HTTP 8002 / gRPC 9002
-- `node-3`: HTTP 8003 / gRPC 9003
-- `node-4`: HTTP 8004 / gRPC 9004
-- `node-5`: HTTP 8005 / gRPC 9005
 
-### 3. Run the Automated Chaos & Failover Demonstration
+# 2. Application
+cd C:\Sushrut\projects\nexus-pay
+pnpm install
+pnpm db:generate
+pnpm db:deploy
+pnpm dev
+```
+
+| URL | Purpose |
+| --- | --- |
+| `http://localhost:3000` | Nexus Pay customer app |
+| `http://localhost:3000/control` | Nexus Control admin console |
+
+Copy `nexus-pay/apps/web/.env.example` → `nexus-pay/apps/web/.env.local`. Register the tenant with `cd nexus-pay; .\scripts\ensure-raftline-tenant.ps1`.
+
+---
+
+## Features
+
+<details open>
+<summary><b>Customer app</b></summary>
+
+| Area | Routes |
+| --- | --- |
+| Wallet & payments | `/home`, `/wallet`, `/wallet/add-money`, `/send`, `/receive`, `/transactions` |
+| Social | `/contacts`, `/requests`, `/groups`, `/groups/[groupId]/settle` |
+| Finance | `/insights`, `/insights/spending`, `/transactions/categories`, `/budgets`, `/savings`, `/scheduled`, `/calendar`, `/statements` |
+
+</details>
+
+<details>
+<summary><b>Nexus Control (admin)</b></summary>
+
+| Section | Capability |
+| --- | --- |
+| Overview / Cluster / Nodes | Live health, dynamic leader, node detail, sampled history |
+| Leader Elections | Observed transitions, including re-elections via term changes |
+| Chaos Engineering | Real Raftline inject/heal with reason, confirmation, rate limit, quorum safety |
+| Payments / Reconciliation | Masked investigation, evidence-based resolution without replay |
+| Metrics / Alerts | Nexus-observed samples, deduplicated incidents |
+| Audit / Diagnostics / Admin | Append-only audit, structured logs, role management |
+
+**RBAC:** `SUPER_ADMIN` → all · `OPERATOR` → operate, no admin management · `VIEWER` → read-only. Chaos is disabled by default (`NEXUS_CONTROL_CHAOS_ENABLED=false`).
+
+</details>
+
+---
+
+## Architecture
+
+```mermaid
+flowchart LR
+  UI[Customer app<br/>/ ...] --> API[Nexus Pay API<br/>auth · idempotency · services]
+  CUI[Nexus Control<br/>/control] --> CADMIN[Admin API<br/>RBAC · audit]
+  API --> DB[(PostgreSQL<br/>metadata + observations)]
+  CADMIN --> DB
+  API --> RAFT[Raftline cluster<br/>node-1 ... node-5]
+  CADMIN --> RAFT
+  RAFT --> LEDGER[(Authoritative<br/>balances + receipts)]
+  DB -.derived views.-> API
+```
+
+- The browser never talks to Raftline directly.
+- Scheduled payments use a durable PostgreSQL job queue with atomic claiming and stable execution keys.
+- Budgets do not reserve funds; savings goals do not move money.
+
+---
+
+## Verification
+
+| Gate | Result |
+| --- | --- |
+| `pnpm typecheck` / `pnpm lint` / `pnpm build` | Passed (44 route groups) |
+| `pnpm test:unit` | **53 passed** |
+| `pnpm test:integration` | **46 passed** (live Raftline + PostgreSQL) |
+| Playwright E2E | **7 passed** (production mode) |
+| Live failover drill | Leader failure → new term → heal → payment settled → reconciled → audited |
+
 ```powershell
-.\scripts\demo-chaos-cluster.ps1
-```
-This script automatically:
-1. Discovers the active leader.
-2. Writes `PUT user:42 "Sushrut"`.
-3. Verifies linearizable read on the leader.
-4. **Kills the leader process** abruptly.
-5. Observes the remaining 4 nodes detect the timeout and elect a new leader.
-6. Reads `user:42` from the **new leader**, verifying zero data loss.
-7. Shuts down the cluster cleanly.
-
----
-
-## 🌐 Client REST API
-
-| Method | Endpoint | Description |
-|---|---|---|
-| `PUT` | `/v1/kv/{key}` | Write a value. Commits when replicated to a quorum (\(3/5\)). |
-| `GET` | `/v1/kv/{key}` | Linearizable read via `ReadIndex` (confirms current leadership). |
-| `GET` | `/v1/kv/{key}?stale=true`| Fast follower read (allows bounded staleness). |
-| `DELETE` | `/v1/kv/{key}` | Delete a key through consensus. |
-| `GET` | `/v1/cluster/status` | Current role, term, leaderId, commitIndex, and lastApplied. |
-| `GET` | `/v1/cluster/nodes` | Cluster membership, total nodes, and quorum count. |
-| `GET` | `/v1/metrics` | Prometheus metrics (`raft_current_term`, `raft_commit_index`, etc.). |
-| `POST` | `/v1/admin/snapshot` | Trigger a point-in-time snapshot and WAL log compaction. |
-
-### cURL Examples
-```bash
-# Write to cluster
-curl -X PUT http://localhost:8001/v1/kv/user:42 -d "Sushrut"
-
-# Linearizable read
-curl http://localhost:8001/v1/kv/user:42
-
-# Check cluster status
-curl http://localhost:8001/v1/cluster/status
+cd nexus-pay
+pnpm test:unit
+pnpm test:integration
+pnpm exec playwright test --config playwright.prod.config.ts
 ```
 
 ---
 
-## ☕ Java SDK Usage
+## Documentation
 
-```java
-import io.raftline.client.QuorixClient;
-
-// Connect with seed URLs (SDK automatically discovers leader and caches redirects)
-QuorixClient client = QuorixClient.create(
-    "http://localhost:8001",
-    "http://localhost:8002",
-    "http://localhost:8003",
-    "http://localhost:8004",
-    "http://localhost:8005"
-);
-
-// Idempotent write (client sequence ID attached automatically)
-client.put("user:42", "Sushrut");
-
-// Linearizable read
-String name = client.getString("user:42"); // "Sushrut"
-
-// Stale read from local follower
-byte[] fastRead = client.get("user:42", true);
-
-// Delete
-client.delete("user:42");
-```
-
----
-
-## 🛡️ Correctness Guarantees Implemented
-
-1. **Raft Commit Rule §5.4.2**:
-   Leaders only directly commit entries created in their *current term*. Entries from previous terms commit indirectly once a current-term entry is committed.
-2. **Atomic Term & Vote Persistence**:
-   `currentTerm` and `votedFor` are fsynced to disk using atomic temporary file swap before responding to any `RequestVote` RPC.
-3. **Log Suffix Truncation (§5.3)**:
-   Followers truncate conflicting uncommitted entries physically from the WAL before appending new entries.
-4. **ReadIndex Linearizability**:
-   Leaders execute a quorum heartbeat verification round before returning state machine reads, preventing stale reads if partitioned.
-5. **Session Idempotency**:
-   The state machine maintains a client sequence table preserved across snapshots to guarantee exactly-once execution semantics under client retries.
+- [Nexus Pay README](nexus-pay/README.md)
+- [API reference](nexus-pay/docs/api.md) · [Environment setup](nexus-pay/docs/environment-setup.md) · [Raftline integration](nexus-pay/docs/raftline-integration.md)
+- [Nexus Control](nexus-pay/docs/nexus-control.md) · [Runbooks](nexus-pay/docs/nexus-control-runbooks.md) · [Assessment](nexus-pay/docs/nexus-control-assessment.md)
+- Reports: [R2](nexus-pay/docs/release-2-report.md) · [R3](nexus-pay/docs/release-3-report.md) · [R4](nexus-pay/docs/release-4-report.md) · [R5](nexus-pay/docs/release-5-report.md)
