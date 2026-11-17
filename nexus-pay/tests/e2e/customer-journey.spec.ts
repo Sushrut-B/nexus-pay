@@ -44,7 +44,7 @@ test("customer can register, verify a wallet, update profile, sign in and reset 
   await expect(page.getByText("Verification needed")).toHaveCount(0);
   await expect(page.getByText("Needs attention")).toHaveCount(0);
 
-  await page.getByRole("link", { name: "Profile", exact: true }).click();
+  await page.getByRole("link", { name: "Settings", exact: true }).click();
   await page.waitForURL("**/profile");
   await expect(page.getByRole("heading", { name: "Profile & security" })).toBeVisible();
   await page.getByLabel("Display name").fill("Nexus Profile");
