@@ -16,17 +16,22 @@ export default defineConfig({
   reporter: [["list"]],
   use: {
     ...baseConfig.use,
-    baseURL: "http://localhost:3200",
+    baseURL: "http://localhost:3000",
     trace: "off",
     screenshot: "off",
     video: "off",
   },
   webServer: {
-    command: "npx next start --port 3200",
+    command: "npx next start --port 3000",
     cwd: path.resolve(projectRoot, "apps/web"),
-    url: "http://localhost:3200",
+    url: "http://localhost:3000",
     reuseExistingServer: false,
     timeout: 120_000,
+    env: {
+      ...process.env,
+      E2E_TEST_MODE: "1",
+      RATE_LIMIT_TEST_MULTIPLIER: "50",
+    } as Record<string, string>,
   },
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
 });

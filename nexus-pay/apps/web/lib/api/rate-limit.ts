@@ -68,12 +68,23 @@ export function getClientIp(request: Request): string {
   return request.headers.get("x-real-ip")?.trim() || "unknown";
 }
 
+/**
+ * Test environments can raise all limits with RATE_LIMIT_TEST_MULTIPLIER so a
+ * single Playwright run can create the several users its scenarios need.
+ * Production defaults are unchanged.
+ */
+function effectiveLimit(key: string, limit: number): number {
+  if (process.env.NODE_ENV !== "test" && !process.env.E2E_TEST_MODE) return limit;
+  const multiplier = Number(process.env.RATE_LIMIT_TEST_MULTIPLIER ?? "20");
+  return Number.isFinite(multiplier) && multiplier > 0 ? Math.ceil(limit * multiplier) : limit;
+}
+
 export function enforceRateLimit(
   key: string,
   limit: number,
   windowMs: number,
 ): RateLimitResult {
-  return rateLimiter.consume(key, limit, windowMs);
+  return rateLimiter.consume(key, effectiveLimit(key, limit), windowMs);
 }
 
 export function enforceRateLimitOrThrow(
