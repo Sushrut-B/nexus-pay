@@ -188,3 +188,107 @@ to the expense total.
 Notifications are persisted in PostgreSQL and generated for requests, group
 membership, expenses and settlements. The header notification center polls
 every 30 seconds; no WebSockets or external push are used.
+
+---
+
+## Release 4 — Personal finance
+
+All endpoints require authentication, validate input and enforce ownership.
+All monetary figures are integer minor units.
+
+### Insights
+
+| Method | Route | Notes |
+| --- | --- | --- |
+| GET | `/api/insights/overview?period=&from=&to=` | `FinanceOverview`. Periods: month, last_month, last_3_months, last_6_months, year, custom. |
+| GET | `/api/insights/cash-flow?period=` | Cash flow, weekly and daily buckets. |
+| GET | `/api/insights/spending?period=` | Eligible spending and period comparison. |
+| GET | `/api/insights/categories?period=` | Category breakdown. |
+| GET | `/api/insights/comparison?period=` | Current vs previous period totals. |
+| GET | `/api/insights/transactions?period=&categoryId=&search=&minMinor=&maxMinor=` | Underlying transactions for a category drill-down. |
+
+Inclusion policy: only `SUCCESSFUL` P2P transactions with a ledger reference.
+Funding, failed/unconfirmed payments, personal transfers and group obligations
+are excluded from spending. Each payment is counted once because the read model
+is unique per `(user, paymentRef)`.
+
+### Categorization
+
+| Method | Route | Notes |
+| --- | --- | --- |
+| GET | `/api/transactions/categories` | System plus user categories and the caller's categorizations. |
+| PATCH | `/api/transactions/[id]/category` | `{ paymentRef, categoryId, note? }`. Never modifies the transaction. |
+| GET | `/api/transactions/category-rules` | User-specific rules, highest priority first. |
+| POST | `/api/transactions/category-rules` | `{ conditionType, conditionValue, categoryId, priority, isEnabled }`. |
+| PATCH | `/api/transactions/category-rules/[id]` | Edit a rule. |
+| DELETE | `/api/transactions/category-rules/[id]` | Remove a rule. |
+
+Resolution order: manual choice → highest-priority enabled rule (ties by
+creation order) → Uncategorized. The `[id]` segment is shared with the existing
+transaction detail route for Next.js compatibility.
+
+### Budgets
+
+| Method | Route | Notes |
+| --- | --- | --- |
+| GET | `/api/budgets` | Budgets with utilization and crossed thresholds. |
+| POST | `/api/budgets` | `{ name, categoryId, amountMinor, currency, periodType, startDate, endDate?, thresholds[] }`. |
+| GET | `/api/budgets/[id]` | Budget detail; syncs threshold alerts once. |
+| PATCH | `/api/budgets/[id]` | Edit or pause/complete/cancel. |
+| DELETE | `/api/budgets/[id]` | Delete a budget and its alert history. |
+
+Thresholds are recorded once per `(budget, periodStart, threshold)`; reopening
+the dashboard never re-notifies.
+
+### Savings goals
+
+| Method | Route | Notes |
+| --- | --- | --- |
+| GET | `/api/savings/goals` | Goals with recorded/planned totals. |
+| POST | `/api/savings/goals` | `{ name, targetAmountMinor, currency, targetDate?, description?, icon? }`. |
+| GET | `/api/savings/goals/[id]` | Goal detail with contributions. |
+| PATCH | `/api/savings/goals/[id]` | Edit details or status. |
+| POST | `/api/savings/goals/[id]/contributions` | `{ amountMinor, contributionType, note?, relatedPaymentRef? }`. |
+
+Contributions are planning events. `RECORDED` counts toward progress, `PLANNED`
+does not. No money moves.
+
+### Scheduled payments
+
+| Method | Route | Notes |
+| --- | --- | --- |
+| GET | `/api/scheduled-payments` | Caller's schedules. |
+| POST | `/api/scheduled-payments` | `{ recipientQuery, amountMinor, currency, description?, frequency, startDate, endDate?, maxExecutions? }`. |
+| GET | `/api/scheduled-payments/[id]` | Schedule detail. |
+| PATCH | `/api/scheduled-payments/[id]` | Edit eligible fields. |
+| POST | `/api/scheduled-payments/[id]/pause` | Pause an active schedule. |
+| POST | `/api/scheduled-payments/[id]/resume` | Resume a paused schedule. |
+| POST | `/api/scheduled-payments/[id]/cancel` | Cancel a schedule. |
+| GET | `/api/scheduled-payments/[id]/executions` | Execution history. |
+| POST | `/api/scheduled-payments/run` | Manual scheduler trigger (rate limited). |
+
+The server-side worker (`instrumentation.ts` → `schedule-worker.ts`, or
+`scripts/run-scheduler.ts`) claims due executions atomically. The execution key
+`scheduleId:scheduledForISO` is the idempotency boundary and becomes the payment
+intent's client request id. Ambiguous outcomes retry the same intent (max 3
+attempts); definitive rejections require attention.
+
+### Recurring and calendar
+
+| Method | Route | Notes |
+| --- | --- | --- |
+| GET | `/api/recurring/suggestions` | Detected patterns; suggestions only. |
+| POST | `/api/recurring/suggestions/[id]/confirm` | Explicitly creates a schedule. |
+| POST | `/api/recurring/suggestions/[id]/ignore` | Ignore a suggestion. |
+| GET | `/api/calendar/events?from=&to=` | Scheduled payments, budget boundaries, goal dates and estimates. |
+
+### Statements
+
+| Method | Route | Notes |
+| --- | --- | --- |
+| POST | `/api/statements/generate` | `{ format: PDF\|CSV, periodStart, periodEnd }`. |
+| GET | `/api/statements` | Generated statements. |
+| GET | `/api/statements/[id]` | Metadata and totals. |
+| GET | `/api/statements/[id]/download` | Streams the file; ownership checked; `no-store`. |
+
+PDF statements use `INR` (standard PDF fonts cannot encode ₹); CSV keeps Unicode.

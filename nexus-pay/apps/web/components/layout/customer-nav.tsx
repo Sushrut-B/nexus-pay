@@ -5,7 +5,7 @@ import { usePathname } from "next/navigation";
 import { cn } from "@nexus/ui";
 
 const LINKS = [
-  { href: "/home", label: "Home" },
+  { href: "/home", label: "Overview" },
   { href: "/wallet", label: "My Wallet" },
   { href: "/send", label: "Send Money" },
   { href: "/receive", label: "Receive Money" },
@@ -13,7 +13,13 @@ const LINKS = [
   { href: "/requests", label: "Payment Requests" },
   { href: "/contacts", label: "Contacts" },
   { href: "/transactions", label: "Transactions" },
-  { href: "/profile", label: "Profile" },
+  { href: "/insights", label: "Insights" },
+  { href: "/budgets", label: "Budgets" },
+  { href: "/savings", label: "Savings Goals" },
+  { href: "/scheduled", label: "Scheduled Payments" },
+  { href: "/calendar", label: "Calendar" },
+  { href: "/statements", label: "Statements" },
+  { href: "/profile", label: "Settings" },
 ];
 
 export function CustomerNav({ mobile = false }: { mobile?: boolean }) {

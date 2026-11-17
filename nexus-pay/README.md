@@ -114,6 +114,39 @@ Key rules:
 
 Reports:
 
+## Release 4 — personal finance intelligence
+
+Release 4 adds insights, categorization, budgets, savings goals, scheduled
+payments, recurring detection, a calendar and statements. All analytics are
+derived from verified Raftline transactions; Raftline remains the only source
+of truth.
+
+| Route | Purpose |
+| --- | --- |
+| `/insights`, `/insights/spending` | Financial overview, cash flow and spending analytics |
+| `/transactions/categories` | Categorize transactions and manage personal rules |
+| `/budgets` | Category budgets with threshold alerts |
+| `/savings` | Savings goals with manual planning contributions |
+| `/scheduled`, `/scheduled/recurring` | Scheduled payments, execution history and detected patterns |
+| `/calendar` | Upcoming payment, budget and goal dates |
+| `/statements` | Generate and download PDF/CSV statements |
+
+Important boundaries:
+
+- Analytics exclude funding, failed/unconfirmed payments and personal transfers
+  or group obligations from "spending".
+- Budgets track limits; they never reserve funds.
+- Savings goals track progress; contributions are planning events, not transfers.
+- Scheduled payments reuse the Release 2 idempotent payment engine with a
+  stable execution key; no bank mandate or UPI AutoPay is involved.
+- Statements contain only verified records; unavailable balances are labelled.
+
+Reports:
+
+- [Release 4 report](docs/release-4-report.md)
+- [Financial calculation report](docs/release-4-financial-report.md)
+- [Scheduled execution reliability report](docs/release-4-scheduling-report.md)
+
 - [Release 3 report](docs/release-3-report.md) — completion status and evidence.
 - [Financial calculation report](docs/release-3-financial-calculation-report.md)
   — split/balance rules and test results.

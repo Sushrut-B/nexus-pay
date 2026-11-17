@@ -102,6 +102,17 @@ model User {
   activities          GroupActivity[]
   notifications       Notification[]
 
+  // Release 4 — personal finance intelligence
+  categories          TransactionCategory[]   @relation("UserCategory")
+  categorizations     TransactionCategorization[]
+  categorizationRules CategorizationRule[]
+  budgets             Budget[]
+  savingsGoals        SavingsGoal[]
+  scheduledPayments   ScheduledPayment[]     @relation("ScheduleOwner")
+  scheduledRecipients ScheduledPayment[]     @relation("ScheduleRecipient")
+  recurringSuggestions RecurringPaymentSuggestion[]
+  statements          Statement[]
+
   @@index([accountStatus])
   @@index([createdAt])
   @@map("users")
@@ -157,6 +168,8 @@ model Wallet {
   paymentIntents    PaymentIntent[]
   fundingOperations FundingOperation[]
   transactions      TransactionRecord[]
+  scheduledPaymentsSource      ScheduledPayment[] @relation("ScheduleSourceWallet")
+  scheduledPaymentsDestination ScheduledPayment[] @relation("ScheduleDestinationWallet")
 
   @@unique([userId, currency])
   @@index([status])
@@ -373,6 +386,14 @@ enum NotificationType {
   GROUP_EXPENSE_UPDATED
   SETTLEMENT_COMPLETED
   SETTLEMENT_FAILED
+  BUDGET_THRESHOLD_REACHED
+  BUDGET_EXCEEDED
+  SCHEDULED_PAYMENT_DUE
+  SCHEDULED_PAYMENT_COMPLETED
+  SCHEDULED_PAYMENT_FAILED
+  SCHEDULED_PAYMENT_ATTENTION
+  SAVINGS_GOAL_COMPLETED
+  STATEMENT_AVAILABLE
 }
 
 enum GroupActivityEventType {
@@ -567,4 +588,337 @@ model Notification {
 
   @@index([userId, readAt, createdAt])
   @@map("notifications")
+}
+
+// ---------------------------------------------------------------------------
+// Release 4 — Personal finance intelligence
+// Analytics are derived from verified transactions. Raftline remains the only
+// financial ledger; nothing here is an independent source of truth.
+// ---------------------------------------------------------------------------
+
+enum CategoryType {
+  FOOD_DINING
+  GROCERIES
+  SHOPPING
+  TRANSPORT
+  TRAVEL
+  ENTERTAINMENT
+  RENT_HOUSING
+  UTILITIES
+  HEALTHCARE
+  EDUCATION
+  SUBSCRIPTIONS
+  PERSONAL_TRANSFERS
+  GROUP_EXPENSES
+  INCOME
+  OTHER
+  UNCATEGORIZED
+}
+
+enum CategorizationSource {
+  SYSTEM_RULE
+  USER_RULE
+  MANUAL
+}
+
+enum RuleConditionType {
+  CONTAINS
+  STARTS_WITH
+  ENDS_WITH
+  EXACT
+}
+
+enum BudgetPeriodType {
+  WEEKLY
+  MONTHLY
+  CUSTOM
+}
+
+enum BudgetStatus {
+  ACTIVE
+  PAUSED
+  COMPLETED
+  CANCELLED
+}
+
+enum SavingsGoalStatus {
+  ACTIVE
+  PAUSED
+  COMPLETED
+  CANCELLED
+}
+
+enum ContributionType {
+  PLANNED
+  RECORDED
+}
+
+enum ScheduleFrequency {
+  ONCE
+  DAILY
+  WEEKLY
+  MONTHLY
+  QUARTERLY
+  YEARLY
+}
+
+enum ScheduleStatus {
+  DRAFT
+  ACTIVE
+  PAUSED
+  PROCESSING
+  COMPLETED
+  FAILED
+  CANCELLED
+  REQUIRES_ATTENTION
+}
+
+enum ExecutionStatus {
+  PENDING
+  PROCESSING
+  SETTLED
+  FAILED
+  RETRY_PENDING
+  CANCELLED
+}
+
+enum RecurringFrequency {
+  WEEKLY
+  MONTHLY
+  QUARTERLY
+  YEARLY
+  UNKNOWN
+}
+
+enum RecurringSuggestionStatus {
+  SUGGESTED
+  CONFIRMED
+  IGNORED
+}
+
+enum StatementFormat {
+  PDF
+  CSV
+}
+
+enum StatementStatus {
+  GENERATING
+  READY
+  FAILED
+}
+
+model TransactionCategory {
+  id           String          @id @default(cuid())
+  userId       String?
+  name         String          @db.VarChar(60)
+  categoryType CategoryType
+  icon         String?         @db.VarChar(40)
+  isSystem     Boolean         @default(false)
+  createdAt    DateTime        @default(now())
+
+  user           User?                     @relation("UserCategory", fields: [userId], references: [id], onDelete: Cascade)
+  categorizations TransactionCategorization[]
+  rules           CategorizationRule[]
+  budgets         Budget[]
+
+  @@unique([userId, name])
+  @@index([isSystem, categoryType])
+  @@map("transaction_categories")
+}
+
+model TransactionCategorization {
+  id                   String               @id @default(cuid())
+  paymentRef           String               @db.VarChar(80)
+  userId               String
+  categoryId           String
+  note                 String?              @db.VarChar(200)
+  categorizationSource CategorizationSource
+  createdAt            DateTime             @default(now())
+  updatedAt            DateTime             @updatedAt
+
+  user     User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  category TransactionCategory @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, paymentRef])
+  @@index([categoryId])
+  @@map("transaction_categorizations")
+}
+
+model CategorizationRule {
+  id             String             @id @default(cuid())
+  userId         String
+  conditionType  RuleConditionType
+  conditionValue String             @db.VarChar(120)
+  categoryId     String
+  priority       Int                @default(100)
+  isEnabled      Boolean            @default(true)
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+
+  user     User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  category TransactionCategory @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+
+  @@index([userId, isEnabled, priority])
+  @@map("categorization_rules")
+}
+
+model Budget {
+  id           String           @id @default(cuid())
+  userId       String
+  name         String           @db.VarChar(80)
+  categoryId   String
+  amountMinor  BigInt
+  currency     String           @db.VarChar(3)
+  periodType   BudgetPeriodType
+  startDate    DateTime
+  endDate      DateTime?
+  thresholds   Int[]            @default([50, 75, 90, 100])
+  status       BudgetStatus     @default(ACTIVE)
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+
+  user     User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  category TransactionCategory @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  alerts   BudgetAlert[]
+
+  @@index([userId, status, startDate])
+  @@map("budgets")
+}
+
+model BudgetAlert {
+  id                 String   @id @default(cuid())
+  budgetId           String
+  periodStart        DateTime
+  thresholdPercentage Int
+  notifiedAt         DateTime @default(now())
+
+  budget Budget @relation(fields: [budgetId], references: [id], onDelete: Cascade)
+
+  @@unique([budgetId, periodStart, thresholdPercentage])
+  @@map("budget_alerts")
+}
+
+model SavingsGoal {
+  id                String            @id @default(cuid())
+  userId            String
+  name              String            @db.VarChar(80)
+  targetAmountMinor BigInt
+  currency          String            @db.VarChar(3)
+  targetDate        DateTime?
+  description       String?           @db.VarChar(400)
+  icon              String?           @db.VarChar(40)
+  status            SavingsGoalStatus @default(ACTIVE)
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+
+  user          User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  contributions SavingsContribution[]
+
+  @@index([userId, status])
+  @@map("savings_goals")
+}
+
+model SavingsContribution {
+  id               String           @id @default(cuid())
+  goalId           String
+  amountMinor      BigInt
+  contributionType ContributionType
+  relatedPaymentRef String?         @db.VarChar(80)
+  note             String?          @db.VarChar(200)
+  createdAt        DateTime         @default(now())
+
+  goal SavingsGoal @relation(fields: [goalId], references: [id], onDelete: Cascade)
+
+  @@index([goalId, createdAt])
+  @@map("savings_contributions")
+}
+
+model ScheduledPayment {
+  id                 String            @id @default(cuid())
+  userId             String
+  recipientUserId    String
+  sourceWalletId     String
+  destinationWalletId String
+  amountMinor        BigInt
+  currency           String            @db.VarChar(3)
+  description        String?           @db.VarChar(200)
+  frequency          ScheduleFrequency
+  startDate          DateTime
+  endDate            DateTime?
+  nextExecutionAt    DateTime
+  maxExecutions      Int?
+  executionCount     Int               @default(0)
+  status             ScheduleStatus    @default(DRAFT)
+  createdAt          DateTime          @default(now())
+  updatedAt          DateTime          @updatedAt
+
+  user             User                      @relation("ScheduleOwner", fields: [userId], references: [id], onDelete: Cascade)
+  recipient        User                      @relation("ScheduleRecipient", fields: [recipientUserId], references: [id], onDelete: Cascade)
+  sourceWallet     Wallet                    @relation("ScheduleSourceWallet", fields: [sourceWalletId], references: [id], onDelete: Cascade)
+  destinationWallet Wallet                   @relation("ScheduleDestinationWallet", fields: [destinationWalletId], references: [id], onDelete: Cascade)
+  executions       ScheduledPaymentExecution[]
+
+  @@index([userId, status, nextExecutionAt])
+  @@index([status, nextExecutionAt])
+  @@map("scheduled_payments")
+}
+
+model ScheduledPaymentExecution {
+  id                  String         @id @default(cuid())
+  scheduledPaymentId  String
+  executionKey        String         @unique @db.VarChar(120)
+  paymentRef          String?        @db.VarChar(80)
+  scheduledFor        DateTime
+  status              ExecutionStatus @default(PENDING)
+  attemptCount        Int            @default(0)
+  lastErrorCode       String?        @db.VarChar(80)
+  nextAttemptAt       DateTime?
+  executedAt          DateTime?
+  createdAt           DateTime       @default(now())
+  updatedAt           DateTime       @updatedAt
+
+  scheduledPayment ScheduledPayment @relation(fields: [scheduledPaymentId], references: [id], onDelete: Cascade)
+
+  @@index([scheduledPaymentId, scheduledFor])
+  @@index([status, nextAttemptAt])
+  @@map("scheduled_payment_executions")
+}
+
+model RecurringPaymentSuggestion {
+  id                   String                   @id @default(cuid())
+  userId               String
+  counterparty         String                   @db.VarChar(80)
+  counterpartyUsername String?                  @db.VarChar(30)
+  amountMinor          BigInt
+  currency             String                   @db.VarChar(3)
+  suggestedFrequency   RecurringFrequency
+  lastObservedAt       DateTime
+  nextExpectedAt       DateTime?
+  confidence           Int
+  status               RecurringSuggestionStatus @default(SUGGESTED)
+  createdAt            DateTime                 @default(now())
+  updatedAt            DateTime                 @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, counterpartyUsername, amountMinor])
+  @@index([userId, status])
+  @@map("recurring_payment_suggestions")
+}
+
+model Statement {
+  id          String          @id @default(cuid())
+  userId      String
+  periodStart DateTime
+  periodEnd   DateTime
+  format      StatementFormat
+  status      StatementStatus @default(GENERATING)
+  fileName    String?         @db.VarChar(200)
+  fileSize    Int?
+  createdAt   DateTime        @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@map("statements")
 }

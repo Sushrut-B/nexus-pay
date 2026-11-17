@@ -1,16 +1,25 @@
 import { z } from "zod";
 import {
+  BUDGET_PERIOD_TYPES,
+  BUDGET_STATUS,
+  CATEGORY_TYPES,
+  CONTRIBUTION_TYPES,
   EXPENSE_CATEGORIES,
   GROUP_CATEGORIES,
   HISTORY_FILTERS,
   HISTORY_SORTS,
+  INSIGHT_PERIODS,
   MAX_FUNDING_MINOR,
   MAX_PAYMENT_DESCRIPTION_LENGTH,
   MAX_PAYMENT_MINOR,
   MIN_FUNDING_MINOR,
   MIN_PAYMENT_MINOR,
   PAYMENT_REQUEST_STATUSES,
+  RULE_CONDITION_TYPES,
+  SAVINGS_GOAL_STATUSES,
+  SCHEDULE_FREQUENCIES,
   SPLIT_METHODS,
+  STATEMENT_FORMATS,
   SUPPORTED_CURRENCIES,
   SUPPORTED_LANGUAGES,
 } from "@nexus/shared-types";
@@ -334,6 +343,145 @@ export const notificationListQuerySchema = z.object({
   pageSize: z.coerce.number().int().min(1).max(50).default(20),
 });
 
+// ---------------------------------------------------------------------------
+// Release 4 — personal finance
+// ---------------------------------------------------------------------------
+
+const isoDateOptional = isoDate.optional();
+
+export const insightQuerySchema = z.object({
+  period: z.enum(INSIGHT_PERIODS).default("month"),
+  from: isoDate.optional(),
+  to: isoDate.optional(),
+});
+
+export const categorizeSchema = z.object({
+  paymentRef: z.string().trim().min(1).max(80),
+  categoryId: z.string().trim().min(1).max(64),
+  note: z.string().trim().max(200).optional(),
+});
+
+export const categoryRuleCreateSchema = z.object({
+  conditionType: z.enum(RULE_CONDITION_TYPES),
+  conditionValue: z.string().trim().min(1).max(120),
+  categoryId: z.string().trim().min(1).max(64),
+  priority: z.number().int().min(0).max(1000).default(100),
+  isEnabled: z.boolean().default(true),
+});
+
+export const categoryRuleUpdateSchema = z
+  .object({
+    conditionType: z.enum(RULE_CONDITION_TYPES).optional(),
+    conditionValue: z.string().trim().min(1).max(120).optional(),
+    categoryId: z.string().trim().min(1).max(64).optional(),
+    priority: z.number().int().min(0).max(1000).optional(),
+    isEnabled: z.boolean().optional(),
+  })
+  .refine((value) => Object.keys(value).length > 0, "Nothing to update");
+
+export const budgetCreateSchema = z
+  .object({
+    name: z.string().trim().min(2).max(80),
+    categoryId: z.string().trim().min(1).max(64),
+    amountMinor: minorAmount("budget amount"),
+    currency: z.literal("INR").default("INR"),
+    periodType: z.enum(BUDGET_PERIOD_TYPES),
+    startDate: isoDate,
+    endDate: isoDateOptional,
+    thresholds: z.array(z.number().int().min(1).max(100)).max(10).default([50, 75, 90, 100]),
+  })
+  .refine((value) => !value.endDate || value.startDate <= value.endDate, {
+    message: "The start date must be on or before the end date",
+    path: ["startDate"],
+  });
+
+export const budgetUpdateSchema = z
+  .object({
+    name: z.string().trim().min(2).max(80).optional(),
+    categoryId: z.string().trim().min(1).max(64).optional(),
+    amountMinor: minorAmount("budget amount").optional(),
+    periodType: z.enum(BUDGET_PERIOD_TYPES).optional(),
+    startDate: isoDate.optional(),
+    endDate: isoDateOptional,
+    status: z.enum(BUDGET_STATUS).optional(),
+    thresholds: z.array(z.number().int().min(1).max(100)).max(10).optional(),
+  })
+  .refine((value) => Object.keys(value).length > 0, "Nothing to update");
+
+export const savingsGoalCreateSchema = z.object({
+  name: z.string().trim().min(2).max(80),
+  targetAmountMinor: minorAmount("target amount"),
+  currency: z.literal("INR").default("INR"),
+  targetDate: z.string().datetime().optional(),
+  description: z.string().trim().max(400).optional(),
+  icon: z.string().trim().max(40).optional(),
+});
+
+export const savingsGoalUpdateSchema = z
+  .object({
+    name: z.string().trim().min(2).max(80).optional(),
+    targetAmountMinor: minorAmount("target amount").optional(),
+    targetDate: z.string().datetime().nullable().optional(),
+    description: z.string().trim().max(400).nullable().optional(),
+    icon: z.string().trim().max(40).nullable().optional(),
+    status: z.enum(SAVINGS_GOAL_STATUSES).optional(),
+  })
+  .refine((value) => Object.keys(value).length > 0, "Nothing to update");
+
+export const contributionCreateSchema = z.object({
+  amountMinor: minorAmount("contribution amount"),
+  contributionType: z.enum(CONTRIBUTION_TYPES).default("RECORDED"),
+  note: z.string().trim().max(200).optional(),
+  relatedPaymentRef: z.string().trim().max(80).optional(),
+});
+
+export const scheduledPaymentCreateSchema = z
+  .object({
+    recipientQuery: socialQuery,
+    amountMinor: minorAmount("payment amount"),
+    currency: z.literal("INR").default("INR"),
+    description: z.string().trim().max(200).optional(),
+    frequency: z.enum(SCHEDULE_FREQUENCIES),
+    startDate: z.string().datetime(),
+    endDate: z.string().datetime().optional(),
+    maxExecutions: z.number().int().min(1).max(1000).optional(),
+  })
+  .refine((value) => !value.endDate || value.startDate <= value.endDate, {
+    message: "The start date must be on or before the end date",
+    path: ["startDate"],
+  });
+
+export const scheduledPaymentUpdateSchema = z
+  .object({
+    amountMinor: minorAmount("payment amount").optional(),
+    description: z.string().trim().max(200).nullable().optional(),
+    frequency: z.enum(SCHEDULE_FREQUENCIES).optional(),
+    endDate: z.string().datetime().nullable().optional(),
+    maxExecutions: z.number().int().min(1).max(1000).nullable().optional(),
+  })
+  .refine((value) => Object.keys(value).length > 0, "Nothing to update");
+
+export const statementGenerateSchema = z
+  .object({
+    format: z.enum(STATEMENT_FORMATS),
+    periodStart: isoDate,
+    periodEnd: isoDate,
+  })
+  .refine((value) => value.periodStart <= value.periodEnd, {
+    message: "The start date must be on or before the end date",
+    path: ["periodStart"],
+  });
+
+export const calendarQuerySchema = z
+  .object({
+    from: isoDate,
+    to: isoDate,
+  })
+  .refine((value) => value.from <= value.to, {
+    message: "The start date must be on or before the end date",
+    path: ["from"],
+  });
+
 export type ContactCreateInput = z.infer<typeof contactCreateSchema>;
 export type RequestCreateInput = z.infer<typeof requestCreateSchema>;
 export type RequestListQueryInput = z.infer<typeof requestListQuerySchema>;
@@ -344,3 +492,16 @@ export type ExpenseCreateInput = z.infer<typeof expenseCreateSchema>;
 export type ExpenseUpdateInput = z.infer<typeof expenseUpdateSchema>;
 export type SettlementCreateInput = z.infer<typeof settlementCreateSchema>;
 export type NotificationListQueryInput = z.infer<typeof notificationListQuerySchema>;
+export type InsightQueryInput = z.infer<typeof insightQuerySchema>;
+export type CategorizeInput = z.infer<typeof categorizeSchema>;
+export type CategoryRuleCreateInput = z.infer<typeof categoryRuleCreateSchema>;
+export type CategoryRuleUpdateInput = z.infer<typeof categoryRuleUpdateSchema>;
+export type BudgetCreateInput = z.infer<typeof budgetCreateSchema>;
+export type BudgetUpdateInput = z.infer<typeof budgetUpdateSchema>;
+export type SavingsGoalCreateInput = z.infer<typeof savingsGoalCreateSchema>;
+export type SavingsGoalUpdateInput = z.infer<typeof savingsGoalUpdateSchema>;
+export type ContributionCreateInput = z.infer<typeof contributionCreateSchema>;
+export type ScheduledPaymentCreateInput = z.infer<typeof scheduledPaymentCreateSchema>;
+export type ScheduledPaymentUpdateInput = z.infer<typeof scheduledPaymentUpdateSchema>;
+export type StatementGenerateInput = z.infer<typeof statementGenerateSchema>;
+export type CalendarQueryInput = z.infer<typeof calendarQuerySchema>;
