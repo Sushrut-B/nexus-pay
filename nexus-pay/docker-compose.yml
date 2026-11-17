@@ -1,0 +1,4 @@
+name: nexus-pay-infra
+
+include:
+  - infrastructure/docker/docker-compose.yml

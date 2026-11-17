@@ -1,0 +1,40 @@
+import { prisma, type Prisma } from "@nexus/database";
+
+type AuditMetadata = Prisma.InputJsonValue;
+
+export const AUDIT_ACTIONS = {
+  USER_REGISTERED: "USER_REGISTERED",
+  USER_LOGGED_IN: "USER_LOGGED_IN",
+  USER_LOGIN_FAILED: "USER_LOGIN_FAILED",
+  USER_LOGGED_OUT: "USER_LOGGED_OUT",
+  PASSWORD_RESET_REQUESTED: "PASSWORD_RESET_REQUESTED",
+  PASSWORD_RESET_COMPLETED: "PASSWORD_RESET_COMPLETED",
+  ONBOARDING_COMPLETED: "ONBOARDING_COMPLETED",
+  PROFILE_UPDATED: "PROFILE_UPDATED",
+  WALLET_PROVISIONING_STARTED: "WALLET_PROVISIONING_STARTED",
+  WALLET_PROVISIONED: "WALLET_PROVISIONED",
+  WALLET_PROVISIONING_FAILED: "WALLET_PROVISIONING_FAILED",
+  WALLET_RECONCILIATION_REQUIRED: "WALLET_RECONCILIATION_REQUIRED",
+} as const;
+
+export async function recordAudit(input: {
+  actorId?: string | null;
+  action: string;
+  entityType: string;
+  entityId: string;
+  metadata?: AuditMetadata;
+}): Promise<void> {
+  try {
+    await prisma.auditEvent.create({
+      data: {
+        actorId: input.actorId ?? null,
+        action: input.action,
+        entityType: input.entityType,
+        entityId: input.entityId,
+        metadata: input.metadata ?? {},
+      },
+    });
+  } catch {
+    // Audit logging must never break the primary request path.
+  }
+}

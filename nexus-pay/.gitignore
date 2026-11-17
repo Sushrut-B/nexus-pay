@@ -1,0 +1,33 @@
+# dependencies
+node_modules/
+.pnpm-store/
+
+# Next.js
+.next/
+out/
+next-env.d.ts
+*.tsbuildinfo
+
+# tests
+coverage/
+test-results/
+playwright-report/
+blob-report/
+
+# env
+.env
+.env.local
+.env.*.local
+
+# logs
+*.log
+logs/
+
+# prisma
+packages/database/prisma/dev.db
+
+# os / editors
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

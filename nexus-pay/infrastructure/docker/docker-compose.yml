@@ -1,0 +1,33 @@
+name: nexus-pay-infra
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: nexuspay-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: nexuspay
+      POSTGRES_PASSWORD: nexuspay
+      POSTGRES_DB: nexus_pay
+      POSTGRES_INITDB_ARGS: "--locale=C --encoding=UTF8"
+    ports:
+      - "5433:5432"
+    volumes:
+      - nexuspay-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U nexuspay -d nexus_pay"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  mailpit:
+    image: axllent/mailpit:latest
+    container_name: nexuspay-mailpit
+    restart: unless-stopped
+    ports:
+      - "8025:8025"
+      - "1025:1025"
+
+volumes:
+  nexuspay-postgres-data:
+    name: nexus-pay-infra_nexuspay-postgres-data
