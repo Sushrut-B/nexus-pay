@@ -1,6 +1,7 @@
 import { z } from "zod";
 import {
   ADMIN_ROLES,
+  API_SCOPES,
   BUDGET_PERIOD_TYPES,
   BUDGET_STATUS,
   CATEGORY_TYPES,
@@ -12,6 +13,7 @@ import {
   HISTORY_SORTS,
   INSIGHT_PERIODS,
   MAX_FUNDING_MINOR,
+  MERCHANT_TYPES,
   MAX_PAYMENT_DESCRIPTION_LENGTH,
   MAX_PAYMENT_MINOR,
   MIN_FUNDING_MINOR,
@@ -23,6 +25,7 @@ import {
   SPLIT_METHODS,
   STATEMENT_FORMATS,
   SUPPORTED_CURRENCIES,
+  WEBHOOK_EVENT_TYPES,
   SUPPORTED_LANGUAGES,
 } from "@nexus/shared-types";
 
@@ -575,3 +578,124 @@ export type ChaosHealInput = z.infer<typeof chaosHealSchema>;
 export type ReconciliationResolveInput = z.infer<typeof reconciliationResolveSchema>;
 export type AlertAcknowledgeInput = z.infer<typeof alertAcknowledgeSchema>;
 export type ControlRangeInput = z.infer<typeof controlRangeSchema>;
+
+// ---------------------------------------------------------------------------
+// Release 6 — Merchant ecosystem
+// ---------------------------------------------------------------------------
+
+const merchantHandle = z
+  .string()
+  .trim()
+  .min(3)
+  .max(40)
+  .regex(/^[a-z0-9][a-z0-9_-]{2,39}$/, "Use lowercase letters, numbers, hyphens or underscores");
+
+const minorAmount6 = z
+  .number({ required_error: "Enter an amount" })
+  .int("Amounts must be whole paise")
+  .min(1, "Amount must be greater than zero")
+  .max(10_000_000, "Amount is above the sandbox limit");
+
+export const merchantCreateSchema = z.object({
+  handle: merchantHandle,
+  businessName: z.string().trim().min(2).max(120),
+  displayName: z.string().trim().min(2).max(120),
+  businessType: z.enum(MERCHANT_TYPES),
+  category: z.string().trim().min(2).max(60),
+  description: z.string().trim().max(600).optional(),
+  email: emailField,
+  phone: phoneField,
+  website: z.string().trim().url().max(2048).optional(),
+  address: z.string().trim().max(400).optional(),
+  logoUrl: z.string().trim().url().max(2048).optional(),
+  brandColor: z.string().trim().regex(/^#[0-9a-fA-F]{6}$/).optional(),
+  supportEmail: z.string().trim().email().max(254).optional(),
+  supportPhone: z.string().trim().max(20).optional(),
+  refundPolicy: z.string().trim().max(1000).optional(),
+});
+
+export const merchantUpdateSchema = merchantCreateSchema.partial().refine(
+  (value) => Object.keys(value).length > 0,
+  "Nothing to update",
+);
+
+export const merchantOrderItemSchema = z.object({
+  title: z.string().trim().min(1).max(160),
+  quantity: z.number().int().min(1).max(10_000),
+  unitPriceMinor: minorAmount6,
+  sku: z.string().trim().max(80).optional(),
+});
+
+export const merchantOrderCreateSchema = z.object({
+  title: z.string().trim().min(2).max(120),
+  description: z.string().trim().max(600).optional(),
+  customerName: z.string().trim().max(120).optional(),
+  customerEmail: z.string().trim().email().max(254).optional(),
+  customerPhone: z.string().trim().max(20).optional(),
+  items: z.array(merchantOrderItemSchema).min(1).max(50),
+  taxMinor: z.number().int().min(0).max(10_000_000).default(0),
+  discountMinor: z.number().int().min(0).max(10_000_000).default(0),
+  expiresAt: z.string().datetime().optional(),
+});
+
+export const merchantPaymentLinkCreateSchema = z.object({
+  title: z.string().trim().min(2).max(120),
+  description: z.string().trim().max(600).optional(),
+  amountMinor: minorAmount6,
+  customerName: z.string().trim().max(120).optional(),
+  customerEmail: z.string().trim().email().max(254).optional(),
+  maxPayments: z.number().int().min(1).max(1000).optional(),
+  expiresAt: z.string().datetime().optional(),
+  redirectUrl: z.string().trim().url().max(2048).optional(),
+  orderId: z.string().trim().max(64).optional(),
+});
+
+export const checkoutConfirmSchema = z.object({
+  clientRequestId: clientRequestIdSchema,
+});
+
+export const refundCreateSchema = z.object({
+  paymentId: z.string().trim().min(1).max(64),
+  amountMinor: minorAmount6,
+  reason: z.string().trim().min(5).max(500),
+  type: z.enum(["FULL", "PARTIAL"]),
+});
+
+export const refundReviewSchema = z.object({
+  decision: z.enum(["APPROVE", "REJECT"]),
+  note: z.string().trim().min(5).max(500),
+});
+
+export const webhookCreateSchema = z.object({
+  url: z.string().trim().url().max(2048),
+  events: z.array(z.enum(WEBHOOK_EVENT_TYPES)).min(1),
+});
+
+export const webhookUpdateSchema = z.object({
+  url: z.string().trim().url().max(2048).optional(),
+  events: z.array(z.enum(WEBHOOK_EVENT_TYPES)).min(1).optional(),
+  enabled: z.boolean().optional(),
+}).refine((value) => Object.keys(value).length > 0, "Nothing to update");
+
+export const apiKeyCreateSchema = z.object({
+  name: z.string().trim().min(2).max(80),
+  scopes: z.array(z.enum(API_SCOPES)).min(1),
+});
+
+export const merchantRangeSchema = z.object({
+  range: z.enum(["today", "week", "month", "90days", "custom"]).default("month"),
+  from: isoDate.optional(),
+  to: isoDate.optional(),
+});
+
+export type MerchantCreateInput = z.infer<typeof merchantCreateSchema>;
+export type MerchantUpdateInput = z.infer<typeof merchantUpdateSchema>;
+export type MerchantOrderCreateInput = z.infer<typeof merchantOrderCreateSchema>;
+export type PaymentLinkCreateInput = z.infer<typeof merchantPaymentLinkCreateSchema>;
+export type CheckoutConfirmInput = z.infer<typeof checkoutConfirmSchema>;
+export type RefundCreateInput = z.infer<typeof refundCreateSchema>;
+export type RefundReviewInput = z.infer<typeof refundReviewSchema>;
+export type WebhookCreateInput = z.infer<typeof webhookCreateSchema>;
+export type WebhookUpdateInput = z.infer<typeof webhookUpdateSchema>;
+export type ApiKeyCreateInput = z.infer<typeof apiKeyCreateSchema>;
+export type MerchantRangeInput = z.infer<typeof merchantRangeSchema>;

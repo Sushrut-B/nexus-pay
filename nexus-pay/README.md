@@ -2,11 +2,11 @@
 
 # Nexus Pay
 
-**Consumer payments · Social finance · Personal intelligence · Cluster operations**
+**Consumer payments · Social finance · Personal intelligence · Merchant ecosystem · Cluster operations**
 
 [![Stack](https://img.shields.io/badge/stack-Next.js%2015%20%7C%20React%2019%20%7C%20TypeScript-blue)](https://nextjs.org/)
 [![Ledger](https://img.shields.io/badge/ledger-Raftline%205--node-green)](#architecture)
-[![Tests](https://img.shields.io/badge/tests-53%20unit%20%7C%2046%20integration%20%7C%207%20E2E-brightgreen)](#verification)
+[![Tests](https://img.shields.io/badge/tests-53%20unit%20%7C%2055%20integration%20%7C%208%20E2E-brightgreen)](#verification)
 [![Mode](https://img.shields.io/badge/mode-SIMULATED%20SANDBOX-orange)](#sandbox-notice)
 
 [Overview](#overview) · [Quick start](#quick-start) · [Features](#features) · [Architecture](#architecture) · [Verification](#verification) · [Docs](#documentation)
@@ -17,7 +17,7 @@
 
 ## Overview
 
-Nexus Pay is a full consumer-finance platform backed by a live five-node **Raftline** cluster. It evolved across five releases without rebuilding earlier work.
+Nexus Pay is a full payments and finance platform backed by a live five-node **Raftline** cluster. It evolved across six releases without rebuilding earlier work.
 
 | Release | Delivered |
 | --- | --- |
@@ -26,10 +26,11 @@ Nexus Pay is a full consumer-finance platform backed by a live five-node **Raftl
 | **R3** | Contacts, payment requests, groups, expense splitting, balances, debt simplification, verified settlements, notifications |
 | **R4** | Insights, categorization rules, budgets, savings goals, scheduled payments + durable worker, recurring detection, calendar, PDF/CSV statements |
 | **R5** | **Nexus Control** — isolated admin console, RBAC, live cluster monitoring, chaos engineering, payment reconciliation, metrics, alerts, audit |
+| **R6** | **Merchant ecosystem** — business accounts, orders, payment links, merchant QR, checkout, verified settlement, refund requests, analytics, webhooks, scoped developer APIs |
 
 > [!IMPORTANT]
 > <a name="sandbox-notice"></a>
-> **Sandbox only.** Funding is labelled **SIMULATED SANDBOX FUNDING**. There is no bank, UPI, card or real-money integration, and no regulatory claim.
+> **Sandbox only.** Funding is labelled **SIMULATED SANDBOX FUNDING**. There is no bank, UPI, card or real-money integration, and no regulatory claim. Merchant approval is application-level (not KYC), merchant QR is a Nexus Pay QR (not UPI), and **Raftline has no refund/reversal capability** — refunds stop at request/review with no money moved.
 
 <details>
 <summary><b>Core financial rules</b> (click to expand)</summary>
@@ -39,6 +40,9 @@ Nexus Pay is a full consumer-finance platform backed by a live five-node **Raftl
 - Ambiguous outcomes stay `UNKNOWN` / `RECONCILIATION_REQUIRED`.
 - No new idempotency key after a timeout; repeated submissions reuse the original intent.
 - Analytics, budgets and savings goals are derived/tracking metadata, never a second ledger.
+- Merchant payment state is set only after a verified Raftline settlement; checkout links never move money themselves.
+- Raftline has no reversal operation, so refunds are request + audited review only — never a simulated payout.
+- Webhook delivery is asynchronous via a durable outbox; it never runs inside a settlement transaction.
 
 </details>
 
@@ -63,6 +67,7 @@ pnpm dev
 | URL | Purpose |
 | --- | --- |
 | `http://localhost:3000` | Nexus Pay customer app |
+| `http://localhost:3000/merchant` | Nexus Pay for Business (merchant dashboard) |
 | `http://localhost:3000/control` | Nexus Control admin console |
 
 Copy `apps/web/.env.example` → `apps/web/.env.local`. Register the tenant with `./scripts/ensure-raftline-tenant.ps1`.
@@ -82,6 +87,20 @@ Copy `apps/web/.env.example` → `apps/web/.env.local`. Register the tenant with
 
 </details>
 
+<details open>
+<summary><b>Nexus Pay for Business</b></summary>
+
+| Area | Routes |
+| --- | --- |
+| Onboarding | `/merchant/onboarding` — business info, wallet provisioning, sandbox review |
+| Operations | `/merchant`, `/merchant/orders`, `/merchant/payment-links`, `/merchant/qr`, `/merchant/customers`, `/merchant/refunds`, `/merchant/analytics` |
+| Integrations | `/merchant/developers`, `/merchant/settings` |
+| Customer checkout | `/pay-link/[token]`, `/merchant-qr/[handle]` |
+
+Payments settle through the existing Raftline engine; merchant tables are metadata only. Webhooks are HMAC-SHA256 signed and delivered from a durable outbox.
+
+</details>
+
 <details>
 <summary><b>Nexus Control (admin)</b></summary>
 
@@ -92,6 +111,7 @@ Copy `apps/web/.env.example` → `apps/web/.env.local`. Register the tenant with
 | Chaos Engineering | Real Raftline inject/heal with reason, confirmation, rate limit, quorum safety |
 | Payments / Reconciliation | Masked investigation, evidence-based resolution without replay |
 | Metrics / Alerts | Nexus-observed samples, deduplicated incidents |
+| Merchants / Merchant Refunds | Sandbox approval, suspension, refund request review (all audited) |
 | Audit / Diagnostics / Admin | Append-only audit, structured logs, role management |
 
 **RBAC:** `SUPER_ADMIN` → all · `OPERATOR` → operate, no admin management · `VIEWER` → read-only. Chaos is disabled by default (`NEXUS_CONTROL_CHAOS_ENABLED=false`).
@@ -117,6 +137,8 @@ flowchart LR
 - The browser never talks to Raftline directly.
 - Scheduled payments use a durable PostgreSQL job queue with atomic claiming and stable execution keys.
 - Budgets do not reserve funds; savings goals do not move money.
+- Merchant webhooks use a transactional outbox plus an async worker; failures never reverse a payment.
+- Merchant API keys are stored as hashes, scoped, and rate-limited per merchant.
 
 ---
 
@@ -124,10 +146,10 @@ flowchart LR
 
 | Gate | Result |
 | --- | --- |
-| `pnpm typecheck` / `pnpm lint` / `pnpm build` | Passed (44 route groups) |
+| `pnpm typecheck` / `pnpm lint` / `pnpm build` | Passed |
 | `pnpm test:unit` | **53 passed** |
-| `pnpm test:integration` | **46 passed** (live Raftline + PostgreSQL) |
-| Playwright E2E | **7 passed** (production mode) |
+| `pnpm test:integration` | **55 passed** (live Raftline + PostgreSQL) |
+| Playwright E2E | **8 passed** (production mode) |
 | Live failover drill | Leader failure → new term → heal → payment settled → reconciled → audited |
 
 ```powershell
@@ -142,4 +164,5 @@ pnpm exec playwright test --config playwright.prod.config.ts
 
 - [API reference](docs/api.md) · [Environment setup](docs/environment-setup.md) · [Raftline integration](docs/raftline-integration.md)
 - [Nexus Control](docs/nexus-control.md) · [Runbooks](docs/nexus-control-runbooks.md) · [Assessment](docs/nexus-control-assessment.md)
-- Reports: [R2](docs/release-2-report.md) · [R3](docs/release-3-report.md) · [R4](docs/release-4-report.md) · [R5](docs/release-5-report.md)
+- Merchant: [Guide](docs/merchant-guide.md) · [Refunds](docs/merchant-refunds.md) · [Webhooks](docs/merchant-webhooks.md) · [Developer API](docs/merchant-developer-api.md) · [Assessment](docs/release-6-assessment.md)
+- Reports: [R2](docs/release-2-report.md) · [R3](docs/release-3-report.md) · [R4](docs/release-4-report.md) · [R5](docs/release-5-report.md) · [R6](docs/release-6-report.md)

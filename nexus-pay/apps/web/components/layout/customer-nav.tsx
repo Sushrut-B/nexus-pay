@@ -19,6 +19,7 @@ const LINKS = [
   { href: "/scheduled", label: "Scheduled Payments" },
   { href: "/calendar", label: "Calendar" },
   { href: "/statements", label: "Statements" },
+  { href: "/merchant", label: "For Business" },
   { href: "/profile", label: "Settings" },
 ];
 

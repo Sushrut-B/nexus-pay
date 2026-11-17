@@ -332,3 +332,72 @@ Chaos injection body: `{ nodeId, scenario, reason, peer?, delayMs?, dropRate? }`
 Heal body: `{ nodeId, reason, all, peer? }`. Only scenarios from Raftline's
 `ChaosScenario` enum are accepted; unsupported modes are rejected before any
 backend call. Details: `docs/nexus-control.md`.
+
+---
+
+## Release 6 — Merchant ecosystem
+
+All routes require the `np_session` cookie and merchant ownership checks unless
+noted. Mutations require the CSRF token. Amounts are integer paise (`INR`).
+
+### Onboarding
+
+| Method | Route | Notes |
+| --- | --- | --- |
+| POST | `/api/merchants` | Creates a DRAFT merchant linked to the current user. |
+| GET | `/api/merchants` | Current user's merchant. |
+| GET | `/api/merchants/me` | Current merchant status (`NONE` when absent). |
+| PATCH | `/api/merchants/me` | Update business profile. |
+| POST | `/api/merchants/provision` | Idempotent Raftline business-account provisioning. |
+| POST | `/api/merchants/submit` | Submit for sandbox review. |
+
+### Orders, links and checkout
+
+| Method | Route | Notes |
+| --- | --- | --- |
+| GET/POST | `/api/merchant/orders` | List / create orders. |
+| GET/POST | `/api/merchant/orders/[orderId]` | Details / cancel. |
+| GET/POST | `/api/merchant/payment-links` | List / create payment links (unguessable tokens). |
+| GET/POST | `/api/merchant/payment-links/[id]` | Details / disable. |
+| GET | `/api/checkout/[token]` | Public checkout data; amount derived server-side, rate limited. |
+| POST | `/api/checkout/[token]/confirm` | Idempotent settlement via existing payment engine. |
+| GET | `/api/checkout/[token]/status` | Checkout session / payment status. |
+| GET | `/api/merchant-qr/[handle]` | Public merchant QR resolution. |
+| POST | `/api/merchant-qr/[handle]/pay` | Static QR payment (customer enters amount). |
+
+### Payments, refunds and reporting
+
+| Method | Route | Notes |
+| --- | --- | --- |
+| GET | `/api/merchant/payments` / `/api/merchant/payments/[id]` | Verified settlement records. |
+| GET/POST | `/api/merchant/refunds` | Refund requests (request/review only). |
+| GET | `/api/merchant/analytics/overview?range=` | Scope-limited analytics; `today\|week\|month\|90days\|custom`. |
+| GET | `/api/merchant/customers` | Purchaser history with masked contact data. |
+
+### Integrations
+
+| Method | Route | Notes |
+| --- | --- | --- |
+| GET/POST | `/api/merchant/webhooks` | Manage webhook endpoints. |
+| PATCH/DELETE | `/api/merchant/webhooks/[id]` | Update / delete endpoint. |
+| POST | `/api/merchant/webhooks/[id]/test` | Queue a labelled test event. |
+| POST | `/api/merchant/webhooks/[id]/rotate` | Rotate signing secret. |
+| GET | `/api/merchant/webhooks/[id]/deliveries` | Delivery history. |
+| POST | `/api/merchant/webhooks/run` | Drain the outbox (worker alternative). |
+| GET/POST | `/api/merchant/api-keys` | Scoped, hashed developer keys. |
+| DELETE/POST | `/api/merchant/api-keys/[id]` | Revoke / rotate key. |
+| GET/POST | `/api/v1/merchant/orders` | Developer API (Bearer key + scope). |
+
+### Nexus Control merchant operations
+
+| Method | Route | Permission |
+| --- | --- | --- |
+| GET | `/api/control/merchants` | `cluster:read` |
+| POST | `/api/control/merchants/[id]/status` | `admin:write` (approve/suspend/reactivate) |
+| GET | `/api/control/merchant-refunds` | `payments:read` |
+| POST | `/api/control/merchant-refunds/[id]/review` | `reconciliation:write` |
+
+**Refund limitation.** Raftline has no refund/reversal endpoint. Requests stop at
+request/review; no money is moved and no refund is marked settled by execution.
+See `docs/merchant-refunds.md`, `docs/merchant-webhooks.md` and
+`docs/merchant-developer-api.md`.

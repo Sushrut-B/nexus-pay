@@ -113,6 +113,10 @@ model User {
   recurringSuggestions RecurringPaymentSuggestion[]
   statements          Statement[]
 
+  // Release 6 — Merchant ecosystem
+  merchantOwners      Merchant[]          @relation("MerchantOwner")
+  merchantMemberships MerchantMember[]
+  merchantPayments    MerchantPayment[]   @relation("MerchantCustomer")
 
   @@index([accountStatus])
   @@index([createdAt])
@@ -395,6 +399,11 @@ enum NotificationType {
   SCHEDULED_PAYMENT_ATTENTION
   SAVINGS_GOAL_COMPLETED
   STATEMENT_AVAILABLE
+  MERCHANT_PAYMENT_RECEIVED
+  MERCHANT_PAYMENT_FAILED
+  MERCHANT_ORDER_CREATED
+  MERCHANT_REFUND_REQUESTED
+  MERCHANT_REFUND_OUTCOME
 }
 
 enum GroupActivityEventType {
@@ -1165,6 +1174,393 @@ model ReconciliationAttempt {
 
   @@index([caseId, createdAt])
   @@map("reconciliation_attempts")
+}
+
+// ---------------------------------------------------------------------------
+// Release 6 — Merchant ecosystem
+// Merchant records are application metadata. Raftline remains authoritative
+// for all money movement and balances.
+// ---------------------------------------------------------------------------
+
+enum MerchantType {
+  INDIVIDUAL_BUSINESS
+  SOLE_PROPRIETORSHIP
+  SMALL_BUSINESS
+  COMPANY
+  ENTERPRISE
+}
+
+enum MerchantStatus {
+  DRAFT
+  PENDING_REVIEW
+  ACTIVE
+  SUSPENDED
+  CLOSED
+}
+
+enum MerchantRole {
+  OWNER
+  ADMIN
+  STAFF
+}
+
+enum MerchantOrderStatus {
+  DRAFT
+  CREATED
+  PAYMENT_PENDING
+  PARTIALLY_PAID
+  PAID
+  EXPIRED
+  CANCELLED
+  REFUNDED
+  PARTIALLY_REFUNDED
+}
+
+enum PaymentLinkStatus {
+  DRAFT
+  ACTIVE
+  PAID
+  EXPIRED
+  CANCELLED
+  DISABLED
+}
+
+enum RefundStatus {
+  REQUESTED
+  UNDER_REVIEW
+  APPROVED
+  PROCESSING
+  SUCCEEDED
+  FAILED
+  REJECTED
+  UNKNOWN
+}
+
+enum WebhookDeliveryStatus {
+  PENDING
+  DELIVERED
+  FAILED
+  RETRY_PENDING
+  DEAD_LETTER
+}
+
+model Merchant {
+  id              String        @id @default(cuid())
+  ownerUserId     String
+  handle          String        @unique @db.VarChar(40)
+  businessName    String        @db.VarChar(120)
+  displayName     String        @db.VarChar(120)
+  businessType    MerchantType
+  category        String        @db.VarChar(60)
+  description     String?       @db.VarChar(600)
+  email           String        @db.VarChar(254)
+  phone           String        @db.VarChar(20)
+  website         String?       @db.VarChar(2048)
+  address         String?       @db.VarChar(400)
+  logoUrl         String?       @db.VarChar(2048)
+  brandColor      String?       @db.VarChar(20)
+  supportEmail    String?       @db.VarChar(254)
+  supportPhone    String?       @db.VarChar(20)
+  refundPolicy    String?       @db.VarChar(1000)
+  currency        String        @db.VarChar(3)
+  status          MerchantStatus @default(DRAFT)
+  raftlineAccountId String?     @unique @db.VarChar(80)
+  walletId        String?       @db.VarChar(64)
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  owner          User                    @relation("MerchantOwner", fields: [ownerUserId], references: [id], onDelete: Cascade)
+  members        MerchantMember[]
+  approvalEvents MerchantApprovalEvent[]
+  orders         MerchantOrder[]
+  links          MerchantPaymentLink[]
+  sessions       MerchantCheckoutSession[]
+  payments       MerchantPayment[]
+  customers      MerchantCustomer[]
+  refunds        MerchantRefundRequest[]
+  apiKeys        MerchantApiKey[]
+  webhooks       MerchantWebhookEndpoint[]
+  webhookEvents  MerchantWebhookEvent[]
+  reportExports  MerchantReportExport[]
+
+  @@index([ownerUserId, status])
+  @@index([status, createdAt])
+  @@map("merchants")
+}
+
+model MerchantMember {
+  id         String       @id @default(cuid())
+  merchantId String
+  userId     String
+  role       MerchantRole @default(STAFF)
+  joinedAt   DateTime     @default(now())
+  removedAt  DateTime?
+
+  merchant Merchant @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([merchantId, userId])
+  @@map("merchant_members")
+}
+
+model MerchantApprovalEvent {
+  id          String         @id @default(cuid())
+  merchantId  String
+  actorAdminId String?
+  fromStatus  MerchantStatus
+  toStatus    MerchantStatus
+  reason      String?        @db.VarChar(500)
+  createdAt   DateTime       @default(now())
+
+  merchant Merchant @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+
+  @@index([merchantId, createdAt])
+  @@map("merchant_approval_events")
+}
+
+model MerchantOrder {
+  id             String              @id @default(cuid())
+  merchantId     String
+  title          String              @db.VarChar(120)
+  description    String?             @db.VarChar(600)
+  customerName   String?             @db.VarChar(120)
+  customerEmail  String?             @db.VarChar(254)
+  customerPhone  String?             @db.VarChar(20)
+  subtotalMinor  Int
+  taxMinor       Int                 @default(0)
+  discountMinor  Int                 @default(0)
+  totalMinor     Int
+  currency       String              @db.VarChar(3)
+  status         MerchantOrderStatus @default(CREATED)
+  expiresAt      DateTime?
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+
+  merchant Merchant             @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  items    MerchantOrderItem[]
+  payments MerchantPayment[]
+  links    MerchantPaymentLink[]
+  sessions MerchantCheckoutSession[]
+  refunds  MerchantRefundRequest[]
+
+  @@index([merchantId, status, createdAt])
+  @@map("merchant_orders")
+}
+
+model MerchantOrderItem {
+  id              String @id @default(cuid())
+  orderId         String
+  title           String @db.VarChar(160)
+  quantity        Int
+  unitPriceMinor  Int
+  lineTotalMinor  Int
+  sku             String? @db.VarChar(80)
+
+  order MerchantOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([orderId])
+  @@map("merchant_order_items")
+}
+
+model MerchantCustomer {
+  id              String    @id @default(cuid())
+  merchantId      String
+  userId          String?
+  displayName     String    @db.VarChar(120)
+  email           String?   @db.VarChar(254)
+  phone           String?   @db.VarChar(20)
+  totalPaidMinor  Int       @default(0)
+  orderCount      Int       @default(0)
+  firstPurchaseAt DateTime?
+  lastPurchaseAt  DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  merchant Merchant @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+
+  @@unique([merchantId, userId])
+  @@index([merchantId, lastPurchaseAt])
+  @@map("merchant_customers")
+}
+
+model MerchantPayment {
+  id              String    @id @default(cuid())
+  merchantId      String
+  orderId         String?
+  customerUserId  String
+  paymentIntentId String    @unique @db.VarChar(64)
+  paymentRef      String    @unique @db.VarChar(80)
+  idempotencyKey  String    @db.VarChar(80)
+  amountMinor     Int
+  currency        String    @db.VarChar(3)
+  status          String    @db.VarChar(40)
+  source          String    @db.VarChar(30)
+  refundedMinor   Int       @default(0)
+  createdAt       DateTime  @default(now())
+  settledAt       DateTime?
+
+  merchant Merchant       @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  order    MerchantOrder? @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  customer User           @relation("MerchantCustomer", fields: [customerUserId], references: [id], onDelete: Cascade)
+  refunds  MerchantRefundRequest[]
+
+  @@index([merchantId, createdAt])
+  @@index([customerUserId, createdAt])
+  @@map("merchant_payments")
+}
+
+model MerchantCheckoutSession {
+  id           String    @id @default(cuid())
+  merchantId   String
+  orderId      String?
+  token        String    @unique @db.VarChar(80)
+  clientRequestId String @unique @db.VarChar(64)
+  status       String    @db.VarChar(30)
+  expiresAt    DateTime
+  completedAt  DateTime?
+  createdAt    DateTime  @default(now())
+
+  merchant Merchant       @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  order    MerchantOrder? @relation(fields: [orderId], references: [id], onDelete: SetNull)
+
+  @@index([merchantId, createdAt])
+  @@map("merchant_checkout_sessions")
+}
+
+model MerchantPaymentLink {
+  id            String            @id @default(cuid())
+  merchantId    String
+  orderId       String?
+  token         String            @unique @db.VarChar(80)
+  title         String            @db.VarChar(120)
+  description   String?           @db.VarChar(600)
+  amountMinor   Int
+  currency      String            @db.VarChar(3)
+  customerName  String?           @db.VarChar(120)
+  customerEmail String?           @db.VarChar(254)
+  maxPayments   Int?
+  paymentCount  Int               @default(0)
+  totalCollectedMinor Int         @default(0)
+  status        PaymentLinkStatus @default(ACTIVE)
+  expiresAt     DateTime?
+  redirectUrl   String?           @db.VarChar(2048)
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
+
+  merchant Merchant       @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  order    MerchantOrder? @relation(fields: [orderId], references: [id], onDelete: SetNull)
+
+  @@index([merchantId, status, createdAt])
+  @@map("merchant_payment_links")
+}
+
+model MerchantRefundRequest {
+  id              String       @id @default(cuid())
+  merchantId      String
+  paymentId       String
+  orderId         String?
+  amountMinor     Int
+  reason          String       @db.VarChar(500)
+  type            String       @db.VarChar(20)
+  status          RefundStatus @default(REQUESTED)
+  requestedBy     String
+  reviewedBy      String?
+  reviewNote      String?      @db.VarChar(500)
+  executionNote   String?      @db.VarChar(500)
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+  resolvedAt      DateTime?
+
+  merchant Merchant        @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  payment  MerchantPayment @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+  order    MerchantOrder?  @relation(fields: [orderId], references: [id], onDelete: SetNull)
+
+  @@index([merchantId, status, createdAt])
+  @@map("merchant_refund_requests")
+}
+
+model MerchantApiKey {
+  id          String    @id @default(cuid())
+  merchantId  String
+  name        String    @db.VarChar(80)
+  keyPrefix   String    @db.VarChar(20)
+  keyHash     String    @unique @db.VarChar(64)
+  scopes      String[]
+  lastUsedAt  DateTime?
+  expiresAt   DateTime?
+  revokedAt   DateTime?
+  createdAt   DateTime  @default(now())
+
+  merchant Merchant @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+
+  @@index([merchantId, revokedAt])
+  @@map("merchant_api_keys")
+}
+
+model MerchantWebhookEndpoint {
+  id           String   @id @default(cuid())
+  merchantId   String
+  url          String   @db.VarChar(2048)
+  events       String[]
+  enabled      Boolean  @default(true)
+  signingSecret String  @db.VarChar(128)
+  createdAt    DateTime @default(now())
+
+  merchant  Merchant               @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  deliveries MerchantWebhookDelivery[]
+
+  @@index([merchantId, enabled])
+  @@map("merchant_webhook_endpoints")
+}
+
+model MerchantWebhookEvent {
+  id          String   @id @default(cuid())
+  merchantId  String
+  eventType   String   @db.VarChar(60)
+  payload     Json
+  status      String   @db.VarChar(30)
+  availableAt DateTime @default(now())
+  createdAt   DateTime @default(now())
+
+  merchant  Merchant                 @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  deliveries MerchantWebhookDelivery[]
+
+  @@index([status, availableAt])
+  @@map("merchant_webhook_events")
+}
+
+model MerchantWebhookDelivery {
+  id           String                @id @default(cuid())
+  eventId      String
+  endpointId   String
+  attempt      Int                   @default(1)
+  status       WebhookDeliveryStatus @default(PENDING)
+  responseCode Int?
+  error        String?               @db.VarChar(500)
+  nextAttemptAt DateTime?
+  deliveredAt  DateTime?
+  createdAt    DateTime              @default(now())
+
+  event    MerchantWebhookEvent    @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  endpoint MerchantWebhookEndpoint @relation(fields: [endpointId], references: [id], onDelete: Cascade)
+
+  @@index([status, nextAttemptAt])
+  @@map("merchant_webhook_deliveries")
+}
+
+model MerchantReportExport {
+  id        String   @id @default(cuid())
+  merchantId String
+  type      String   @db.VarChar(40)
+  format    String   @db.VarChar(10)
+  fileName  String   @db.VarChar(200)
+  fileSize  Int
+  createdAt DateTime @default(now())
+
+  merchant Merchant @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+
+  @@index([merchantId, createdAt])
+  @@map("merchant_report_exports")
 }
 
 model Statement {
