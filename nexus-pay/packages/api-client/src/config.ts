@@ -5,6 +5,8 @@ export interface RaftlineConfig {
   tenantId: string;
   apiKey: string | null;
   timeoutMs: number;
+  /** Settlement and funding can legally take longer than a read request. */
+  settlementTimeoutMs: number;
   leaderCacheTtlMs: number;
   accountCreateMode: AccountCreateMode;
 }
@@ -97,6 +99,10 @@ export function loadRaftlineConfig(
       env.RAFTLINE_TIMEOUT_MS ?? env.RAFTLINE_REQUEST_TIMEOUT_MS,
       8000,
     ),
+    settlementTimeoutMs: parsePositiveInteger(
+      env.RAFTLINE_SETTLEMENT_TIMEOUT_MS,
+      25_000,
+    ),
     leaderCacheTtlMs: parsePositiveInteger(env.RAFTLINE_LEADER_CACHE_TTL_MS, 5000),
     accountCreateMode: mode,
   };
@@ -106,6 +112,16 @@ export function assertSafeAccountId(accountId: string): void {
   if (!SAFE_ACCOUNT_ID_PATTERN.test(accountId)) {
     throw new RaftlineConfigurationError(
       "Account id must be 1-80 characters of letters, numbers, dots, underscores or hyphens",
+    );
+  }
+}
+
+const SAFE_IDEMPOTENCY_KEY_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_.:-]{7,79}$/;
+
+export function assertSafeIdempotencyKey(key: string): void {
+  if (!SAFE_IDEMPOTENCY_KEY_PATTERN.test(key)) {
+    throw new RaftlineConfigurationError(
+      "Idempotency key must be 8-80 characters of letters, numbers, dots, colons, underscores or hyphens",
     );
   }
 }

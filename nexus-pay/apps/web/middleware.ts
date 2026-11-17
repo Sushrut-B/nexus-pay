@@ -1,6 +1,18 @@
 import { NextResponse, type NextRequest } from "next/server";
 
-const PROTECTED_PREFIXES = ["/home", "/onboarding", "/profile"];
+const PROTECTED_PREFIXES = [
+  "/home",
+  "/onboarding",
+  "/profile",
+  "/wallet",
+  "/add-money",
+  "/funding",
+  "/send",
+  "/pay",
+  "/receive",
+  "/transactions",
+  "/history",
+];
 const CSRF_COOKIE = "np_csrf";
 
 function randomToken(): string {

@@ -1,6 +1,7 @@
 import Link from "next/link";
-import { cn } from "@nexus/ui";
+import { Bell, Settings2 } from "lucide-react";
 import { Logo } from "@/components/brand/logo";
+import { CustomerNav } from "@/components/layout/customer-nav";
 import { LogoutButton } from "@/components/layout/logout-button";
 import { initials } from "@/lib/format";
 
@@ -14,20 +15,39 @@ export function CustomerHeader({
   return (
     <header className="border-b border-border/70 bg-background/85 backdrop-blur-md">
       <div className="container flex h-[72px] items-center justify-between gap-4">
-        <div className="flex items-center gap-8">
+        <div className="flex min-w-0 items-center gap-6">
           <Logo href="/home" />
-          <nav className="hidden items-center gap-1 sm:flex">
-            <NavLink href="/home">Overview</NavLink>
-            <NavLink href="/profile">Profile</NavLink>
+          <nav className="hidden items-center gap-0.5 lg:flex">
+            <CustomerNav />
           </nav>
         </div>
 
-        <div className="flex items-center gap-2">
-          <div className="hidden items-center gap-3 rounded-xl border border-border bg-card px-3 py-1.5 md:flex">
+        <div className="flex shrink-0 items-center gap-1.5">
+          <span
+            className="grid h-9 w-9 place-items-center rounded-xl border border-border bg-card text-muted-foreground"
+            title="Notifications are not available in this release"
+            aria-label="Notifications (not available in this release)"
+            role="img"
+          >
+            <Bell className="h-4 w-4" aria-hidden="true" />
+          </span>
+          <Link
+            href="/profile"
+            className="grid h-9 w-9 place-items-center rounded-xl border border-border bg-card text-muted-foreground transition-colors hover:text-foreground"
+            title="Account settings"
+            aria-label="Account settings"
+          >
+            <Settings2 className="h-4 w-4" aria-hidden="true" />
+          </Link>
+          <Link
+            href="/profile"
+            className="hidden items-center gap-3 rounded-xl border border-border bg-card px-3 py-1.5 transition-colors hover:bg-secondary/60 xl:flex"
+            aria-label="Open your profile"
+          >
             <span className="grid h-8 w-8 place-items-center rounded-lg bg-navy text-xs font-semibold text-white">
               {initials(displayName)}
             </span>
-            <span className="max-w-[180px]">
+            <span className="max-w-[160px]">
               <span className="block truncate text-xs font-semibold leading-tight text-foreground">
                 {displayName}
               </span>
@@ -35,27 +55,13 @@ export function CustomerHeader({
                 {email}
               </span>
             </span>
-          </div>
+          </Link>
           <LogoutButton compact />
         </div>
       </div>
-      <nav className="container flex gap-1 border-t border-border/60 py-2 sm:hidden">
-        <NavLink href="/home">Overview</NavLink>
-        <NavLink href="/profile">Profile</NavLink>
+      <nav className="container flex gap-0.5 overflow-x-auto border-t border-border/60 py-2 lg:hidden">
+        <CustomerNav mobile />
       </nav>
     </header>
-  );
-}
-
-function NavLink({ href, children }: { href: string; children: React.ReactNode }) {
-  return (
-    <Link
-      href={href}
-      className={cn(
-        "rounded-lg px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground",
-      )}
-    >
-      {children}
-    </Link>
   );
 }

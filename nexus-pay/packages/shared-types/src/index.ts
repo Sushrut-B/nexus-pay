@@ -6,6 +6,9 @@ export const ERROR_CATEGORIES = [
   "RAFTLINE_UNAVAILABLE",
   "RAFTLINE_TIMEOUT",
   "WALLET_PROVISIONING_ERROR",
+  "PAYMENT_ERROR",
+  "RECONCILIATION_REQUIRED",
+  "RECIPIENT_NOT_FOUND",
   "INTERNAL_SERVER_ERROR",
 ] as const;
 
@@ -64,11 +67,22 @@ export interface WalletSummary {
   raftlineAccountId: string | null;
   provisionedAt: string | null;
   lastProvisioningError: string | null;
+  createdAt: string;
 }
 
+/**
+ * A point-in-time balance read directly from the Raftline ledger. `amountMinor`
+ * is the spendable (available) balance. PostgreSQL never stores or overrides
+ * these values; `fetchedAt` identifies exactly when the ledger was read.
+ */
 export interface BalanceSummary {
   amountMinor: number;
+  availableMinor: number;
+  reservedMinor: number;
+  ledgerBalanceMinor: number;
   currency: CurrencyCode;
+  fetchedAt: string;
+  source: "RAFTLINE";
 }
 
 export interface WalletOverview {
@@ -80,7 +94,28 @@ export interface WalletOverview {
     | "RAFTLINE_TIMEOUT"
     | "ACCOUNT_NOT_FOUND"
     | null;
+  /** When this overview was assembled. Always a live read, never a cache. */
+  fetchedAt: string;
 }
+
+export interface WalletListResult {
+  wallets: WalletOverview[];
+  fetchedAt: string;
+}
+
+export interface MonthlySummary {
+  monthStart: string;
+  sentMinor: number;
+  receivedMinor: number;
+  transactionCount: number;
+  currency: string;
+}
+
+export interface RecentRecipient {
+  displayName: string;
+  username: string;
+}
+
 
 export interface SessionUser {
   id: string;
@@ -98,3 +133,6 @@ export interface ApiSuccessBody<T> {
   data: T;
   requestId: string;
 }
+
+export * from "./money";
+export * from "./payments";

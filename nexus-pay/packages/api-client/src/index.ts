@@ -16,7 +16,14 @@ export function createRaftlineClient(options: CreateRaftlineClientOptions = {}):
 }
 
 export { RaftlinePaymentsClient, parseAccount } from "./accounts";
-export type { EnsureAccountInput, EnsureAccountResult, RaftlineAccount } from "./accounts";
+export type {
+  EnsureAccountInput,
+  EnsureAccountResult,
+  FundAccountInput,
+  FundAccountResult,
+  RaftlineAccount,
+  SettlePaymentInput,
+} from "./accounts";
 export { loadRaftlineConfig, RaftlineConfigurationError } from "./config";
 export type { AccountCreateMode, RaftlineConfig } from "./config";
 export {
@@ -24,9 +31,17 @@ export {
   isAccountNotFoundError,
   isAmbiguousError,
   isNotLeaderError,
+  isTransientRaftlineError,
   toSafeRaftlineError,
 } from "./errors";
 export type { RaftlineErrorCode } from "./errors";
+export {
+  isRejectedReceipt,
+  isSettledReceipt,
+  parseTransactionReceipt,
+  receiptMatches,
+} from "./receipts";
+export type { RaftlineTransactionReceipt } from "./receipts";
 export { LeaderLocator } from "./leader";
 export type { ClusterStatus, LeaderLocation } from "./leader";
 export type { HttpTransport, RaftlineHttpResponse } from "./http";

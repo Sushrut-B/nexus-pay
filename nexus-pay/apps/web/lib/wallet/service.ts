@@ -1,6 +1,6 @@
 import { createRaftlineClient, RaftlineError, type RaftlinePaymentsClient } from "@nexus/api-client";
 import { prisma, type Wallet } from "@nexus/database";
-import type { WalletOverview, WalletSummary, CurrencyCode } from "@nexus/shared-types";
+import type { WalletOverview, WalletSummary, WalletListResult, CurrencyCode } from "@nexus/shared-types";
 import { AUDIT_ACTIONS, recordAudit } from "@/lib/audit";
 import { ApiError } from "@/lib/api/response";
 
@@ -29,17 +29,20 @@ export function toWalletSummary(wallet: Wallet): WalletSummary {
     raftlineAccountId: wallet.raftlineAccountId,
     provisionedAt: wallet.provisionedAt?.toISOString() ?? null,
     lastProvisioningError: wallet.lastProvisioningError,
+    createdAt: wallet.createdAt.toISOString(),
   };
 }
 
 export async function buildWalletOverview(wallet: Wallet): Promise<WalletOverview> {
   const summary = toWalletSummary(wallet);
+  const fetchedAt = new Date().toISOString();
 
   if (wallet.status !== "ACTIVE" || !wallet.raftlineAccountId) {
     return {
       wallet: summary,
       balance: null,
       balanceUnavailableReason: "WALLET_NOT_ACTIVE",
+      fetchedAt,
     };
   }
 
@@ -50,6 +53,7 @@ export async function buildWalletOverview(wallet: Wallet): Promise<WalletOvervie
         wallet: summary,
         balance: null,
         balanceUnavailableReason: "ACCOUNT_NOT_FOUND",
+        fetchedAt,
       };
     }
     if (account.currency !== wallet.currency) {
@@ -57,15 +61,24 @@ export async function buildWalletOverview(wallet: Wallet): Promise<WalletOvervie
         wallet: summary,
         balance: null,
         balanceUnavailableReason: "ACCOUNT_NOT_FOUND",
+        fetchedAt,
       };
     }
+    const reservedMinor = account.reservedCents;
+    const availableMinor = account.availableBalanceCents;
     return {
       wallet: summary,
       balance: {
-        amountMinor: account.availableBalanceCents,
+        amountMinor: availableMinor,
+        availableMinor,
+        reservedMinor,
+        ledgerBalanceMinor: account.balanceCents,
         currency: wallet.currency as CurrencyCode,
+        fetchedAt,
+        source: "RAFTLINE",
       },
       balanceUnavailableReason: null,
+      fetchedAt,
     };
   } catch (error) {
     const reason =
@@ -76,8 +89,39 @@ export async function buildWalletOverview(wallet: Wallet): Promise<WalletOvervie
       wallet: summary,
       balance: null,
       balanceUnavailableReason: reason,
+      fetchedAt,
     };
   }
+}
+
+export async function listWalletOverviewsForUser(userId: string): Promise<WalletListResult> {
+  const wallets = await prisma.wallet.findMany({
+    where: { userId },
+    orderBy: [{ createdAt: "asc" }],
+  });
+  const overviews = await Promise.all(wallets.map((wallet) => buildWalletOverview(wallet)));
+  return {
+    wallets: overviews,
+    fetchedAt: new Date().toISOString(),
+  };
+}
+
+export async function getWalletOverviewForUserById(
+  userId: string,
+  walletId: string,
+): Promise<WalletOverview> {
+  const wallet = await prisma.wallet.findFirst({ where: { id: walletId, userId } });
+  if (!wallet) {
+    throw new ApiError(404, "AUTHORIZATION_ERROR", "This wallet could not be found.");
+  }
+  return buildWalletOverview(wallet);
+}
+
+export async function getWalletBalanceForUser(
+  userId: string,
+  walletId: string,
+): Promise<WalletOverview> {
+  return getWalletOverviewForUserById(userId, walletId);
 }
 
 export async function getWalletOverviewForUser(userId: string): Promise<WalletOverview | null> {

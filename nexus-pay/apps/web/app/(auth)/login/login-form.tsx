@@ -12,7 +12,7 @@ import { PasswordInput } from "@/components/forms/password-input";
 import { SubmitButton } from "@/components/forms/submit-button";
 import { apiFetch, ApiClientError } from "@/lib/api/client";
 
-export function LoginForm() {
+export function LoginForm({ nextPath }: { nextPath?: string | null }) {
   const router = useRouter();
   const [formError, setFormError] = useState<string | null>(null);
   const form = useForm<LoginInput>({
@@ -27,7 +27,13 @@ export function LoginForm() {
         method: "POST",
         body: JSON.stringify(values),
       });
-      router.push(result.redirectTo);
+      const target =
+        result.redirectTo === "/onboarding"
+          ? "/onboarding"
+          : nextPath && nextPath.startsWith("/") && !nextPath.startsWith("//")
+            ? nextPath
+            : result.redirectTo;
+      router.push(target);
       router.refresh();
     } catch (error) {
       if (error instanceof ApiClientError) {

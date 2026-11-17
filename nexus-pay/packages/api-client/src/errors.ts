@@ -7,7 +7,20 @@ export type RaftlineErrorCode =
   | "CONFLICT"
   | "AMBIGUOUS"
   | "PROVISIONING_FAILED"
+  | "RATE_LIMITED"
+  | "REQUEST_REJECTED"
+  | "UNAUTHORIZED"
   | "CONFIGURATION";
+
+export function isTransientRaftlineError(error: unknown): error is RaftlineError {
+  return (
+    error instanceof RaftlineError &&
+    (error.code === "UNAVAILABLE" ||
+      error.code === "TIMEOUT" ||
+      error.code === "RATE_LIMITED" ||
+      error.code === "NOT_LEADER")
+  );
+}
 
 export class RaftlineError extends Error {
   readonly code: RaftlineErrorCode;

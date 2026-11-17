@@ -1,9 +1,18 @@
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
-import { assertSafeAccountId, type RaftlineConfig } from "./config";
-import { RaftlineError, isNotLeaderError } from "./errors";
+import {
+  assertSafeAccountId,
+  assertSafeIdempotencyKey,
+  type RaftlineConfig,
+} from "./config";
+import { RaftlineError, isNotLeaderError, type RaftlineErrorCode } from "./errors";
 import type { HttpTransport, RaftlineHttpResponse } from "./http";
 import type { LeaderLocator } from "./leader";
+import {
+  isRejectedReceipt,
+  parseTransactionReceipt,
+  type RaftlineTransactionReceipt,
+} from "./receipts";
 
 const rawAccountSchema = z.object({
   accountId: z.string().min(1),
@@ -43,6 +52,28 @@ export interface EnsureAccountResult {
   mode: "existing" | "official" | "kv";
 }
 
+export interface SettlePaymentInput {
+  idempotencyKey: string;
+  sourceAccountId: string;
+  destinationAccountId: string;
+  amountCents: number;
+  currency: string;
+  description?: string;
+}
+
+export interface FundAccountInput {
+  accountId: string;
+  amountCents: number;
+  idempotencyKey: string;
+  currency?: string;
+}
+
+export interface FundAccountResult {
+  account: RaftlineAccount;
+  /** The replicated funding receipt, or null while it is not yet readable. */
+  receipt: RaftlineTransactionReceipt | null;
+}
+
 export type AccountCreateMode = RaftlineConfig["accountCreateMode"];
 
 interface LeaderResponse {
@@ -74,6 +105,197 @@ export class RaftlinePaymentsClient {
     if (response.status === 404) return null;
     if (response.status === 200) return parseAccount(response.text);
     throw this.responseError(response, "UNAVAILABLE", false);
+  }
+
+  /**
+   * Executes an internal-book settlement. A 422 is a definitive rejection and is
+   * returned as a receipt, not an exception. A 409 means the idempotency key was
+   * reused with a different payload; timeout and 5xx outcomes are ambiguous.
+   */
+  async settlePayment(input: SettlePaymentInput): Promise<RaftlineTransactionReceipt> {
+    assertSafeAccountId(input.sourceAccountId);
+    assertSafeAccountId(input.destinationAccountId);
+    assertSafeIdempotencyKey(input.idempotencyKey);
+    this.assertSettlementAmount(input.amountCents);
+    const currency = input.currency.toUpperCase();
+
+    const { response } = await this.leaderRequest(
+      "/v1/payments/settle",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Tenant-Id": this.config.tenantId,
+          "Idempotency-Key": input.idempotencyKey,
+        },
+        body: JSON.stringify({
+          idempotencyKey: input.idempotencyKey,
+          rail: "INTERNAL_BOOK",
+          sourceAccountId: input.sourceAccountId,
+          destinationAccountId: input.destinationAccountId,
+          amountCents: input.amountCents,
+          currency,
+          description: input.description ?? "",
+          tenantId: this.config.tenantId,
+        }),
+      },
+      this.config.settlementTimeoutMs,
+    );
+
+    if (response.status === 200 || response.status === 201) {
+      return parseTransactionReceipt(response.text);
+    }
+    if (response.status === 422) {
+      const receipt = parseTransactionReceipt(response.text);
+      if (!isRejectedReceipt(receipt)) {
+        throw new RaftlineError("Raftline returned an inconsistent rejection receipt", {
+          code: "BAD_RESPONSE",
+          status: 422,
+        });
+      }
+      return receipt;
+    }
+
+    throw this.transformPaymentError(response, "settlement");
+  }
+
+  /**
+   * Credits a simulated sandbox funding amount. The tenant must be supplied in
+   * the header: Raftline ignores a tenantId only supplied in the body here.
+   */
+  async fundAccount(input: FundAccountInput): Promise<FundAccountResult> {
+    assertSafeAccountId(input.accountId);
+    assertSafeIdempotencyKey(input.idempotencyKey);
+    this.assertSettlementAmount(input.amountCents);
+
+    const { response } = await this.leaderRequest(
+      "/v1/payments/account/fund",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Tenant-Id": this.config.tenantId,
+          "Idempotency-Key": input.idempotencyKey,
+        },
+        body: JSON.stringify({
+          accountId: input.accountId,
+          amountCents: input.amountCents,
+          idempotencyKey: input.idempotencyKey,
+          tenantId: this.config.tenantId,
+        }),
+      },
+      this.config.settlementTimeoutMs,
+    );
+
+    if (response.status === 200 || response.status === 201) {
+      const account = parseAccount(response.text);
+      this.assertCompatible(account, (input.currency ?? "INR").toUpperCase());
+      const receipt = await this.getTransactionEventually(input.idempotencyKey);
+      return { account, receipt };
+    }
+
+    if (response.status === 404) {
+      throw new RaftlineError("The ledger account was not found", {
+        code: "NOT_FOUND",
+        status: 404,
+      });
+    }
+    throw this.transformPaymentError(response, "funding");
+  }
+
+  /**
+   * Reads the committed receipt by idempotency key or payment reference.
+   * Returns null only for a definitive 404.
+   */
+  async getTransaction(ref: string): Promise<RaftlineTransactionReceipt | null> {
+    const query = new URLSearchParams({
+      tenantId: this.config.tenantId,
+      ref,
+    });
+    const { response } = await this.leaderRequest(
+      `/v1/payments/transactions?${query.toString()}`,
+      { method: "GET" },
+    );
+
+    if (response.status === 404) return null;
+    if (response.status === 200) return parseTransactionReceipt(response.text);
+    if (response.status === 429) {
+      throw new RaftlineError("Raftline tenant rate limit reached", {
+        code: "RATE_LIMITED",
+        status: 429,
+      });
+    }
+    throw this.responseError(response, response.status >= 500 ? "UNAVAILABLE" : "REQUEST_REJECTED", false);
+  }
+
+  /**
+   * Reads a receipt with a short read-after-write backoff. Used after funding,
+   * where the HTTP response returns an account rather than a receipt.
+   */
+  async getTransactionEventually(ref: string): Promise<RaftlineTransactionReceipt | null> {
+    const delays = [0, 150, 400];
+    for (const delay of delays) {
+      if (delay > 0) {
+        await new Promise((resolve) => setTimeout(resolve, delay));
+      }
+      const receipt = await this.getTransaction(ref);
+      if (receipt) return receipt;
+    }
+    return null;
+  }
+
+  private assertSettlementAmount(amountCents: number): void {
+    if (!Number.isSafeInteger(amountCents) || amountCents <= 0) {
+      throw new RaftlineError("Payment amount must be a positive integer in minor units", {
+        code: "CONFIGURATION",
+      });
+    }
+  }
+
+  private transformPaymentError(
+    response: RaftlineHttpResponse,
+    operation: "settlement" | "funding",
+  ): RaftlineError {
+    if (response.status === 409) {
+      return new RaftlineError("Raftline reported an idempotency conflict", {
+        code: "CONFLICT",
+        status: 409,
+      });
+    }
+    if (response.status === 429) {
+      return new RaftlineError("Raftline tenant rate limit reached", {
+        code: "RATE_LIMITED",
+        status: 429,
+      });
+    }
+    if (response.status === 401 || response.status === 403) {
+      return new RaftlineError("Raftline rejected the integration credentials", {
+        code: "UNAUTHORIZED",
+        status: response.status,
+      });
+    }
+    if (response.status === 404) {
+      return new RaftlineError("The ledger account was not found", {
+        code: "NOT_FOUND",
+        status: 404,
+      });
+    }
+    if (response.status >= 500) {
+      return new RaftlineError(
+        `Raftline ${operation} could not be confirmed`,
+        { code: "AMBIGUOUS", status: response.status, ambiguous: true },
+      );
+    }
+    if (response.status === 400 || response.status === 405) {
+      return new RaftlineError(`Raftline rejected the ${operation} request`, {
+        code: "REQUEST_REJECTED",
+        status: response.status,
+      });
+    }
+    return new RaftlineError(`Raftline returned HTTP ${response.status}`, {
+      code: "UNAVAILABLE",
+      status: response.status,
+    });
   }
 
   async ensureAccount(input: EnsureAccountInput): Promise<EnsureAccountResult> {
@@ -241,12 +463,16 @@ export class RaftlinePaymentsClient {
     }
   }
 
-  private async leaderRequest(path: string, init: RequestInit): Promise<LeaderResponse> {
+  private async leaderRequest(
+    path: string,
+    init: RequestInit,
+    timeoutMs?: number,
+  ): Promise<LeaderResponse> {
     let lastError: unknown = null;
 
     for (let attempt = 0; attempt < MAX_LEADER_ATTEMPTS; attempt += 1) {
       const location = await this.leader.locate(attempt > 0);
-      const response = await this.http.request(`${location.baseUrl}${path}`, init);
+      const response = await this.http.request(`${location.baseUrl}${path}`, init, timeoutMs);
 
       if (isLeaderRedirect(response)) {
         this.leader.invalidate();
@@ -277,7 +503,7 @@ export class RaftlinePaymentsClient {
 
   private responseError(
     response: RaftlineHttpResponse,
-    code: "UNAVAILABLE" | "AMBIGUOUS" | "PROVISIONING_FAILED",
+    code: RaftlineErrorCode,
     ambiguous: boolean,
   ): RaftlineError {
     return new RaftlineError(`Raftline returned HTTP ${response.status}`, {

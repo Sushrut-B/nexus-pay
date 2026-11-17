@@ -25,28 +25,67 @@ enum WalletType {
   CUSTOMER
 }
 
+enum PaymentIntentStatus {
+  CREATED
+  PROCESSING
+  SETTLED
+  REJECTED
+  UNKNOWN
+  RECONCILIATION_REQUIRED
+}
+
+enum FundingOperationStatus {
+  CREATED
+  PROCESSING
+  COMPLETED
+  FAILED
+  UNKNOWN
+  RECONCILIATION_REQUIRED
+}
+
+enum TransactionKind {
+  P2P
+  FUNDING
+}
+
+enum TransactionDirection {
+  SENT
+  RECEIVED
+}
+
+enum TransactionStatus {
+  PROCESSING
+  SUCCESSFUL
+  FAILED
+  RECONCILIATION_REQUIRED
+}
+
 model User {
-  id                    String   @id @default(cuid())
-  fullName              String   @db.VarChar(120)
-  email                 String   @unique @db.VarChar(254)
-  phoneNumber           String   @unique @db.VarChar(20)
+  id                    String        @id @default(cuid())
+  fullName              String        @db.VarChar(120)
+  email                 String        @unique @db.VarChar(254)
+  phoneNumber           String        @unique @db.VarChar(20)
   passwordHash          String
-  username              String   @unique @db.VarChar(30)
-  isEmailVerified       Boolean  @default(false)
-  isPhoneVerified       Boolean  @default(false)
+  username              String        @unique @db.VarChar(30)
+  isEmailVerified       Boolean       @default(false)
+  isPhoneVerified       Boolean       @default(false)
   accountStatus         AccountStatus @default(ACTIVE)
   emailVerifiedAt       DateTime?
   phoneVerifiedAt       DateTime?
   lastLoginAt           DateTime?
   onboardingCompletedAt DateTime?
-  createdAt             DateTime @default(now())
-  updatedAt             DateTime @updatedAt
+  createdAt             DateTime      @default(now())
+  updatedAt             DateTime      @updatedAt
 
-  profile             UserProfile?
-  sessions            UserSession[]
-  wallets             Wallet[]
-  passwordResetTokens PasswordResetToken[]
-  auditEvents         AuditEvent[]         @relation("ActorAuditEvents")
+  profile                UserProfile?
+  sessions               UserSession[]
+  wallets                Wallet[]
+  passwordResetTokens    PasswordResetToken[]
+  auditEvents            AuditEvent[]         @relation("ActorAuditEvents")
+  paymentIntentsSent     PaymentIntent[]      @relation("PaymentIntentSender")
+  paymentIntentsReceived PaymentIntent[]      @relation("PaymentIntentRecipient")
+  fundingOperations      FundingOperation[]
+  transactionRecords     TransactionRecord[]
 
   @@index([accountStatus])
   @@index([createdAt])
@@ -99,11 +138,127 @@ model Wallet {
   createdAt             DateTime     @default(now())
   updatedAt             DateTime     @updatedAt
 
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user              User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  paymentIntents    PaymentIntent[]
+  fundingOperations FundingOperation[]
+  transactions      TransactionRecord[]
 
   @@unique([userId, currency])
   @@index([status])
   @@map("wallets")
+}
+
+/// Durable intent for one P2P payment. A client request id is the customer-facing
+/// idempotency boundary; the ledger idempotency key is generated once and never
+/// replaced, even after a timeout or ambiguous outcome.
+model PaymentIntent {
+  id                   String              @id @default(cuid())
+  userId               String
+  walletId             String
+  recipientUserId      String?
+  clientRequestId      String              @db.VarChar(64)
+  idempotencyKey       String              @unique @db.VarChar(80)
+  status               PaymentIntentStatus @default(CREATED)
+  recipientUsername    String              @db.VarChar(30)
+  recipientDisplayName String              @db.VarChar(60)
+  sourceAccountId      String              @db.VarChar(80)
+  destinationAccountId String              @db.VarChar(80)
+  amountMinor          BigInt
+  currency             String              @db.VarChar(3)
+  description          String?             @db.VarChar(140)
+  paymentRef           String?             @unique @db.VarChar(80)
+  raftLogIndex         BigInt?
+  rejectionCode        String?             @db.VarChar(80)
+  failureMessage       String?             @db.VarChar(500)
+  attemptCount         Int                 @default(0)
+  lastAttemptAt        DateTime?
+  lastReconciledAt     DateTime?
+  receiptVerifiedAt    DateTime?
+  lastWasIdempotentReplay Boolean          @default(false)
+  settledAt            DateTime?
+  createdAt            DateTime            @default(now())
+  updatedAt            DateTime            @updatedAt
+
+  user        User               @relation("PaymentIntentSender", fields: [userId], references: [id], onDelete: Cascade)
+  recipient   User?              @relation("PaymentIntentRecipient", fields: [recipientUserId], references: [id], onDelete: SetNull)
+  wallet      Wallet             @relation(fields: [walletId], references: [id], onDelete: Cascade)
+  transaction TransactionRecord?
+
+  @@unique([userId, clientRequestId])
+  @@index([userId, createdAt])
+  @@index([recipientUserId, createdAt])
+  @@index([status, lastAttemptAt])
+  @@map("payment_intents")
+}
+
+/// Durable record of one simulated INR sandbox funding attempt.
+model FundingOperation {
+  id                String                 @id @default(cuid())
+  userId            String
+  walletId          String
+  clientRequestId   String                 @db.VarChar(64)
+  idempotencyKey    String                 @unique @db.VarChar(80)
+  status            FundingOperationStatus @default(CREATED)
+  amountMinor       BigInt
+  currency          String                 @db.VarChar(3)
+  raftlineAccountId String                 @db.VarChar(80)
+  fundingRef        String?                @unique @db.VarChar(80)
+  balanceAfterMinor BigInt?
+  failureCode       String?                @db.VarChar(80)
+  failureMessage    String?                @db.VarChar(500)
+  attemptCount      Int                    @default(0)
+  lastAttemptAt     DateTime?
+  lastReconciledAt  DateTime?
+  receiptVerifiedAt DateTime?
+  lastWasIdempotentReplay Boolean         @default(false)
+  completedAt       DateTime?
+  createdAt         DateTime               @default(now())
+  updatedAt         DateTime               @updatedAt
+
+  user        User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  wallet      Wallet             @relation(fields: [walletId], references: [id], onDelete: Cascade)
+  transaction TransactionRecord?
+
+  @@unique([userId, clientRequestId])
+  @@index([userId, createdAt])
+  @@index([status, lastAttemptAt])
+  @@map("funding_operations")
+}
+
+/// Customer-scoped transaction read model. Entries are created before a ledger
+/// call and may only reach SUCCESSFUL after a verified Raftline receipt.
+model TransactionRecord {
+  id                   String               @id @default(cuid())
+  userId               String
+  walletId             String?
+  kind                 TransactionKind
+  direction            TransactionDirection
+  status               TransactionStatus
+  amountMinor          BigInt
+  currency             String               @db.VarChar(3)
+  counterpartyName     String?              @db.VarChar(80)
+  counterpartyUsername String?              @db.VarChar(30)
+  paymentRef           String?              @db.VarChar(80)
+  idempotencyKey       String?              @db.VarChar(80)
+  description          String?              @db.VarChar(200)
+  balanceAfterMinor    BigInt?
+  occurredAt           DateTime             @default(now())
+  createdAt            DateTime             @default(now())
+  updatedAt            DateTime             @updatedAt
+  paymentIntentId      String?              @unique
+  fundingOperationId   String?              @unique
+
+  user             User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  wallet           Wallet?           @relation(fields: [walletId], references: [id], onDelete: SetNull)
+  paymentIntent    PaymentIntent?    @relation(fields: [paymentIntentId], references: [id], onDelete: Cascade)
+  fundingOperation FundingOperation? @relation(fields: [fundingOperationId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, paymentRef])
+  @@index([userId, occurredAt])
+  @@index([userId, direction, status])
+  @@index([userId, kind, status])
+  @@index([status])
+  @@map("transaction_records")
 }
 
 model PasswordResetToken {

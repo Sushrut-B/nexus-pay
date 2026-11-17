@@ -1,5 +1,15 @@
 import { z } from "zod";
-import { SUPPORTED_CURRENCIES, SUPPORTED_LANGUAGES } from "@nexus/shared-types";
+import {
+  HISTORY_FILTERS,
+  HISTORY_SORTS,
+  MAX_FUNDING_MINOR,
+  MAX_PAYMENT_DESCRIPTION_LENGTH,
+  MAX_PAYMENT_MINOR,
+  MIN_FUNDING_MINOR,
+  MIN_PAYMENT_MINOR,
+  SUPPORTED_CURRENCIES,
+  SUPPORTED_LANGUAGES,
+} from "@nexus/shared-types";
 
 export const EMAIL_MAX_LENGTH = 254;
 export const USERNAME_MIN_LENGTH = 3;
@@ -143,3 +153,70 @@ export type ForgotPasswordInput = z.infer<typeof forgotPasswordSchema>;
 export type ResetPasswordInput = z.infer<typeof resetPasswordSchema>;
 export type OnboardingInput = z.infer<typeof onboardingSchema>;
 export type ProfileUpdateInput = z.infer<typeof profileUpdateSchema>;
+
+export const clientRequestIdSchema = z
+  .string({ required_error: "A payment request reference is required" })
+  .trim()
+  .uuid("The payment request reference is invalid");
+
+export const fundingRequestSchema = z.object({
+  clientRequestId: clientRequestIdSchema,
+  amountMinor: z
+    .number({ required_error: "Enter an amount" })
+    .int("Amounts must be whole paise")
+    .min(MIN_FUNDING_MINOR, "The minimum simulated funding amount is ₹1.00")
+    .max(MAX_FUNDING_MINOR, "The maximum simulated funding amount is ₹1,00,000.00"),
+});
+
+export const sendPaymentSchema = z.object({
+  clientRequestId: clientRequestIdSchema,
+  recipientToken: z
+    .string({ required_error: "Choose a recipient" })
+    .trim()
+    .min(20, "Choose a recipient")
+    .max(1024, "The recipient reference is invalid"),
+  amountMinor: z
+    .number({ required_error: "Enter an amount" })
+    .int("Amounts must be whole paise")
+    .min(MIN_PAYMENT_MINOR, "The minimum payment amount is ₹1.00")
+    .max(MAX_PAYMENT_MINOR, "The maximum payment amount is ₹1,00,000.00"),
+  description: z
+    .string()
+    .trim()
+    .max(MAX_PAYMENT_DESCRIPTION_LENGTH, "Keep the note under 140 characters")
+    .optional()
+    .transform((value) => (value ? value : undefined)),
+});
+
+export const recipientSearchSchema = z.object({
+  q: z
+    .string({ required_error: "Enter a username, email address or mobile number" })
+    .trim()
+    .min(3, "Enter at least 3 characters")
+    .max(254, "Search text is too long"),
+});
+
+const isoDateSchema = z
+  .string()
+  .regex(/^\d{4}-\d{2}-\d{2}$/, "Use a valid date")
+  .refine((value) => !Number.isNaN(Date.parse(`${value}T00:00:00.000Z`)), "Use a valid date");
+
+export const historyQuerySchema = z
+  .object({
+    filter: z.enum(HISTORY_FILTERS).default("ALL"),
+    sort: z.enum(HISTORY_SORTS).default("newest"),
+    search: z.string().trim().max(80, "Search text is too long").optional(),
+    from: isoDateSchema.optional(),
+    to: isoDateSchema.optional(),
+    page: z.coerce.number().int().min(1).max(10_000).default(1),
+    pageSize: z.coerce.number().int().min(1).max(50).default(10),
+  })
+  .refine((value) => !value.from || !value.to || value.from <= value.to, {
+    message: "The start date must be on or before the end date",
+    path: ["from"],
+  });
+
+export type FundingRequestInput = z.infer<typeof fundingRequestSchema>;
+export type SendPaymentInput = z.infer<typeof sendPaymentSchema>;
+export type RecipientSearchInput = z.infer<typeof recipientSearchSchema>;
+export type HistoryQueryInput = z.infer<typeof historyQuerySchema>;

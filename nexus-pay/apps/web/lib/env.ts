@@ -26,8 +26,16 @@ const envSchema = z.object({
   RAFTLINE_TENANT_ID: z.string().trim().default("nexuspay"),
   RAFTLINE_API_KEY: z.string().trim().optional(),
   RAFTLINE_TIMEOUT_MS: z.coerce.number().int().positive().default(8000),
+  RAFTLINE_SETTLEMENT_TIMEOUT_MS: z.coerce.number().int().positive().default(25_000),
   RAFTLINE_LEADER_CACHE_TTL_MS: z.coerce.number().int().positive().default(5000),
   RAFTLINE_ACCOUNT_CREATE_MODE: z.enum(["auto", "official", "kv"]).default("auto"),
+  RECIPIENT_TOKEN_TTL_MINUTES: z.coerce.number().int().positive().max(24 * 60).default(15),
+  PAYMENT_RECONCILIATION_MIN_INTERVAL_SECONDS: z.coerce
+    .number()
+    .int()
+    .min(0)
+    .max(300)
+    .default(3),
 });
 
 let cached: z.infer<typeof envSchema> | null = null;

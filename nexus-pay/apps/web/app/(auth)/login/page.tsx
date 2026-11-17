@@ -9,17 +9,25 @@ export const metadata: Metadata = {
   title: "Sign in",
 };
 
+function safeNextPath(value: string | undefined): string | null {
+  if (!value) return null;
+  if (!value.startsWith("/") || value.startsWith("//")) return null;
+  if (value.startsWith("/login") || value.startsWith("/api/")) return null;
+  return value;
+}
+
 export default async function LoginPage({
   searchParams,
 }: {
   searchParams: Promise<{ reset?: string; next?: string }>;
 }) {
+  const { reset, next } = await searchParams;
+  const nextPath = safeNextPath(next);
+
   const auth = await getAuthenticatedUser();
   if (auth) {
-    redirect(auth.user.onboardingCompletedAt ? "/home" : "/onboarding");
+    redirect(auth.user.onboardingCompletedAt ? nextPath ?? "/home" : "/onboarding");
   }
-
-  const { reset } = await searchParams;
 
   return (
     <AuthCard
@@ -45,7 +53,7 @@ export default async function LoginPage({
         </p>
       }
     >
-      <LoginForm />
+      <LoginForm nextPath={nextPath} />
     </AuthCard>
   );
 }
