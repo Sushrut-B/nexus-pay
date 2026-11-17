@@ -16,9 +16,9 @@ export function CustomerHeader({
   return (
     <header className="border-b border-border/70 bg-background/85 backdrop-blur-md">
       <div className="container flex h-[72px] items-center justify-between gap-4">
-        <div className="flex min-w-0 items-center gap-6">
+        <div className="flex min-w-0 flex-1 items-center gap-6">
           <Logo href="/home" />
-          <nav className="hidden items-center gap-0.5 lg:flex">
+          <nav className="hidden min-w-0 flex-1 items-center gap-0.5 overflow-x-auto lg:flex">
             <CustomerNav />
           </nav>
         </div>

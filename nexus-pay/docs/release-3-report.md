@@ -1,4 +1,4 @@
-# Nexus Pay — Release 3 Completion Report
+# Nexus Pay — Release 3 completion report
 
 Date: 17 November 2026
 Scope: Release 3 only (contacts, payment requests, groups, shared expenses,
@@ -9,7 +9,7 @@ balances, settlements, activity, notifications). Release 4 is not started.
 | Phase | Status | Notes |
 | --- | --- | --- |
 | 1. Existing system verification | Verified | Release 2 typecheck/lint/build/unit/integration/E2E all green before changes; live Alice→Bob settlement confirmed. |
-| 2. Database schema extensions | Verified | 4 migrations applied: `release3_social`, `release3_referential_actions`, `release3_expense_category`. |
+| 2. Database schema extensions | Verified | 3 migrations applied: `release3_social`, `release3_referential_actions`, `release3_expense_category`. |
 | 3. Contact management | Verified | Search, add, duplicate/self prevention, ownership checks, list, detail, removal. |
 | 4. Payment request workflows | Verified | All six states, guarded transitions, accept ≠ pay, verified payment association. |
 | 5. Group creation and membership | Verified | ADMIN/MEMBER roles, admin-only edits, soft removal, duplicate prevention. |
@@ -47,9 +47,10 @@ balances, settlements, activity, notifications). Release 4 is not started.
 | --- | --- |
 | `pnpm typecheck` | Passed across all 6 workspace projects |
 | `pnpm lint` | 0 warnings |
-| `pnpm build` | Passed (Next.js production build) |
+| `pnpm build` | Passed (Next.js production build, 22 route groups) |
 | `pnpm test:unit` | 46 passed across 6 files |
 | `pnpm test:integration` | 6 passed across 3 files (live Raftline + PostgreSQL) |
+| `pnpm test:e2e` (isolated run, retries) | All 5 scenarios passed on rerun after fixing a header link overlap |
 
 Release 3 E2E scenarios (run against the live cluster through Playwright):
 
