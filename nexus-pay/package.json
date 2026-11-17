@@ -16,7 +16,7 @@
     "typecheck": "pnpm -r --if-present typecheck",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:unit": "vitest run tests/unit packages/api-client/tests packages/validation/tests",
+    "test:unit": "vitest run tests/unit packages/shared-types/tests packages/api-client/tests packages/validation/tests",
     "test:integration": "cross-env RUN_INTEGRATION=1 RUN_RAFTLINE_INTEGRATION=1 vitest run --config vitest.integration.config.ts",
     "test:e2e": "playwright test",
     "db:generate": "pnpm --filter @nexus/database db:generate",

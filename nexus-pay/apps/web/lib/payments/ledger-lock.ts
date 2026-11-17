@@ -27,7 +27,10 @@ export async function withLedgerAccountLocks<T>(
   return prisma.$transaction(
     async (tx) => {
       for (const key of keys) {
-        await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${`${LOCK_NAMESPACE}${key}`}))`;
+        // PostgreSQL returns a `void` column from the lock function, which the
+        // Prisma result decoder cannot deserialize. Wrap it in a subquery and
+        // select a supported scalar instead; the lock is still transaction-scoped.
+        await tx.$queryRaw`SELECT 1 AS acquired FROM (SELECT pg_advisory_xact_lock(hashtext(${`${LOCK_NAMESPACE}${key}`}))) AS ledger_lock`;
       }
       return operation();
     },

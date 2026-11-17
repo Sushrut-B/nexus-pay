@@ -79,6 +79,24 @@ Modes:
 hyphens. Account IDs must be 1-80 characters of letters, numbers, dots,
 underscores or hyphens.
 
+### 4.1 Tenant registration (required for settlement)
+
+Raftline applies a per-tenant token bucket to the settlement endpoint. A tenant
+that is not registered on the current leader receives HTTP `429` for every
+settlement, even when funding and account reads succeed. Nexus Pay treats that
+as a definitive "busy" outcome: it returns the intent to an attemptable state
+and never reports success.
+
+Register the configured tenant on **each** node after starting the cluster:
+
+```powershell
+./scripts/ensure-raftline-tenant.ps1
+```
+
+This is safe to re-run. Leader changes do not require re-registration once all
+five nodes have the tenant. If payments return "The ledger is busy" repeatedly,
+verify the tenant with `GET /v1/dbaas/tenants` on the current leader.
+
 ## 5. Leader discovery
 
 Discovery requests `GET /v1/cluster/status` from all configured nodes in

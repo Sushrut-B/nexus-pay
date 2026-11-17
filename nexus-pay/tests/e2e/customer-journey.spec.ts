@@ -40,7 +40,7 @@ test("customer can register, verify a wallet, update profile, sign in and reset 
   await page.waitForURL("**/home");
   await expect(page.getByRole("heading", { name: /Good to see you/ })).toBeVisible();
   await expect(page.getByText("Active", { exact: true }).first()).toBeVisible({ timeout: 40_000 });
-  await expect(page.getByText("₹0.00", { exact: true })).toBeVisible();
+  await expect(page.getByText("₹0.00", { exact: true }).first()).toBeVisible();
   await expect(page.getByText("Verification needed")).toHaveCount(0);
   await expect(page.getByText("Needs attention")).toHaveCount(0);
 
@@ -61,7 +61,7 @@ test("customer can register, verify a wallet, update profile, sign in and reset 
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
   await page.waitForURL("**/home");
   await expect(page.getByText("Active", { exact: true }).first()).toBeVisible();
-  await expect(page.getByText("₹0.00", { exact: true })).toBeVisible();
+  await expect(page.getByText("₹0.00", { exact: true }).first()).toBeVisible();
 
   await page.getByRole("button", { name: /sign out/i }).click();
   await page.waitForURL("**/");
