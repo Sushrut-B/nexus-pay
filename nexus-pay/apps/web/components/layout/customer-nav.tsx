@@ -5,13 +5,14 @@ import { usePathname } from "next/navigation";
 import { cn } from "@nexus/ui";
 
 const LINKS = [
-  { href: "/home", label: "Overview" },
-  { href: "/wallet", label: "Wallet" },
-  { href: "/send", label: "Send" },
-  { href: "/wallet/add-money", label: "Add money", match: "/wallet/add-money" },
-  { href: "/receive", label: "Receive" },
+  { href: "/home", label: "Home" },
+  { href: "/wallet", label: "My Wallet" },
+  { href: "/send", label: "Send Money" },
+  { href: "/receive", label: "Receive Money" },
+  { href: "/groups", label: "Split Expenses" },
+  { href: "/requests", label: "Payment Requests" },
+  { href: "/contacts", label: "Contacts" },
   { href: "/transactions", label: "Transactions" },
-  { href: "/profile", label: "Profile" },
 ];
 
 export function CustomerNav({ mobile = false }: { mobile?: boolean }) {
@@ -21,9 +22,7 @@ export function CustomerNav({ mobile = false }: { mobile?: boolean }) {
       {LINKS.map((link) => {
         const active =
           pathname === link.href ||
-          (link.match
-            ? pathname.startsWith(link.match)
-            : link.href !== "/home" && pathname.startsWith(`${link.href}/`));
+          (link.href !== "/home" && pathname.startsWith(`${link.href}/`));
         return (
           <Link
             key={link.href}

@@ -1,7 +1,8 @@
 import Link from "next/link";
-import { Bell, Settings2 } from "lucide-react";
+import { Settings2 } from "lucide-react";
 import { Logo } from "@/components/brand/logo";
 import { CustomerNav } from "@/components/layout/customer-nav";
+import { NotificationCenter } from "@/components/layout/notification-center";
 import { LogoutButton } from "@/components/layout/logout-button";
 import { initials } from "@/lib/format";
 
@@ -23,14 +24,7 @@ export function CustomerHeader({
         </div>
 
         <div className="flex shrink-0 items-center gap-1.5">
-          <span
-            className="grid h-9 w-9 place-items-center rounded-xl border border-border bg-card text-muted-foreground"
-            title="Notifications are not available in this release"
-            aria-label="Notifications (not available in this release)"
-            role="img"
-          >
-            <Bell className="h-4 w-4" aria-hidden="true" />
-          </span>
+          <NotificationCenter />
           <Link
             href="/profile"
             className="grid h-9 w-9 place-items-center rounded-xl border border-border bg-card text-muted-foreground transition-colors hover:text-foreground"

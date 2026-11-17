@@ -122,3 +122,69 @@ payment reference (`/transactions/{paymentRef}`).
 
 `idempotentReplay: true` means Raftline returned the original receipt for the
 same key. It is evidence that no second debit or credit occurred.
+
+---
+
+## Release 3 — Contacts
+
+| Method | Route | Notes |
+| --- | --- | --- |
+| GET | `/api/contacts` | `ContactListResult`. Owned contacts only, alphabetical. |
+| POST | `/api/contacts` | `{ query, displayLabel? }`. Uses exact-match recipient lookup; self and duplicates rejected. |
+| GET | `/api/contacts/[id]` | `ContactView`, ownership enforced. |
+| DELETE | `/api/contacts/[id]` | Removes the contact; shared history is retained. |
+
+## Release 3 — Payment requests
+
+| Method | Route | Notes |
+| --- | --- | --- |
+| GET | `/api/requests?direction=received\|sent&status=&sort=&page=&pageSize=` | `RequestListResult`. |
+| POST | `/api/requests` | `{ payerQuery, amountMinor, currency, description?, dueAt?, groupId?, expenseId? }`. No debit. |
+| GET | `/api/requests/summary` | Pending counts and totals for both directions. |
+| GET | `/api/requests/[id]` | Request detail; only requester or payer can read. |
+| POST | `/api/requests/[id]/accept` | Payer only, `PENDING → ACCEPTED`. Does not move money. |
+| POST | `/api/requests/[id]/decline` | Payer only, `PENDING → DECLINED`. |
+| POST | `/api/requests/[id]/cancel` | Requester only, `PENDING → CANCELLED`. |
+| POST | `/api/requests/[id]/pay` | Payer only. Reuses the durable intent; sets `PAID` only after a verified settlement. |
+
+States: `PENDING → ACCEPTED | DECLINED | CANCELLED | EXPIRED`; `ACCEPTED → PAID`.
+Unexpected transitions return `409 PAYMENT_ERROR`. A request past its `dueAt`
+becomes `EXPIRED`.
+
+## Release 3 — Groups and expenses
+
+| Method | Route | Notes |
+| --- | --- | --- |
+| GET | `/api/groups` | `GroupListResult` with the caller's net balance. |
+| POST | `/api/groups` | `{ name, category, description?, imageUrl?, memberQueries[] }`. Creator is ADMIN. |
+| GET | `/api/groups/[groupId]` | `GroupDetail` with members and roles. |
+| PATCH | `/api/groups/[groupId]` | ADMIN only; name, description, category, image, archive. |
+| POST | `/api/groups/[groupId]/members` | ADMIN only; `{ query }`. |
+| DELETE | `/api/groups/[groupId]/members/[userId]` | ADMIN only; soft-removes membership. |
+| GET | `/api/groups/[groupId]/expenses` | `ExpenseListResult` for members. |
+| POST | `/api/groups/[groupId]/expenses` | `{ title, totalAmountMinor, category, expenseDate, paidByUserId, splitMethod, participants[] }`. |
+| GET | `/api/groups/[groupId]/expenses/[expenseId]` | Expense splits and payer. |
+| PATCH | `/api/groups/[groupId]/expenses/[expenseId]` | Members may edit; records an audit/activity trail and recalculates balances. |
+| DELETE | `/api/groups/[groupId]/expenses/[expenseId]` | Soft delete; blocked when the group has confirmed settlements. |
+| GET | `/api/groups/[groupId]/balances` | `GroupBalances`; `consistent: false` never returned with misleading values. |
+| GET | `/api/groups/[groupId]/suggested-settlements` | Greedy debt-simplified payment plan. |
+| GET | `/api/groups/[groupId]/settlements` | Settlements visible to the member. |
+| POST | `/api/groups/[groupId]/settlements` | `{ payeeUserId, amountMinor, clientRequestId }`. Creates and executes via the Release 2 engine. |
+| GET | `/api/groups/[groupId]/settlements/[settlementId]` | Settlement detail by member. |
+| GET | `/api/groups/[groupId]/activity` | `ActivityListResult` of real events. |
+
+Split methods: `EQUAL`, `CUSTOM` (exact minor amounts), `PERCENTAGE` (must sum
+to 100), `SHARES` (ratios). All allocations are integer paise and sum exactly
+to the expense total.
+
+## Release 3 — Notifications
+
+| Method | Route | Notes |
+| --- | --- | --- |
+| GET | `/api/notifications?page=&pageSize=` | `NotificationListResult` with unread count. |
+| GET | `/api/notifications/unread-count` | `{ unreadCount }`. |
+| PATCH | `/api/notifications/[id]/read` | Marks a caller-owned notification as read. |
+
+Notifications are persisted in PostgreSQL and generated for requests, group
+membership, expenses and settlements. The header notification center polls
+every 30 seconds; no WebSockets or external push are used.

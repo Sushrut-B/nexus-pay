@@ -12,6 +12,10 @@ const PROTECTED_PREFIXES = [
   "/receive",
   "/transactions",
   "/history",
+  "/contacts",
+  "/requests",
+  "/groups",
+  "/notifications",
 ];
 const CSRF_COOKIE = "np_csrf";
 

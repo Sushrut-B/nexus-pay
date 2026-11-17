@@ -87,3 +87,34 @@ pnpm test:e2e           # Playwright starts the dev server if needed
 - [Financial invariant report](docs/release-2-financial-invariant-report.md) —
   how money safety is enforced and tested.
 - [Release 1 test report](docs/release-1-test-report.md) — baseline evidence.
+
+## Release 3 — social payments
+
+Release 3 adds contacts, payment requests, shared expense groups, balance
+calculation, debt simplification, verified Settle Up payments, a group activity
+feed and in-app notifications. It reuses the Release 2 payment engine for every
+monetary transfer; social records are accounting metadata, not a second ledger.
+
+| Route | Purpose |
+| --- | --- |
+| `/contacts`, `/contacts/[contactId]` | Find, add, manage and view contacts |
+| `/requests`, `/requests/[id]` | Create, accept, decline, cancel and pay money requests |
+| `/groups` | Create and browse social expense groups |
+| `/groups/[groupId]` | Members, expenses, balances, suggested payments and activity |
+| `/groups/[groupId]/settle` | Pay group dues through the verified payment engine |
+
+Key rules:
+
+- Accepting a request never moves money; only the explicit pay action does.
+- Splits use integer paise with deterministic largest-remainder allocation.
+- Only a verified successful payment reduces group dues; partial payments are
+  supported and overpayments are rejected server-side.
+- Repeated settlement confirmations reuse one durable client request id, so no
+  second debit or balance reduction can occur.
+
+Reports:
+
+- [Release 3 report](docs/release-3-report.md) — completion status and evidence.
+- [Financial calculation report](docs/release-3-financial-calculation-report.md)
+  — split/balance rules and test results.
+- [API documentation](docs/api.md) — all Release 1–3 endpoints.

@@ -36,6 +36,24 @@ export default async function globalTeardown() {
     });
   }
 
+  // Release 3 social records reference users; remove them before the users.
+  await prisma.groupSettlement.deleteMany({
+    where: { OR: [{ payerUserId: { in: userIds } }, { payeeUserId: { in: userIds } }] },
+  }).catch(() => undefined);
+  await prisma.groupActivity.deleteMany({ where: { actorUserId: { in: userIds } } }).catch(() => undefined);
+  await prisma.expenseSplit.deleteMany({ where: { userId: { in: userIds } } }).catch(() => undefined);
+  await prisma.expense.deleteMany({
+    where: { OR: [{ paidByUserId: { in: userIds } }, { createdByUserId: { in: userIds } }] },
+  }).catch(() => undefined);
+  await prisma.groupMember.deleteMany({ where: { userId: { in: userIds } } }).catch(() => undefined);
+  await prisma.expenseGroup.deleteMany({ where: { createdBy: { in: userIds } } }).catch(() => undefined);
+  await prisma.paymentRequest.deleteMany({
+    where: { OR: [{ requesterUserId: { in: userIds } }, { payerUserId: { in: userIds } }] },
+  }).catch(() => undefined);
+  await prisma.contact.deleteMany({
+    where: { OR: [{ ownerUserId: { in: userIds } }, { contactUserId: { in: userIds } }] },
+  }).catch(() => undefined);
+  await prisma.notification.deleteMany({ where: { userId: { in: userIds } } }).catch(() => undefined);
   await prisma.auditEvent.deleteMany({
     where: {
       OR: [

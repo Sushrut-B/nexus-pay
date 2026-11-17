@@ -1,5 +1,7 @@
 import { z } from "zod";
 import {
+  EXPENSE_CATEGORIES,
+  GROUP_CATEGORIES,
   HISTORY_FILTERS,
   HISTORY_SORTS,
   MAX_FUNDING_MINOR,
@@ -7,6 +9,8 @@ import {
   MAX_PAYMENT_MINOR,
   MIN_FUNDING_MINOR,
   MIN_PAYMENT_MINOR,
+  PAYMENT_REQUEST_STATUSES,
+  SPLIT_METHODS,
   SUPPORTED_CURRENCIES,
   SUPPORTED_LANGUAGES,
 } from "@nexus/shared-types";
@@ -220,3 +224,123 @@ export type FundingRequestInput = z.infer<typeof fundingRequestSchema>;
 export type SendPaymentInput = z.infer<typeof sendPaymentSchema>;
 export type RecipientSearchInput = z.infer<typeof recipientSearchSchema>;
 export type HistoryQueryInput = z.infer<typeof historyQuerySchema>;
+
+// ---------------------------------------------------------------------------
+// Release 3 — social payments
+// ---------------------------------------------------------------------------
+
+const socialQuery = z
+  .string({ required_error: "Enter a username, email address or mobile number" })
+  .trim()
+  .min(3, "Enter at least 3 characters")
+  .max(254, "Search text is too long");
+
+const minorAmount = (label: string) =>
+  z
+    .number({ required_error: `Enter the ${label}` })
+    .int(`${label} must be a whole number of paise`)
+    .min(1, `${label} must be greater than zero`)
+    .max(10_000_000, `${label} is above the sandbox limit`);
+
+const isoDate = z
+  .string()
+  .regex(/^\d{4}-\d{2}-\d{2}$/, "Use a valid date")
+  .refine((value) => !Number.isNaN(Date.parse(`${value}T00:00:00.000Z`)), "Use a valid date");
+
+export const contactCreateSchema = z.object({
+  query: socialQuery,
+  displayLabel: z.string().trim().min(1).max(60).optional(),
+});
+
+export const requestCreateSchema = z.object({
+  payerQuery: socialQuery,
+  amountMinor: minorAmount("request amount"),
+  currency: z.literal("INR").default("INR"),
+  description: z.string().trim().max(200).optional(),
+  dueAt: z.string().datetime().optional(),
+  groupId: z.string().trim().max(64).optional(),
+  expenseId: z.string().trim().max(64).optional(),
+});
+
+export const requestListQuerySchema = z.object({
+  direction: z.enum(["received", "sent"]).default("received"),
+  status: z.enum(PAYMENT_REQUEST_STATUSES).optional(),
+  sort: z.enum(["newest", "oldest"]).default("newest"),
+  page: z.coerce.number().int().min(1).max(10_000).default(1),
+  pageSize: z.coerce.number().int().min(1).max(50).default(10),
+});
+
+export const groupCreateSchema = z.object({
+  name: z.string().trim().min(2, "Give the group a name").max(80),
+  description: z.string().trim().max(400).optional(),
+  category: z.enum(GROUP_CATEGORIES).default("OTHER"),
+  imageUrl: z.string().trim().url().max(2048).optional(),
+  memberQueries: z.array(socialQuery).max(20).default([]),
+});
+
+export const groupUpdateSchema = z
+  .object({
+    name: z.string().trim().min(2).max(80).optional(),
+    description: z.string().trim().max(400).nullable().optional(),
+    category: z.enum(GROUP_CATEGORIES).optional(),
+    imageUrl: z.string().trim().url().max(2048).nullable().optional(),
+    archived: z.boolean().optional(),
+  })
+  .refine((value) => Object.keys(value).length > 0, "Nothing to update");
+
+export const groupMemberSchema = z.object({ query: socialQuery });
+
+export const expenseParticipantSchema = z.object({
+  userId: z.string().trim().min(1).max(64),
+  amountMinor: z.number().int().min(0).max(10_000_000).optional(),
+  percentage: z.number().int().min(0).max(100).optional(),
+  shares: z.number().int().min(0).max(10_000).optional(),
+});
+
+export const expenseCreateSchema = z.object({
+  title: z.string().trim().min(2, "Give the expense a title").max(120),
+  description: z.string().trim().max(400).optional(),
+  totalAmountMinor: minorAmount("expense amount"),
+  category: z.enum(EXPENSE_CATEGORIES).default("OTHER"),
+  expenseDate: isoDate,
+  paidByUserId: z.string().trim().min(1).max(64),
+  splitMethod: z.enum(SPLIT_METHODS),
+  notes: z.string().trim().max(400).optional(),
+  participants: z.array(expenseParticipantSchema).min(1, "Select at least one participant").max(50),
+});
+
+export const expenseUpdateSchema = z.object({
+  title: z.string().trim().min(2).max(120).optional(),
+  description: z.string().trim().max(400).nullable().optional(),
+  totalAmountMinor: minorAmount("expense amount").optional(),
+  category: z.enum(EXPENSE_CATEGORIES).optional(),
+  expenseDate: isoDate.optional(),
+  paidByUserId: z.string().trim().min(1).max(64).optional(),
+  splitMethod: z.enum(SPLIT_METHODS).optional(),
+  notes: z.string().trim().max(400).nullable().optional(),
+  participants: z.array(expenseParticipantSchema).min(1).max(50).optional(),
+  reason: z.string().trim().min(3).max(200).default("Expense updated"),
+});
+
+export const settlementCreateSchema = z.object({
+  payeeUserId: z.string().trim().min(1).max(64),
+  amountMinor: minorAmount("settlement amount"),
+  clientRequestId: clientRequestIdSchema,
+  description: z.string().trim().max(140).optional(),
+});
+
+export const notificationListQuerySchema = z.object({
+  page: z.coerce.number().int().min(1).max(10_000).default(1),
+  pageSize: z.coerce.number().int().min(1).max(50).default(20),
+});
+
+export type ContactCreateInput = z.infer<typeof contactCreateSchema>;
+export type RequestCreateInput = z.infer<typeof requestCreateSchema>;
+export type RequestListQueryInput = z.infer<typeof requestListQuerySchema>;
+export type GroupCreateInput = z.infer<typeof groupCreateSchema>;
+export type GroupUpdateInput = z.infer<typeof groupUpdateSchema>;
+export type GroupMemberInput = z.infer<typeof groupMemberSchema>;
+export type ExpenseCreateInput = z.infer<typeof expenseCreateSchema>;
+export type ExpenseUpdateInput = z.infer<typeof expenseUpdateSchema>;
+export type SettlementCreateInput = z.infer<typeof settlementCreateSchema>;
+export type NotificationListQueryInput = z.infer<typeof notificationListQuerySchema>;

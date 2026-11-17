@@ -87,6 +87,21 @@ model User {
   fundingOperations      FundingOperation[]
   transactionRecords     TransactionRecord[]
 
+  // Release 3 social features
+  contactsOwned       Contact[]         @relation("ContactOwner")
+  contactsOf          Contact[]         @relation("ContactUser")
+  requestsSent        PaymentRequest[]  @relation("RequestRequester")
+  requestsReceived    PaymentRequest[]  @relation("RequestPayer")
+  groupsCreated       ExpenseGroup[]    @relation("GroupCreator")
+  groupMemberships    GroupMember[]
+  expensesPaid        Expense[]         @relation("ExpensePayer")
+  expensesCreated     Expense[]         @relation("ExpenseCreator")
+  expenseSplits       ExpenseSplit[]
+  settlementsPaid     GroupSettlement[] @relation("SettlementPayer")
+  settlementsReceived GroupSettlement[] @relation("SettlementPayee")
+  activities          GroupActivity[]
+  notifications       Notification[]
+
   @@index([accountStatus])
   @@index([createdAt])
   @@map("users")
@@ -291,4 +306,265 @@ model AuditEvent {
   @@index([entityType, entityId])
   @@index([createdAt])
   @@map("audit_events")
+}
+
+// ---------------------------------------------------------------------------
+// Release 3 — Contacts, requests, groups, expenses, settlements, activity
+// These records are social accounting metadata. Raftline remains the only
+// financial ledger; monetary transfers always reuse the Release 2 engine.
+// ---------------------------------------------------------------------------
+
+enum PaymentRequestStatus {
+  PENDING
+  ACCEPTED
+  DECLINED
+  PAID
+  CANCELLED
+  EXPIRED
+}
+
+enum GroupRole {
+  ADMIN
+  MEMBER
+}
+
+enum GroupCategory {
+  HOME
+  TRAVEL
+  FOOD
+  FRIENDS
+  FAMILY
+  OTHER
+}
+
+enum ExpenseCategory {
+  FOOD
+  TRAVEL
+  ACCOMMODATION
+  SHOPPING
+  TRANSPORT
+  ENTERTAINMENT
+  UTILITIES
+  OTHER
+}
+
+enum SplitMethod {
+  EQUAL
+  CUSTOM
+  PERCENTAGE
+  SHARES
+}
+
+enum SettlementStatus {
+  PENDING
+  PROCESSING
+  SETTLED
+  FAILED
+  RECONCILIATION_REQUIRED
+}
+
+enum NotificationType {
+  PAYMENT_REQUEST_RECEIVED
+  PAYMENT_REQUEST_ACCEPTED
+  PAYMENT_REQUEST_DECLINED
+  PAYMENT_REQUEST_PAID
+  ADDED_TO_GROUP
+  GROUP_EXPENSE_CREATED
+  GROUP_EXPENSE_UPDATED
+  SETTLEMENT_COMPLETED
+  SETTLEMENT_FAILED
+}
+
+enum GroupActivityEventType {
+  GROUP_CREATED
+  GROUP_UPDATED
+  MEMBER_JOINED
+  MEMBER_REMOVED
+  EXPENSE_CREATED
+  EXPENSE_UPDATED
+  EXPENSE_DELETED
+  SETTLEMENT_RECORDED
+  SETTLEMENT_COMPLETED
+  SETTLEMENT_FAILED
+}
+
+model Contact {
+  id            String   @id @default(cuid())
+  ownerUserId   String
+  contactUserId String
+  displayLabel  String?  @db.VarChar(60)
+  createdAt     DateTime @default(now())
+
+  owner   User @relation("ContactOwner", fields: [ownerUserId], references: [id], onDelete: Cascade)
+  contact User @relation("ContactUser", fields: [contactUserId], references: [id], onDelete: Cascade)
+
+  @@unique([ownerUserId, contactUserId])
+  @@index([ownerUserId, createdAt])
+  @@map("contacts")
+}
+
+model PaymentRequest {
+  id              String                @id @default(cuid())
+  requesterUserId String
+  payerUserId     String
+  amountMinor     BigInt
+  currency        String                @db.VarChar(3)
+  description     String?               @db.VarChar(200)
+  dueAt           DateTime?
+  status          PaymentRequestStatus  @default(PENDING)
+  paymentRef      String?               @unique @db.VarChar(80)
+  groupId         String?
+  expenseId       String?
+  clientRequestId String?               @unique @db.VarChar(64)
+  createdAt       DateTime              @default(now())
+  updatedAt       DateTime              @updatedAt
+  paidAt          DateTime?
+
+  requester User          @relation("RequestRequester", fields: [requesterUserId], references: [id], onDelete: Cascade)
+  payer     User          @relation("RequestPayer", fields: [payerUserId], references: [id], onDelete: Cascade)
+  group     ExpenseGroup? @relation(fields: [groupId], references: [id], onDelete: SetNull)
+  expense   Expense?      @relation(fields: [expenseId], references: [id], onDelete: SetNull)
+
+  @@index([payerUserId, status, createdAt])
+  @@index([requesterUserId, status, createdAt])
+  @@index([groupId])
+  @@map("payment_requests")
+}
+
+model ExpenseGroup {
+  id          String         @id @default(cuid())
+  name        String         @db.VarChar(80)
+  description String?        @db.VarChar(400)
+  category    GroupCategory  @default(OTHER)
+  imageUrl    String?        @db.VarChar(2048)
+  createdBy   String
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+  archivedAt  DateTime?
+
+  creator     User              @relation("GroupCreator", fields: [createdBy], references: [id], onDelete: Restrict)
+  members     GroupMember[]
+  expenses    Expense[]
+  requests    PaymentRequest[]
+  settlements GroupSettlement[]
+  activities  GroupActivity[]
+
+  @@index([createdAt])
+  @@map("expense_groups")
+}
+
+model GroupMember {
+  id        String     @id @default(cuid())
+  groupId   String
+  userId    String
+  role      GroupRole  @default(MEMBER)
+  joinedAt  DateTime   @default(now())
+  removedAt DateTime?
+
+  group ExpenseGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  user  User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([groupId, userId])
+  @@index([userId, removedAt])
+  @@map("group_members")
+}
+
+model Expense {
+  id                String          @id @default(cuid())
+  groupId           String
+  title             String          @db.VarChar(120)
+  description       String?         @db.VarChar(400)
+  totalAmountMinor  BigInt
+  currency          String          @db.VarChar(3)
+  paidByUserId      String
+  splitMethod       SplitMethod
+  category          ExpenseCategory @default(OTHER)
+  expenseDate       DateTime
+  createdByUserId   String
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+  deletedAt         DateTime?
+
+  group       ExpenseGroup    @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  paidBy      User            @relation("ExpensePayer", fields: [paidByUserId], references: [id], onDelete: Restrict)
+  createdBy   User            @relation("ExpenseCreator", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  splits      ExpenseSplit[]
+  requests    PaymentRequest[]
+
+  @@index([groupId, deletedAt, expenseDate])
+  @@map("expenses")
+}
+
+model ExpenseSplit {
+  id               String  @id @default(cuid())
+  expenseId        String
+  userId           String
+  shareAmountMinor BigInt
+  percentage       Int?
+  shares           Int?
+
+  expense Expense @relation(fields: [expenseId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([expenseId, userId])
+  @@index([userId])
+  @@map("expense_splits")
+}
+
+model GroupSettlement {
+  id             String           @id @default(cuid())
+  groupId        String
+  payerUserId    String
+  payeeUserId    String
+  amountMinor    BigInt
+  currency       String           @db.VarChar(3)
+  paymentRef     String?          @db.VarChar(80)
+  status         SettlementStatus @default(PENDING)
+  idempotencyKey String           @unique @db.VarChar(80)
+  clientRequestId String          @unique @db.VarChar(64)
+  paymentIntentId String?         @unique @db.VarChar(64)
+  createdAt      DateTime         @default(now())
+  completedAt    DateTime?
+
+  group ExpenseGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  payer User          @relation("SettlementPayer", fields: [payerUserId], references: [id], onDelete: Cascade)
+  payee User          @relation("SettlementPayee", fields: [payeeUserId], references: [id], onDelete: Cascade)
+
+  @@index([groupId, createdAt])
+  @@index([payerUserId, status])
+  @@index([payeeUserId, status])
+  @@map("group_settlements")
+}
+
+model GroupActivity {
+  id              String                 @id @default(cuid())
+  groupId         String
+  actorUserId     String?
+  eventType       GroupActivityEventType
+  entityType      String                 @db.VarChar(40)
+  entityId        String                 @db.VarChar(64)
+  metadata        Json                   @default("{}")
+  createdAt       DateTime               @default(now())
+
+  group ExpenseGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  actor User?        @relation(fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  @@index([groupId, createdAt])
+  @@map("group_activities")
+}
+
+model Notification {
+  id        String           @id @default(cuid())
+  userId    String
+  type      NotificationType
+  title     String           @db.VarChar(120)
+  body      String?          @db.VarChar(400)
+  data      Json             @default("{}")
+  readAt    DateTime?
+  createdAt DateTime         @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, readAt, createdAt])
+  @@map("notifications")
 }
