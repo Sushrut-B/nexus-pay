@@ -49,7 +49,7 @@ balances, settlements, activity, notifications). Release 4 is not started.
 | `pnpm lint` | 0 warnings |
 | `pnpm build` | Passed (Next.js production build, 22 route groups) |
 | `pnpm test:unit` | 46 passed across 6 files |
-| `pnpm test:integration` | 6 passed across 3 files (live Raftline + PostgreSQL) |
+| `pnpm test:integration` | 14 passed across 4 files (live Raftline + PostgreSQL), including an 8-test checklist verification suite |
 | `pnpm test:e2e` (production mode, `playwright.prod.config.ts`) | 5 passed — all scenarios green, no flakes |
 
 Release 3 E2E scenarios (run against the live cluster through Playwright):

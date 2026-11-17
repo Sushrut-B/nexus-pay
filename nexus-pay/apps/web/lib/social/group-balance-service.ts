@@ -125,6 +125,16 @@ export async function getSuggestedSettlements(groupId: string): Promise<Suggeste
   }
 }
 
+/** Membership-checked balance read for API routes. */
+export async function getGroupBalancesFor(
+  userId: string,
+  groupId: string,
+): Promise<GroupBalances> {
+  const { assertMembership } = await import("@/lib/social/group-service");
+  await assertMembership(userId, groupId);
+  return getGroupBalances(groupId);
+}
+
 export async function getMemberBalanceMinor(groupId: string, userId: string): Promise<number> {
   const balances = await getGroupBalances(groupId);
   return balances.entries.find((entry) => entry.user.userId === userId)?.netMinor ?? 0;
