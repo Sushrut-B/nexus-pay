@@ -1,4 +1,5 @@
 import { prisma } from "@nexus/database";
+import { createRaftlineClient } from "@nexus/api-client";
 import type { MerchantAnalytics } from "@nexus/shared-types";
 import { ApiError } from "@/lib/api/response";
 import { requireMerchantForUser } from "@/lib/merchant/merchant-service";
@@ -79,6 +80,29 @@ export async function getMerchantDashboard(userId: string) {
     prisma.merchantRefundRequest.count({ where: { merchantId: merchant.id } }),
   ]);
   const settled = payments.filter((payment) => payment.status === "SETTLED");
+
+  // Authoritative business balance: a live read from the mapped Raftline
+  // account. Never derived from merchant order/payment metadata.
+  let walletBalance: { availableMinor: number | null; currency: string; unavailableReason: string | null } = {
+    availableMinor: null,
+    currency: "INR",
+    unavailableReason: merchant.raftlineAccountId ? "RAFTLINE_UNAVAILABLE" : "WALLET_NOT_PROVISIONED",
+  };
+  if (merchant.raftlineAccountId) {
+    try {
+      const account = await createRaftlineClient().getAccount(merchant.raftlineAccountId);
+      if (account) {
+        walletBalance = {
+          availableMinor: account.availableBalanceCents,
+          currency: account.currency,
+          unavailableReason: null,
+        };
+      }
+    } catch {
+      // Leave the unavailable reason set; never guess a balance.
+    }
+  }
+
   return {
     merchant: {
       id: merchant.id,
@@ -96,7 +120,7 @@ export async function getMerchantDashboard(userId: string) {
     orders,
     customers,
     recentPayments: payments,
-    walletBalance: "Read from Raftline in the wallet view",
+    walletBalance,
   };
 }
 

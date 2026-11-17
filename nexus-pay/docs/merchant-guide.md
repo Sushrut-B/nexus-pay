@@ -13,7 +13,7 @@ Sandbox merchant payments inside Nexus Pay. Raftline remains authoritative for a
 
 ## Dashboard
 
-Shows payment volume, successful/pending/failed counts, orders, customers and recent payments. All values are derived from verified `MerchantPayment` records; the business wallet balance is the mapped Raftline account, not a calculated merchant ledger.
+Shows payment volume, successful/pending/failed counts, orders, customers, recent payments and the **available business wallet balance read live from the mapped Raftline account** (`Unavailable` when the ledger cannot be read — no balance is guessed). All payment metrics derive from verified `MerchantPayment` records; there is no calculated merchant ledger.
 
 ## Orders & links
 
@@ -22,7 +22,7 @@ Orders store line items in integer paise: `total = subtotal + tax − discount`.
 ## QR payments
 
 - **Static QR:** resolves the merchant handle, customer enters an amount, Nexus Pay settles internally. Not a UPI QR — only Nexus Pay can pay it.
-- **Dynamic QR:** use a payment link/order token to fix the exact amount.
+- **Dynamic QR:** generated from a payment link (`/merchant/payment-links/{id}/qr`). It encodes the `/pay-link/{token}` checkout URL, so the payable amount is fixed server-side and the customer cannot change it. Both QR types resolve to a real Nexus Pay payment experience; no external app can pay them.
 
 ## Checkout
 
@@ -34,4 +34,4 @@ Raftline has **no refund/reversal operation**. Merchants can request and adminis
 
 ## Security
 
-Merchant ownership is checked on every resource. Public tokens are unguessable, rate limited, expiry-checked and cannot change amounts. API keys are hashed and scoped. Webhooks are HMAC-SHA256 signed.
+Merchant ownership is checked on every resource. Public tokens are unguessable, rate limited, expiry-checked and cannot change amounts. API keys are hashed and scoped. Webhooks are HMAC-SHA256 signed, delivered from a durable outbox with exponential backoff and a dead-letter state, and can be manually retried from the developer portal.

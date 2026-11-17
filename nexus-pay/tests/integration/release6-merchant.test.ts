@@ -310,4 +310,53 @@ describe.skipIf(!enabled)("Release 6 merchant ecosystem verification", () => {
     },
     60_000,
   );
+
+  it(
+    "MER-10: failed webhook deliveries retry with backoff and support manual retry",
+    async () => {
+      await buildActiveMerchant();
+      let calls = 0;
+      const server: Server = createServer((request, response) => {
+        request.resume();
+        request.on("end", () => {
+          calls += 1;
+          if (calls === 1) response.writeHead(500).end("fail");
+          else response.writeHead(200).end("ok");
+        });
+      });
+      await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+      const address = server.address();
+      const port = typeof address === "object" && address ? address.port : 0;
+      const endpoint = await svc.webhook.createEndpoint(merchantOwnerId, {
+        url: `http://127.0.0.1:${port}/hook`,
+        events: ["order.created"],
+      });
+      const eventId = await svc.webhook.createWebhookEvent(merchantId, "order.created", { test: true });
+
+      // First pass: 500 response leaves the delivery FAILED with backoff recorded.
+      await svc.webhook.runWebhookWorker(25);
+      let deliveries = await svc.webhook.listDeliveries(merchantOwnerId, endpoint.id);
+      const first = deliveries.find((delivery) => delivery.eventId === eventId);
+      expect(first?.status).toBe("FAILED");
+      expect(first?.attempt).toBe(1);
+
+      // Make the backoff immediately due (avoids waiting the real 60s).
+      await prisma.merchantWebhookDelivery.updateMany({
+        where: { eventId },
+        data: { nextAttemptAt: new Date(Date.now() - 1000) },
+      });
+      await svc.webhook.runWebhookWorker(25);
+      deliveries = await svc.webhook.listDeliveries(merchantOwnerId, endpoint.id);
+      const retried = deliveries.find((delivery) => delivery.eventId === eventId);
+      expect(retried?.status).toBe("DELIVERED");
+      expect(retried?.attempt).toBe(2);
+      expect(calls).toBe(2);
+
+      const manual = await svc.webhook.retryDelivery(merchantOwnerId, retried!.id);
+      expect(manual.status).toBe("PENDING");
+      expect(manual.attempt).toBe(0);
+      server.close();
+    },
+    120_000,
+  );
 });

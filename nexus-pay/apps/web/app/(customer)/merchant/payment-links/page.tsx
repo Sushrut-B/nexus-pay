@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Alert, AlertDescription, Button, Card, CardContent, CardHeader, CardTitle, Input, Label } from "@nexus/ui";
 import type { PaymentLinkView } from "@nexus/shared-types";
@@ -54,6 +55,7 @@ export default function PaymentLinksPage() {
                 <div key={link.id} className="flex flex-wrap items-center gap-3 py-3">
                   <div className="min-w-0 flex-1"><p className="truncate text-sm font-medium">{link.title}</p><p className="text-[10px] text-muted-foreground">{link.paymentCount} payments · {link.status}</p></div>
                   <p className="text-sm font-semibold">{formatMoney(link.amountMinor, link.currency)}</p>
+                  <Button size="sm" variant="ghost" asChild><Link href={`/merchant/payment-links/${encodeURIComponent(link.id)}/qr`}>QR</Link></Button>
                   <Button size="sm" variant="ghost" onClick={() => navigator.clipboard.writeText(`${window.location.origin}${link.url}`)}>Copy</Button>
                   {link.status === "ACTIVE" ? <Button size="sm" variant="ghost" onClick={() => disable.mutate(link.id)}>Disable</Button> : null}
                 </div>

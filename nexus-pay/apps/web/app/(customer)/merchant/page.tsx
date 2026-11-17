@@ -17,6 +17,7 @@ interface Dashboard {
   orders: number;
   customers: number;
   recentPayments: Array<{ id: string; paymentRef: string; amountMinor: number; currency: string; status: string; source: string; createdAt: string }>;
+  walletBalance: { availableMinor: number | null; currency: string; unavailableReason: string | null };
 }
 
 export default function MerchantDashboardPage() {
@@ -62,6 +63,7 @@ export default function MerchantDashboardPage() {
       ) : null}
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <Metric label="Business wallet" value={dashboard.data?.walletBalance.availableMinor === null || dashboard.data?.walletBalance.availableMinor === undefined ? "Unavailable" : formatMoney(dashboard.data.walletBalance.availableMinor, dashboard.data.walletBalance.currency)} />
         <Metric label="Total volume" value={formatMoney(dashboard.data?.totalVolumeMinor ?? 0, "INR")} />
         <Metric label="Successful payments" value={String(dashboard.data?.successfulPayments ?? 0)} />
         <Metric label="Orders" value={String(dashboard.data?.orders ?? 0)} />

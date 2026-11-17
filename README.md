@@ -6,7 +6,7 @@
 
 [![Stack](https://img.shields.io/badge/stack-Next.js%2015%20%7C%20React%2019%20%7C%20TypeScript-blue)](https://nextjs.org/)
 [![Ledger](https://img.shields.io/badge/ledger-Raftline%205--node-green)](#architecture)
-[![Tests](https://img.shields.io/badge/tests-53%20unit%20%7C%2055%20integration%20%7C%208%20E2E-brightgreen)](#verification)
+[![Tests](https://img.shields.io/badge/tests-53%20unit%20%7C%2056%20integration%20%7C%208%20E2E-brightgreen)](#verification)
 [![Mode](https://img.shields.io/badge/mode-SIMULATED%20SANDBOX-orange)](#sandbox-notice)
 
 [Overview](#overview) · [Quick start](#quick-start) · [Features](#features) · [Architecture](#architecture) · [Verification](#verification) · [Docs](#documentation)
@@ -150,7 +150,7 @@ flowchart LR
 | --- | --- |
 | `pnpm typecheck` / `pnpm lint` / `pnpm build` | Passed |
 | `pnpm test:unit` | **53 passed** |
-| `pnpm test:integration` | **55 passed** (live Raftline + PostgreSQL) |
+| `pnpm test:integration` | **56 passed** (live Raftline + PostgreSQL) |
 | Playwright E2E | **8 passed** (production mode) |
 | Live failover drill | Leader failure → new term → heal → payment settled → reconciled → audited |
 

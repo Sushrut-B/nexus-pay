@@ -364,6 +364,7 @@ noted. Mutations require the CSRF token. Amounts are integer paise (`INR`).
 | GET | `/api/checkout/[token]/status` | Checkout session / payment status. |
 | GET | `/api/merchant-qr/[handle]` | Public merchant QR resolution. |
 | POST | `/api/merchant-qr/[handle]/pay` | Static QR payment (customer enters amount). |
+| GET | `/api/merchant/qr/link/[token]` | Dynamic QR PNG for a payment link (amount fixed server-side). |
 
 ### Payments, refunds and reporting
 
@@ -382,7 +383,9 @@ noted. Mutations require the CSRF token. Amounts are integer paise (`INR`).
 | PATCH/DELETE | `/api/merchant/webhooks/[id]` | Update / delete endpoint. |
 | POST | `/api/merchant/webhooks/[id]/test` | Queue a labelled test event. |
 | POST | `/api/merchant/webhooks/[id]/rotate` | Rotate signing secret. |
-| GET | `/api/merchant/webhooks/[id]/deliveries` | Delivery history. |
+| GET | `/api/merchant/webhooks/[id]/deliveries` | Delivery history for one endpoint. |
+| GET | `/api/merchant/webhooks/deliveries` | All delivery attempts for the merchant. |
+| POST | `/api/merchant/webhooks/deliveries/[id]/retry` | Manually re-queue a failed delivery. |
 | POST | `/api/merchant/webhooks/run` | Drain the outbox (worker alternative). |
 | GET/POST | `/api/merchant/api-keys` | Scoped, hashed developer keys. |
 | DELETE/POST | `/api/merchant/api-keys/[id]` | Revoke / rotate key. |
