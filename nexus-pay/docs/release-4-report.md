@@ -39,7 +39,7 @@ report.
 | `pnpm lint` | 0 warnings |
 | `pnpm build` | Passed — 31 route groups, 6 new API groups |
 | `pnpm test:unit` | 50 passed across 7 files |
-| `pnpm test:integration` | 21 passed across 5 files (live Raftline + PostgreSQL), including 7 Release 4 tests |
+| `pnpm test:integration` | 32 passed across 6 files (live Raftline + PostgreSQL), including a dedicated 11-test Release 4 checklist suite |
 | Release 4 E2E smoke | 1 passed — all new screens and planning workflows |
 
 Live verification highlights:
