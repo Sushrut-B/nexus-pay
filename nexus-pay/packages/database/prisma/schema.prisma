@@ -113,6 +113,7 @@ model User {
   recurringSuggestions RecurringPaymentSuggestion[]
   statements          Statement[]
 
+
   @@index([accountStatus])
   @@index([createdAt])
   @@map("users")
@@ -904,6 +905,266 @@ model RecurringPaymentSuggestion {
   @@unique([userId, counterpartyUsername, amountMinor])
   @@index([userId, status])
   @@map("recurring_payment_suggestions")
+}
+
+// ---------------------------------------------------------------------------
+// Release 5 — Nexus Control (administrative operations)
+// These records observe and audit infrastructure. They are never a financial
+// ledger and never modify Raftline's authoritative state.
+// ---------------------------------------------------------------------------
+
+enum AdminRole {
+  SUPER_ADMIN
+  OPERATOR
+  VIEWER
+}
+
+enum ClusterHealth {
+  HEALTHY
+  DEGRADED
+  NO_LEADER
+  QUORUM_LOST
+  NODE_UNAVAILABLE
+  RECOVERING
+  UNKNOWN
+}
+
+enum ChaosOperationStatus {
+  REQUESTED
+  INJECTED
+  HEALED
+  FAILED
+  BLOCKED
+}
+
+enum AlertSeverity {
+  CRITICAL
+  HIGH
+  MEDIUM
+  LOW
+  INFORMATIONAL
+}
+
+enum AlertStatus {
+  OPEN
+  ACKNOWLEDGED
+  RESOLVED
+}
+
+enum ReconciliationStatus {
+  OPEN
+  UNDER_REVIEW
+  RESOLVED_SETTLED
+  RESOLVED_REJECTED
+  UNRESOLVED
+}
+
+model AdminUser {
+  id           String     @id @default(cuid())
+  email        String     @unique @db.VarChar(254)
+  username     String     @unique @db.VarChar(30)
+  passwordHash String     @db.VarChar(255)
+  role         AdminRole  @default(VIEWER)
+  isActive     Boolean    @default(true)
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+  lastLoginAt  DateTime?
+
+  sessions       AdminSession[]
+  chaosOperations ChaosOperation[]
+  reconciliations ReconciliationCase[]
+
+  @@index([role, isActive])
+  @@map("admin_users")
+}
+
+model AdminSession {
+  id           String    @id @default(cuid())
+  adminUserId  String
+  tokenHash    String    @unique @db.VarChar(64)
+  expiresAt    DateTime
+  revokedAt    DateTime?
+  lastUsedAt   DateTime?
+  ipAddress    String?   @db.VarChar(64)
+  userAgent    String?   @db.VarChar(512)
+  createdAt    DateTime  @default(now())
+
+  adminUser AdminUser @relation(fields: [adminUserId], references: [id], onDelete: Cascade)
+
+  @@index([adminUserId, expiresAt])
+  @@map("admin_sessions")
+}
+
+model AdminAuditLog {
+  id         String   @id @default(cuid())
+  actorId    String?  @db.VarChar(64)
+  actorEmail String?  @db.VarChar(254)
+  actorRole  String   @db.VarChar(30)
+  action     String   @db.VarChar(80)
+  targetType String   @db.VarChar(60)
+  targetId   String   @db.VarChar(80)
+  reason     String?  @db.VarChar(500)
+  requestId  String?  @db.VarChar(64)
+  ipAddress  String?  @db.VarChar(64)
+  outcome    String   @db.VarChar(30)
+  metadata   Json     @default("{}")
+  createdAt  DateTime @default(now())
+
+  @@index([actorId, createdAt])
+  @@index([action, createdAt])
+  @@index([targetType, targetId])
+  @@map("admin_audit_logs")
+}
+
+model ClusterSnapshot {
+  id             String        @id @default(cuid())
+  observedAt     DateTime      @default(now())
+  leaderId       String?       @db.VarChar(40)
+  term           BigInt?
+  commitIndex    BigInt?
+  lastApplied    BigInt?
+  healthyNodes   Int
+  unavailableNodes Int
+  quorum         Int
+  totalNodes     Int
+  health         ClusterHealth
+  capturedMs     Int
+  nodes          NodeObservation[]
+
+  @@index([observedAt])
+  @@index([leaderId, observedAt])
+  @@map("cluster_snapshots")
+}
+
+model NodeObservation {
+  id             String    @id @default(cuid())
+  snapshotId     String
+  nodeId         String    @db.VarChar(40)
+  reachable      Boolean
+  role           String?   @db.VarChar(30)
+  term           BigInt?
+  commitIndex    BigInt?
+  lastApplied    BigInt?
+  responseTimeMs Int
+  error          String?   @db.VarChar(300)
+  observedAt     DateTime  @default(now())
+
+  snapshot ClusterSnapshot @relation(fields: [snapshotId], references: [id], onDelete: Cascade)
+
+  @@unique([snapshotId, nodeId])
+  @@index([nodeId, observedAt])
+  @@map("node_observations")
+}
+
+model LeaderTransition {
+  id            String   @id @default(cuid())
+  fromLeaderId  String?  @db.VarChar(40)
+  toLeaderId    String?  @db.VarChar(40)
+  term          BigInt?
+  observedAt    DateTime @default(now())
+  source        String   @default("OBSERVED") @db.VarChar(30)
+  snapshotId    String?
+
+  @@index([observedAt])
+  @@index([toLeaderId, observedAt])
+  @@map("leader_transitions")
+}
+
+model ChaosOperation {
+  id            String               @id @default(cuid())
+  actorId       String
+  actorRole     String               @db.VarChar(30)
+  nodeId        String               @db.VarChar(40)
+  scenario      String               @db.VarChar(40)
+  target        String?              @db.VarChar(80)
+  peer          String?              @db.VarChar(40)
+  reason        String               @db.VarChar(500)
+  status        ChaosOperationStatus @default(REQUESTED)
+  requestId     String               @unique @db.VarChar(80)
+  request       Json
+  response      Json                 @default("{}")
+  error         String?              @db.VarChar(400)
+  requestedAt   DateTime             @default(now())
+  completedAt   DateTime?
+  events        ChaosOperationEvent[]
+
+  actor AdminUser @relation(fields: [actorId], references: [id], onDelete: Restrict)
+
+  @@index([nodeId, requestedAt])
+  @@index([status, requestedAt])
+  @@map("chaos_operations")
+}
+
+model ChaosOperationEvent {
+  id          String   @id @default(cuid())
+  operationId String
+  eventType   String   @db.VarChar(40)
+  message     String   @db.VarChar(400)
+  metadata    Json     @default("{}")
+  createdAt   DateTime @default(now())
+
+  operation ChaosOperation @relation(fields: [operationId], references: [id], onDelete: Cascade)
+
+  @@index([operationId, createdAt])
+  @@map("chaos_operation_events")
+}
+
+model OperationalAlert {
+  id               String        @id @default(cuid())
+  fingerprint      String        @unique @db.VarChar(120)
+  title            String        @db.VarChar(160)
+  description      String        @db.VarChar(600)
+  severity         AlertSeverity
+  status           AlertStatus   @default(OPEN)
+  nodeId           String?       @db.VarChar(40)
+  paymentRef       String?       @db.VarChar(80)
+  suggestedSteps   String?       @db.VarChar(600)
+  firstDetectedAt  DateTime      @default(now())
+  lastObservedAt   DateTime      @default(now())
+  resolvedAt       DateTime?
+  acknowledgedBy   String?       @db.VarChar(64)
+  acknowledgedAt   DateTime?
+  metadata         Json          @default("{}")
+
+  @@index([status, severity, lastObservedAt])
+  @@map("operational_alerts")
+}
+
+model ReconciliationCase {
+  id                String               @id @default(cuid())
+  paymentIntentId   String               @db.VarChar(64)
+  paymentRef        String?              @db.VarChar(80)
+  idempotencyKey    String               @db.VarChar(80)
+  applicationStatus String               @db.VarChar(40)
+  status            ReconciliationStatus @default(OPEN)
+  decision          String?              @db.VarChar(200)
+  reason            String?              @db.VarChar(500)
+  operatorId        String?
+  evidence          Json                 @default("{}")
+  createdAt         DateTime             @default(now())
+  resolvedAt        DateTime?
+
+  operator   AdminUser?            @relation(fields: [operatorId], references: [id], onDelete: SetNull)
+  attempts   ReconciliationAttempt[]
+
+  @@unique([paymentIntentId])
+  @@index([status, createdAt])
+  @@map("reconciliation_cases")
+}
+
+model ReconciliationAttempt {
+  id         String   @id @default(cuid())
+  caseId     String
+  operatorId String?  @db.VarChar(64)
+  outcome    String   @db.VarChar(60)
+  evidence   Json     @default("{}")
+  error      String?  @db.VarChar(400)
+  createdAt  DateTime @default(now())
+
+  case ReconciliationCase @relation(fields: [caseId], references: [id], onDelete: Cascade)
+
+  @@index([caseId, createdAt])
+  @@map("reconciliation_attempts")
 }
 
 model Statement {

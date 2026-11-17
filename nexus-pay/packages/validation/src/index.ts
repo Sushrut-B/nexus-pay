@@ -1,8 +1,10 @@
 import { z } from "zod";
 import {
+  ADMIN_ROLES,
   BUDGET_PERIOD_TYPES,
   BUDGET_STATUS,
   CATEGORY_TYPES,
+  CHAOS_SCENARIOS,
   CONTRIBUTION_TYPES,
   EXPENSE_CATEGORIES,
   GROUP_CATEGORIES,
@@ -505,3 +507,71 @@ export type ScheduledPaymentCreateInput = z.infer<typeof scheduledPaymentCreateS
 export type ScheduledPaymentUpdateInput = z.infer<typeof scheduledPaymentUpdateSchema>;
 export type StatementGenerateInput = z.infer<typeof statementGenerateSchema>;
 export type CalendarQueryInput = z.infer<typeof calendarQuerySchema>;
+
+// ---------------------------------------------------------------------------
+// Release 5 — Nexus Control
+// ---------------------------------------------------------------------------
+
+export const adminLoginSchema = z.object({
+  identifier: z.string().trim().min(1).max(254),
+  password: z.string().min(1).max(128),
+});
+
+export const adminCreateSchema = z.object({
+  email: emailField,
+  username: usernameField,
+  password: passwordSchema,
+  role: z.enum(ADMIN_ROLES),
+});
+
+export const adminRoleUpdateSchema = z.object({
+  role: z.enum(ADMIN_ROLES),
+  isActive: z.boolean().optional(),
+});
+
+export const chaosInjectSchema = z
+  .object({
+    nodeId: z.string().trim().regex(/^node-[1-5]$/, "Choose a configured Raftline node"),
+    scenario: z.enum(CHAOS_SCENARIOS),
+    reason: z.string().trim().min(5, "Provide an incident reference or reason").max(500),
+    peer: z.string().trim().max(40).optional(),
+    target: z.string().trim().max(80).optional(),
+    delayMs: z.number().int().min(0).max(60_000).optional(),
+    dropRate: z.number().min(0).max(1).optional(),
+  })
+  .refine((value) => value.scenario !== "CUSTOM" || Boolean(value.peer), {
+    message: "CUSTOM requires a target peer",
+    path: ["peer"],
+  });
+
+export const chaosHealSchema = z.object({
+  nodeId: z.string().trim().regex(/^node-[1-5]$/, "Choose a configured Raftline node"),
+  reason: z.string().trim().min(5, "Provide an incident reference or reason").max(500),
+  all: z.boolean().default(false),
+  peer: z.string().trim().max(40).optional(),
+});
+
+export const reconciliationResolveSchema = z.object({
+  decision: z.enum(["RESOLVED_SETTLED", "RESOLVED_REJECTED", "UNRESOLVED"]),
+  reason: z.string().trim().min(5, "Provide a reconciliation reason").max(500),
+});
+
+export const alertAcknowledgeSchema = z.object({
+  reason: z.string().trim().max(500).optional(),
+});
+
+export const controlRangeSchema = z.object({
+  from: isoDate.optional(),
+  to: isoDate.optional(),
+  page: z.coerce.number().int().min(1).max(10_000).default(1),
+  pageSize: z.coerce.number().int().min(1).max(100).default(25),
+});
+
+export type AdminLoginInput = z.infer<typeof adminLoginSchema>;
+export type AdminCreateInput = z.infer<typeof adminCreateSchema>;
+export type AdminRoleUpdateInput = z.infer<typeof adminRoleUpdateSchema>;
+export type ChaosInjectInput = z.infer<typeof chaosInjectSchema>;
+export type ChaosHealInput = z.infer<typeof chaosHealSchema>;
+export type ReconciliationResolveInput = z.infer<typeof reconciliationResolveSchema>;
+export type AlertAcknowledgeInput = z.infer<typeof alertAcknowledgeSchema>;
+export type ControlRangeInput = z.infer<typeof controlRangeSchema>;

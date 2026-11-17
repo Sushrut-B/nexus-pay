@@ -31,20 +31,22 @@ test("personal finance screens render with real data and support planning workfl
   await page.goto("/budgets");
   await expect(page.getByRole("heading", { name: "Spend with intention." })).toBeVisible();
   await page.getByRole("button", { name: "New budget" }).click();
-  await page.getByLabel("Budget name").fill("E2E food budget");
+  const uniqueName = `E2E budget ${Date.now()}`;
+  await page.getByLabel("Budget name").fill(uniqueName);
   await page.getByLabel("Amount (INR)").fill("6000");
   const categorySelect = page.locator("#budget-category");
   await categorySelect.selectOption({ index: 1 });
   await page.getByRole("button", { name: "Create budget" }).click();
-  await expect(page.getByText("E2E food budget")).toBeVisible();
+  await expect(page.getByText(uniqueName).first()).toBeVisible();
 
   await page.goto("/savings");
   await expect(page.getByRole("heading", { name: "Save for what matters." })).toBeVisible();
   await page.getByRole("button", { name: "New goal" }).click();
-  await page.getByLabel("Goal name").fill("E2E laptop");
+  const uniqueGoal = `E2E laptop ${Date.now()}`;
+  await page.getByLabel("Goal name").fill(uniqueGoal);
   await page.getByLabel("Target amount (INR)").fill("50000");
   await page.getByRole("button", { name: "Create goal" }).click();
-  await expect(page.getByText("E2E laptop")).toBeVisible();
+  await expect(page.getByText(uniqueGoal).first()).toBeVisible();
 
   await page.goto("/scheduled");
   await expect(page.getByRole("heading", { name: "Payments on your terms." })).toBeVisible();

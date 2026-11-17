@@ -114,6 +114,20 @@ Key rules:
 
 Reports:
 
+## Release 5 — Nexus Control
+
+An isolated administrative control plane at **`/control`** for the live Raftline
+cluster: dynamic leader discovery, node health, leader-election observations,
+real chaos operations with safety controls, payment investigation, evidence-based
+reconciliation, metrics, alerts, audit and diagnostics. Separate admin RBAC
+(SUPER_ADMIN / OPERATOR / VIEWER) protects every `/api/control/**` endpoint.
+Chaos is disabled by default.
+
+- [Nexus Control guide](docs/nexus-control.md)
+- [Operational runbooks](docs/nexus-control-runbooks.md)
+- [Pre-implementation assessment](docs/nexus-control-assessment.md)
+- [Release 5 report](docs/release-5-report.md)
+
 ## Release 4 — personal finance intelligence
 
 Release 4 adds insights, categorization, budgets, savings goals, scheduled

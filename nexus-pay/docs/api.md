@@ -292,3 +292,43 @@ attempts); definitive rejections require attention.
 | GET | `/api/statements/[id]/download` | Streams the file; ownership checked; `no-store`. |
 
 PDF statements use `INR` (standard PDF fonts cannot encode ₹); CSV keeps Unicode.
+
+---
+
+## Release 5 — Nexus Control (`/api/control/**`)
+
+All endpoints require the isolated `np_control_session` cookie, enforce RBAC
+server-side, validate input, rate-limit sensitive actions and audit privileged
+operations. Every Raftline request is server-side.
+
+| Method | Route | Permission |
+| --- | --- | --- |
+| POST | `/api/control/auth/login` | public (rate limited) |
+| POST | `/api/control/auth/logout` | authenticated admin |
+| GET | `/api/control/session` | authenticated admin |
+| GET | `/api/control/overview` | `cluster:read` |
+| GET | `/api/control/cluster/status` | `cluster:read` |
+| GET | `/api/control/nodes` | `nodes:read` |
+| GET | `/api/control/nodes/[nodeId]` | `nodes:read` |
+| GET | `/api/control/leader-history` | `leader:read` |
+| GET | `/api/control/metrics?range=hour\|day\|week\|month` | `metrics:read` |
+| GET | `/api/control/payments?paymentRef=&intentId=&idempotencyKey=&status=` | `payments:read` |
+| GET | `/api/control/payments/[id]` | `payments:read` |
+| GET | `/api/control/reconciliation` | `reconciliation:read` |
+| POST | `/api/control/reconciliation/open` | `reconciliation:write` |
+| POST | `/api/control/reconciliation/[id]/investigate` | `reconciliation:write` |
+| POST | `/api/control/reconciliation/[id]/resolve` | `reconciliation:write` |
+| GET | `/api/control/chaos/operations` | `chaos:read` |
+| POST | `/api/control/chaos/inject` | `chaos:write` |
+| POST | `/api/control/chaos/heal` | `chaos:heal` |
+| GET | `/api/control/chaos/[id]` | `chaos:read` |
+| GET | `/api/control/alerts` | `alerts:read` |
+| POST | `/api/control/alerts/[id]/acknowledge` | `alerts:write` |
+| GET | `/api/control/audit` | `audit:read` |
+| GET | `/api/control/diagnostics` | `diagnostics:read` |
+| GET/POST/PATCH | `/api/control/admin` | `admin:write` (SUPER_ADMIN) |
+
+Chaos injection body: `{ nodeId, scenario, reason, peer?, delayMs?, dropRate? }`.
+Heal body: `{ nodeId, reason, all, peer? }`. Only scenarios from Raftline's
+`ChaosScenario` enum are accepted; unsupported modes are rejected before any
+backend call. Details: `docs/nexus-control.md`.

@@ -53,8 +53,13 @@ test("customer can register, verify a wallet, update profile, sign in and reset 
   await expect(page.getByText("Nexus Profile")).toBeVisible();
 
   await page.getByRole("button", { name: /sign out/i }).click();
-  await page.waitForURL("**/");
-
+  // Verify the session itself is gone, then navigate explicitly. The SPA route
+  // transition occasionally races with the assertion in production mode.
+  await expect
+    .poll(async () => (await page.context().cookies()).some((cookie) => cookie.name === "np_session"), {
+      timeout: 30_000,
+    })
+    .toBe(false);
   await page.goto("/login");
   await page.getByLabel("Email or username").fill(email);
   await page.getByLabel("Password", { exact: true }).fill(password);

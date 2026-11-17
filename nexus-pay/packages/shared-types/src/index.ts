@@ -138,3 +138,4 @@ export * from "./money";
 export * from "./payments";
 export * from "./social";
 export * from "./finance";
+export * from "./control";

@@ -36,6 +36,25 @@ const envSchema = z.object({
     .min(0)
     .max(300)
     .default(3),
+
+  // Release 5 — Nexus Control
+  NEXUS_CONTROL_ENABLED: z
+    .enum(["true", "false"])
+    .default("true")
+    .transform((value) => value === "true"),
+  NEXUS_CONTROL_CHAOS_ENABLED: z
+    .enum(["true", "false"])
+    .default("false")
+    .transform((value) => value === "true"),
+  NEXUS_CONTROL_ALLOW_QUORUM_LOSS: z
+    .enum(["true", "false"])
+    .default("false")
+    .transform((value) => value === "true"),
+  NEXUS_CONTROL_POLL_INTERVAL_MS: z.coerce.number().int().min(5000).max(600_000).default(30_000),
+  NEXUS_CONTROL_ADMIN_SESSION_HOURS: z.coerce.number().int().positive().default(8),
+  ADMIN_BOOTSTRAP_EMAIL: z.string().trim().email().optional(),
+  ADMIN_BOOTSTRAP_USERNAME: z.string().trim().min(3).max(30).optional(),
+  ADMIN_BOOTSTRAP_PASSWORD: z.string().min(12).optional(),
 });
 
 let cached: z.infer<typeof envSchema> | null = null;
@@ -65,5 +84,8 @@ export function appBaseUrl(): URL {
 }
 
 export function isSecureCookie(): boolean {
-  return appBaseUrl().protocol === "https:" || isProduction();
+  // Cookies follow the configured public URL scheme. A production deployment
+  // must set APP_URL to https://; a local HTTP environment cannot use Secure
+  // cookies because browsers and HTTP clients will not send them back.
+  return appBaseUrl().protocol === "https:";
 }

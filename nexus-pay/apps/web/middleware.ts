@@ -30,6 +30,23 @@ function randomToken(): string {
 
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
+
+  // Release 5 — Nexus Control has an isolated administrative session.
+  const isControlLogin = pathname === "/control/login" || pathname === "/api/control/auth/login";
+  const needsControl =
+    (pathname === "/control" || pathname.startsWith("/control/") || pathname.startsWith("/api/control/")) &&
+    !isControlLogin;
+  if (needsControl && !request.cookies.get("np_control_session")?.value) {
+    if (pathname.startsWith("/api/")) {
+      return NextResponse.json(
+        { error: { category: "AUTHENTICATION_ERROR", message: "Administrator sign-in required." } },
+        { status: 401 },
+      );
+    }
+    const loginUrl = new URL("/control/login", request.url);
+    loginUrl.searchParams.set("next", pathname);
+    return NextResponse.redirect(loginUrl);
+  }
   const needsProtection = PROTECTED_PREFIXES.some(
     (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`),
   );
