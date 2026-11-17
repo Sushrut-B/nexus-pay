@@ -72,7 +72,7 @@ masked sensitive fields, no browser-to-Raftline access, no secrets in bundles.
 | `pnpm lint` | 0 warnings |
 | `pnpm build` | Passed — 44 route groups |
 | `pnpm test:unit` | 53 passed across 8 files (3 new control tests) |
-| `pnpm test:integration` | 36 passed across 7 files (4 new live control tests) |
+| `pnpm test:integration` | 46 passed across 8 files, including a dedicated 10-test Release 5 checklist suite |
 | Release 5 E2E | 1 passed — admin login and all control screens |
 | Manual acceptance | Leader failure drill + real payment + reconciliation + audit |
 
