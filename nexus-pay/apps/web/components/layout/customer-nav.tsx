@@ -13,6 +13,7 @@ const LINKS = [
   { href: "/requests", label: "Payment Requests" },
   { href: "/contacts", label: "Contacts" },
   { href: "/transactions", label: "Transactions" },
+  { href: "/profile", label: "Profile" },
 ];
 
 export function CustomerNav({ mobile = false }: { mobile?: boolean }) {
