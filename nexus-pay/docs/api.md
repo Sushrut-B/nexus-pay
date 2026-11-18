@@ -404,3 +404,46 @@ noted. Mutations require the CSRF token. Amounts are integer paise (`INR`).
 request/review; no money is moved and no refund is marked settled by execution.
 See `docs/merchant-refunds.md`, `docs/merchant-webhooks.md` and
 `docs/merchant-developer-api.md`.
+
+---
+
+## Release 7 — Subscriptions & recurring billing
+
+All merchant routes require `np_session`, merchant ownership and CSRF on mutations.
+Amounts are integer paise. Raftline has no mandate/recurring capability, so each
+renewal is a separate, explicitly authorised sandbox wallet settlement.
+
+### Merchant plans & subscriptions
+
+| Method | Route | Notes |
+| --- | --- | --- |
+| GET/POST | `/api/merchant/plans` | List / create plans. |
+| GET/PATCH | `/api/merchant/plans/[id]` | Details / update (never rewrites existing snapshots). |
+| POST | `/api/merchant/plans/[id]/status` | DRAFT / ACTIVE / ARCHIVED. |
+| GET | `/api/merchant/subscriptions` / `[id]` | Subscribers (scoped). |
+| POST | `/api/merchant/subscriptions/[id]/pause` / `/resume` / `/cancel` / `/plan-change` | Lifecycle actions. |
+| GET | `/api/merchant/subscriptions/[id]/events` / `/occurrences` | Append-only history / billing periods. |
+
+### Invoices & revenue
+
+| Method | Route | Notes |
+| --- | --- | --- |
+| GET | `/api/merchant/invoices` / `[id]` | Merchant-scoped invoices. |
+| GET | `/api/merchant/invoices/[id]/pdf` | Sandbox invoice PDF. |
+| POST | `/api/merchant/invoices/[id]/void` | Void an unpaid invoice. |
+| GET | `/api/merchant/billing/analytics?range=` | MRR/ARR/churn with definitions. |
+| GET | `/api/merchant/billing/recovery` | Failed renewals, at-risk subscriptions. |
+| POST | `/api/merchant/billing/run` | Trigger one worker pass (rate limited). |
+
+### Public checkout & customer portal
+
+| Method | Route | Notes |
+| --- | --- | --- |
+| GET | `/api/subscribe/[token]` | Public plan data; prices from DB only. |
+| POST | `/api/subscribe/[token]/confirm` | `{ clientRequestId, acceptTerms: true }`; idempotent. |
+| GET | `/api/subscriptions` / `[id]` | Customer's own subscriptions. |
+| GET | `/api/subscriptions/[id]/events` / `/occurrences` / `/invoices` | Customer-scoped history. |
+| POST | `/api/subscriptions/[id]/cancel` | End-of-period cancellation. |
+| GET | `/api/invoices` / `/api/invoices/[id]/pdf` | Customer's own invoices. |
+
+Details: `docs/subscription-guide.md`, `docs/subscription-billing.md`.

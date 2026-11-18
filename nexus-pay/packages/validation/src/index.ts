@@ -2,7 +2,9 @@ import { z } from "zod";
 import {
   ADMIN_ROLES,
   API_SCOPES,
+  BILLING_FREQUENCIES,
   BUDGET_PERIOD_TYPES,
+  CANCELLATION_TIMINGS,
   BUDGET_STATUS,
   CATEGORY_TYPES,
   CHAOS_SCENARIOS,
@@ -699,3 +701,72 @@ export type WebhookCreateInput = z.infer<typeof webhookCreateSchema>;
 export type WebhookUpdateInput = z.infer<typeof webhookUpdateSchema>;
 export type ApiKeyCreateInput = z.infer<typeof apiKeyCreateSchema>;
 export type MerchantRangeInput = z.infer<typeof merchantRangeSchema>;
+
+// ---------------------------------------------------------------------------
+// Release 7 — Subscriptions & recurring billing
+// ---------------------------------------------------------------------------
+
+const subscriptionAmount = z
+  .number({ required_error: "Enter an amount" })
+  .int("Amounts must be whole paise")
+  .min(1, "Amount must be greater than zero")
+  .max(10_000_000, "Amount is above the sandbox limit");
+
+const subscriptionPlanBase = z.object({
+  name: z.string().trim().min(2).max(120),
+  description: z.string().trim().max(1000).optional(),
+  imageUrl: z.string().trim().url().max(2048).optional(),
+  amountMinor: subscriptionAmount,
+  setupFeeMinor: z.number().int().min(0).max(10_000_000).default(0),
+  currency: z.literal("INR"),
+  frequency: z.enum(BILLING_FREQUENCIES),
+  intervalCount: z.number().int().min(1).max(12).default(1),
+  trialDays: z.number().int().min(0).max(365).default(0),
+  introPriceMinor: subscriptionAmount.optional(),
+  introPeriods: z.number().int().min(0).max(24).default(0),
+  maxBillingPeriods: z.number().int().min(1).max(1200).optional(),
+  cancellationPolicy: z.string().trim().max(1000).optional(),
+  visibility: z.enum(["PUBLIC", "PRIVATE"]).default("PUBLIC"),
+  status: z.enum(["DRAFT", "ACTIVE"]).default("DRAFT"),
+});
+
+export const subscriptionPlanCreateSchema = subscriptionPlanBase.refine(
+  (value) => value.introPriceMinor === undefined || value.introPeriods > 0,
+  "Introductory pricing requires at least one introductory period",
+).refine(
+  (value) => value.frequency !== "CUSTOM" || value.intervalCount >= 1,
+  "Custom intervals require a valid interval count",
+);
+
+export const subscriptionPlanUpdateSchema = subscriptionPlanBase.partial().refine(
+  (value) => Object.keys(value).length > 0,
+  "Nothing to update",
+);
+
+export const subscriptionCheckoutConfirmSchema = z.object({
+  clientRequestId: clientRequestIdSchema,
+  acceptTerms: z.literal(true, { errorMap: () => ({ message: "You must accept the recurring billing terms" }) }),
+});
+
+export const subscriptionCancelSchema = z.object({
+  reason: z.string().trim().max(500).optional(),
+  timing: z.enum(CANCELLATION_TIMINGS).default("END_OF_PERIOD"),
+});
+
+export const subscriptionPlanChangeSchema = z.object({
+  planId: z.string().trim().min(1).max(64),
+  reason: z.string().trim().max(500).optional(),
+});
+
+export const subscriptionRangeSchema = z.object({
+  range: z.enum(["today", "week", "month", "90days", "custom"]).default("month"),
+  from: isoDate.optional(),
+  to: isoDate.optional(),
+});
+
+export type SubscriptionPlanCreateInput = z.infer<typeof subscriptionPlanCreateSchema>;
+export type SubscriptionPlanUpdateInput = z.infer<typeof subscriptionPlanUpdateSchema>;
+export type SubscriptionCheckoutConfirmInput = z.infer<typeof subscriptionCheckoutConfirmSchema>;
+export type SubscriptionCancelInput = z.infer<typeof subscriptionCancelSchema>;
+export type SubscriptionPlanChangeInput = z.infer<typeof subscriptionPlanChangeSchema>;
+export type SubscriptionRangeInput = z.infer<typeof subscriptionRangeSchema>;

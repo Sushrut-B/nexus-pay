@@ -117,6 +117,8 @@ model User {
   merchantOwners      Merchant[]          @relation("MerchantOwner")
   merchantMemberships MerchantMember[]
   merchantPayments    MerchantPayment[]   @relation("MerchantCustomer")
+  subscriptions       Subscription[]      @relation("SubscriptionCustomer")
+  invoices            Invoice[]           @relation("InvoiceCustomer")
 
   @@index([accountStatus])
   @@index([createdAt])
@@ -404,6 +406,15 @@ enum NotificationType {
   MERCHANT_ORDER_CREATED
   MERCHANT_REFUND_REQUESTED
   MERCHANT_REFUND_OUTCOME
+  SUBSCRIPTION_CREATED
+  SUBSCRIPTION_TRIAL_ENDING
+  SUBSCRIPTION_ACTIVATED
+  SUBSCRIPTION_RENEWAL_SUCCEEDED
+  SUBSCRIPTION_RENEWAL_FAILED
+  SUBSCRIPTION_PAST_DUE
+  SUBSCRIPTION_CANCELLED
+  SUBSCRIPTION_PLAN_CHANGED
+  SUBSCRIPTION_INVOICE_AVAILABLE
 }
 
 enum GroupActivityEventType {
@@ -1282,6 +1293,13 @@ model Merchant {
   webhooks       MerchantWebhookEndpoint[]
   webhookEvents  MerchantWebhookEvent[]
   reportExports  MerchantReportExport[]
+  plans          SubscriptionPlan[]
+  subscriptions  Subscription[]
+  occurrences    BillingOccurrence[]
+  invoices       Invoice[]
+  invoiceSequences InvoiceNumberSequence[]
+  planChanges    PlanChange[]
+  subscriptionEvents SubscriptionEvent[]
 
   @@index([ownerUserId, status])
   @@index([status, createdAt])
@@ -1561,6 +1579,268 @@ model MerchantReportExport {
 
   @@index([merchantId, createdAt])
   @@map("merchant_report_exports")
+}
+
+// ---------------------------------------------------------------------------
+// Release 7 — Subscriptions & recurring billing
+// Raftline remains authoritative for money movement and balances. Everything
+// below is billing metadata and orchestration state only.
+// ---------------------------------------------------------------------------
+
+enum BillingFrequency {
+  DAILY
+  WEEKLY
+  MONTHLY
+  QUARTERLY
+  YEARLY
+  CUSTOM
+}
+
+enum PlanStatus {
+  DRAFT
+  ACTIVE
+  ARCHIVED
+}
+
+enum PlanVisibility {
+  PUBLIC
+  PRIVATE
+}
+
+enum SubscriptionStatus {
+  PENDING
+  TRIALING
+  ACTIVE
+  PAST_DUE
+  PAUSED
+  CANCELLATION_SCHEDULED
+  CANCELLED
+  EXPIRED
+  INCOMPLETE
+  REQUIRES_CUSTOMER_ACTION
+}
+
+enum CancellationTiming {
+  IMMEDIATE
+  END_OF_PERIOD
+}
+
+enum BillingOccurrenceStatus {
+  PENDING
+  PROCESSING
+  SETTLED
+  FAILED
+  UNRESOLVED
+  RECONCILIATION_REQUIRED
+  DEAD_LETTER
+  SKIPPED
+}
+
+enum InvoiceStatus {
+  DRAFT
+  OPEN
+  PROCESSING
+  PAID
+  PAST_DUE
+  VOID
+  UNCOLLECTIBLE
+}
+
+model SubscriptionPlan {
+  id                 String         @id @default(cuid())
+  merchantId         String
+  name               String         @db.VarChar(120)
+  description        String?        @db.VarChar(1000)
+  imageUrl           String?        @db.VarChar(2048)
+  amountMinor        Int
+  setupFeeMinor      Int            @default(0)
+  currency           String         @db.VarChar(3)
+  frequency          BillingFrequency
+  intervalCount      Int            @default(1)
+  trialDays          Int            @default(0)
+  introPriceMinor    Int?
+  introPeriods       Int            @default(0)
+  maxBillingPeriods  Int?
+  cancellationPolicy String?        @db.VarChar(1000)
+  visibility         PlanVisibility @default(PUBLIC)
+  status             PlanStatus     @default(DRAFT)
+  checkoutToken      String         @unique @db.VarChar(80)
+  createdAt          DateTime       @default(now())
+  updatedAt          DateTime       @updatedAt
+
+  merchant       Merchant          @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  subscriptions  Subscription[]
+  changesFrom    PlanChange[]       @relation("PlanChangeFrom")
+  changesTo      PlanChange[]       @relation("PlanChangeTo")
+
+  @@index([merchantId, status])
+  @@map("subscription_plans")
+}
+
+model Subscription {
+  id                 String              @id @default(cuid())
+  merchantId         String
+  customerUserId     String
+  planId             String
+  pricingSnapshot    Json
+  frequency          BillingFrequency
+  intervalCount      Int
+  status             SubscriptionStatus  @default(PENDING)
+  timezone           String              @default("Asia/Kolkata") @db.VarChar(64)
+  startDate          DateTime
+  trialEndDate       DateTime?
+  currentPeriodStart DateTime
+  currentPeriodEnd   DateTime
+  nextBillingDate    DateTime?
+  cancelledAt        DateTime?
+  cancellationReason String?             @db.VarChar(500)
+  cancellationTiming CancellationTiming?
+  occurrenceCount    Int                 @default(0)
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+
+  merchant    Merchant            @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  customer    User                @relation("SubscriptionCustomer", fields: [customerUserId], references: [id], onDelete: Cascade)
+  plan        SubscriptionPlan    @relation(fields: [planId], references: [id], onDelete: Restrict)
+  events      SubscriptionEvent[]
+  occurrences BillingOccurrence[]
+  invoices    Invoice[]
+  changes     PlanChange[]
+
+  @@index([merchantId, status])
+  @@index([customerUserId, status])
+  @@index([nextBillingDate, status])
+  @@map("subscriptions")
+}
+
+model SubscriptionEvent {
+  id             String   @id @default(cuid())
+  subscriptionId String
+  merchantId     String
+  event          String   @db.VarChar(60)
+  actor          String   @db.VarChar(80)
+  metadata       Json?
+  createdAt      DateTime @default(now())
+
+  subscription Subscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+  merchant     Merchant     @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+
+  @@index([subscriptionId, createdAt])
+  @@map("subscription_events")
+}
+
+model BillingOccurrence {
+  id                    String                  @id @default(cuid())
+  subscriptionId        String
+  merchantId            String
+  occurrenceNumber      Int
+  periodStart           DateTime
+  periodEnd             DateTime
+  amountMinor           Int
+  currency              String                  @db.VarChar(3)
+  status                BillingOccurrenceStatus @default(PENDING)
+  idempotencyKey        String                  @unique @db.VarChar(120)
+  paymentIntentId       String?                 @db.VarChar(80)
+  paymentRef            String?                 @db.VarChar(80)
+  invoiceId             String?
+  attemptCount          Int                     @default(0)
+  lastErrorCode         String?                 @db.VarChar(80)
+  failureCategory       String?                 @db.VarChar(60)
+  nextAttemptAt         DateTime?
+  leaseUntil            DateTime?
+  availableAt           DateTime                @default(now())
+  resolvedAt            DateTime?
+  createdAt             DateTime                @default(now())
+  updatedAt             DateTime                @updatedAt
+
+  subscription Subscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+  merchant     Merchant     @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+
+  @@unique([subscriptionId, occurrenceNumber])
+  @@index([status, availableAt])
+  @@index([merchantId, status])
+  @@map("billing_occurrences")
+}
+
+model Invoice {
+  id             String        @id @default(cuid())
+  merchantId     String
+  customerUserId String
+  subscriptionId String?
+  occurrenceId   String?
+  invoiceNumber  String        @db.VarChar(40)
+  status         InvoiceStatus @default(DRAFT)
+  subtotalMinor  Int
+  taxMinor       Int           @default(0)
+  discountMinor  Int           @default(0)
+  setupFeeMinor  Int           @default(0)
+  totalMinor     Int
+  currency       String        @db.VarChar(3)
+  issueDate      DateTime
+  dueDate        DateTime
+  periodStart    DateTime?
+  periodEnd      DateTime?
+  paymentRef     String?       @db.VarChar(80)
+  customerName   String        @db.VarChar(120)
+  customerEmail  String        @db.VarChar(254)
+  voidedAt       DateTime?
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  merchant    Merchant            @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  customer    User                @relation("InvoiceCustomer", fields: [customerUserId], references: [id], onDelete: Cascade)
+  subscription Subscription?      @relation(fields: [subscriptionId], references: [id], onDelete: SetNull)
+  items       InvoiceLineItem[]
+
+  @@unique([merchantId, invoiceNumber])
+  @@index([merchantId, status, issueDate])
+  @@index([customerUserId, issueDate])
+  @@map("invoices")
+}
+
+model InvoiceLineItem {
+  id             String @id @default(cuid())
+  invoiceId      String
+  description    String @db.VarChar(200)
+  quantity       Int    @default(1)
+  unitPriceMinor Int
+  lineTotalMinor Int
+
+  invoice Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  @@index([invoiceId])
+  @@map("invoice_line_items")
+}
+
+model InvoiceNumberSequence {
+  merchantId String @id
+  year       Int
+  nextValue  Int    @default(1)
+
+  merchant Merchant @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+
+  @@map("invoice_number_sequences")
+}
+
+model PlanChange {
+  id              String   @id @default(cuid())
+  subscriptionId  String
+  merchantId      String
+  fromPlanId      String
+  toPlanId        String
+  reason          String?  @db.VarChar(500)
+  effectiveDate   DateTime
+  pricingSnapshot Json
+  actor           String   @db.VarChar(80)
+  createdAt       DateTime @default(now())
+
+  subscription Subscription     @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+  merchant     Merchant         @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  fromPlan     SubscriptionPlan @relation("PlanChangeFrom", fields: [fromPlanId], references: [id], onDelete: Restrict)
+  toPlan       SubscriptionPlan @relation("PlanChangeTo", fields: [toPlanId], references: [id], onDelete: Restrict)
+
+  @@index([subscriptionId, createdAt])
+  @@map("plan_changes")
 }
 
 model Statement {

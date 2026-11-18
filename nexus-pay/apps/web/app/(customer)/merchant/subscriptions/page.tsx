@@ -1,0 +1,45 @@
+"use client";
+
+import Link from "next/link";
+import { useQuery } from "@tanstack/react-query";
+import { Button, Card, CardContent, CardHeader, CardTitle } from "@nexus/ui";
+import type { SubscriptionView } from "@nexus/shared-types";
+import { formatMoney, formatDateTime } from "@/lib/format";
+import { apiFetch } from "@/lib/api/client";
+
+export default function MerchantSubscriptionsPage() {
+  const subscriptions = useQuery({
+    queryKey: ["merchant", "subscriptions"],
+    queryFn: () => apiFetch<{ items: SubscriptionView[] }>("/api/merchant/subscriptions"),
+  });
+  return (
+    <div className="space-y-6">
+      <div>
+        <p className="text-xs font-semibold uppercase tracking-[0.16em] text-primary">Recurring revenue</p>
+        <h1 className="mt-2 text-2xl font-semibold text-slate-900">Subscriptions</h1>
+      </div>
+      <Card>
+        <CardHeader><CardTitle className="text-base">All subscribers</CardTitle></CardHeader>
+        <CardContent>
+          {(subscriptions.data?.items ?? []).length === 0 ? (
+            <p className="py-10 text-center text-xs text-muted-foreground">No subscriptions yet. Share a plan checkout page to acquire subscribers.</p>
+          ) : (
+            <div className="divide-y divide-border/70">
+              {subscriptions.data?.items.map((subscription) => (
+                <div key={subscription.id} className="flex flex-wrap items-center gap-3 py-3">
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-medium">{subscription.planName}</p>
+                    <p className="text-[10px] text-muted-foreground">Customer {subscription.customerUserId.slice(-8)} · {formatDateTime(subscription.createdAt)}</p>
+                  </div>
+                  <span className="rounded-md bg-secondary px-2 py-1 text-[10px] font-medium">{subscription.status.replaceAll("_", " ")}</span>
+                  <p className="text-sm font-semibold">{formatMoney(subscription.pricingSnapshot.amountMinor, subscription.pricingSnapshot.currency)}</p>
+                  <Button size="sm" variant="ghost" asChild><Link href={`/merchant/subscriptions/${encodeURIComponent(subscription.id)}`}>Manage</Link></Button>
+                </div>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}

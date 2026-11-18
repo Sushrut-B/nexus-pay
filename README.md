@@ -2,11 +2,11 @@
 
 # Nexus Pay
 
-**Consumer payments · Social finance · Personal intelligence · Merchant ecosystem · Cluster operations**
+**Consumer payments · Social finance · Personal intelligence · Merchant ecosystem · Subscriptions · Cluster operations**
 
 [![Stack](https://img.shields.io/badge/stack-Next.js%2015%20%7C%20React%2019%20%7C%20TypeScript-blue)](https://nextjs.org/)
 [![Ledger](https://img.shields.io/badge/ledger-Raftline%205--node-green)](#architecture)
-[![Tests](https://img.shields.io/badge/tests-53%20unit%20%7C%2056%20integration%20%7C%208%20E2E-brightgreen)](#verification)
+[![Tests](https://img.shields.io/badge/tests-61%20unit%20%7C%2064%20integration%20%7C%209%20E2E-brightgreen)](#verification)
 [![Mode](https://img.shields.io/badge/mode-SIMULATED%20SANDBOX-orange)](#sandbox-notice)
 
 [Overview](#overview) · [Quick start](#quick-start) · [Features](#features) · [Architecture](#architecture) · [Verification](#verification) · [Docs](#documentation)
@@ -19,7 +19,7 @@
 
 ## Overview
 
-Nexus Pay is a full payments and finance platform backed by a live five-node **Raftline** cluster. It evolved across six releases without rebuilding earlier work.
+Nexus Pay is a full payments and finance platform backed by a live five-node **Raftline** cluster. It evolved across seven releases without rebuilding earlier work.
 
 | Release | Delivered |
 | --- | --- |
@@ -29,10 +29,11 @@ Nexus Pay is a full payments and finance platform backed by a live five-node **R
 | **R4** | Insights, categorization rules, budgets, savings goals, scheduled payments + durable worker, recurring detection, calendar, PDF/CSV statements |
 | **R5** | **Nexus Control** — isolated admin console, RBAC, live cluster monitoring, chaos engineering, payment reconciliation, metrics, alerts, audit |
 | **R6** | **Merchant ecosystem** — business accounts, orders, payment links, merchant QR, checkout, verified settlement, refund requests, analytics, webhooks, scoped developer APIs |
+| **R7** | **Subscriptions & recurring billing** — plans, trials, intro pricing, subscription checkout, durable billing worker, invoices, dunning, customer portal, recurring revenue analytics |
 
 > [!IMPORTANT]
 > <a name="sandbox-notice"></a>
-> **Sandbox only.** Funding is labelled **SIMULATED SANDBOX FUNDING**. There is no bank, UPI, card or real-money integration, and no regulatory claim. Merchant approval is application-level (not KYC), merchant QR is a Nexus Pay QR (not UPI), and **Raftline has no refund/reversal capability** — refunds stop at request/review with no money moved.
+> **Sandbox only.** Funding is labelled **SIMULATED SANDBOX FUNDING**. There is no bank, UPI, card or real-money integration, and no regulatory claim. Merchant approval is application-level (not KYC), merchant QR is a Nexus Pay QR (not UPI), and **Raftline has no refund/reversal capability** — refunds stop at request/review with no money moved. Subscriptions use explicit sandbox authorization - no UPI AutoPay, bank mandate or card-on-file is established.
 
 <details>
 <summary><b>Core financial rules</b> (click to expand)</summary>
@@ -69,7 +70,9 @@ pnpm dev
 | URL | Purpose |
 | --- | --- |
 | `http://localhost:3000` | Nexus Pay customer app |
+| `http://localhost:3000/subscriptions` | Customer subscription portal |
 | `http://localhost:3000/merchant` | Nexus Pay for Business (merchant dashboard) |
+| `http://localhost:3000/merchant/plans` | Subscription plans |
 | `http://localhost:3000/control` | Nexus Control admin console |
 
 Copy `nexus-pay/apps/web/.env.example` → `nexus-pay/apps/web/.env.local`. Register the tenant with `cd nexus-pay; .\scripts\ensure-raftline-tenant.ps1`.
@@ -97,7 +100,7 @@ Copy `nexus-pay/apps/web/.env.example` → `nexus-pay/apps/web/.env.local`. Regi
 | Onboarding | `/merchant/onboarding` — business info, wallet provisioning, sandbox review |
 | Operations | `/merchant`, `/merchant/orders`, `/merchant/payment-links`, `/merchant/qr`, `/merchant/customers`, `/merchant/refunds`, `/merchant/analytics` |
 | Integrations | `/merchant/developers`, `/merchant/settings` |
-| Customer checkout | `/pay-link/[token]`, `/merchant-qr/[handle]` |
+| Customer checkout | `/pay-link/[token]`, `/merchant-qr/[handle]`, `/subscribe/[token]` |
 
 Payments settle through the existing Raftline engine; merchant tables are metadata only. Webhooks are HMAC-SHA256 signed and delivered from a durable outbox.
 
@@ -149,9 +152,9 @@ flowchart LR
 | Gate | Result |
 | --- | --- |
 | `pnpm typecheck` / `pnpm lint` / `pnpm build` | Passed |
-| `pnpm test:unit` | **53 passed** |
-| `pnpm test:integration` | **56 passed** (live Raftline + PostgreSQL) |
-| Playwright E2E | **8 passed** (production mode) |
+| `pnpm test:unit` | **61 passed** |
+| `pnpm test:integration` | **64 passed** (live Raftline + PostgreSQL) |
+| Playwright E2E | **9 passed** (production mode) |
 | Live failover drill | Leader failure → new term → heal → payment settled → reconciled → audited |
 
 ```powershell
@@ -169,4 +172,6 @@ pnpm exec playwright test --config playwright.prod.config.ts
 - [API reference](nexus-pay/docs/api.md) · [Environment setup](nexus-pay/docs/environment-setup.md) · [Raftline integration](nexus-pay/docs/raftline-integration.md)
 - [Nexus Control](nexus-pay/docs/nexus-control.md) · [Runbooks](nexus-pay/docs/nexus-control-runbooks.md) · [Assessment](nexus-pay/docs/nexus-control-assessment.md)
 - Merchant: [Guide](nexus-pay/docs/merchant-guide.md) · [Refunds](nexus-pay/docs/merchant-refunds.md) · [Webhooks](nexus-pay/docs/merchant-webhooks.md) · [Developer API](nexus-pay/docs/merchant-developer-api.md) · [Assessment](nexus-pay/docs/release-6-assessment.md)
-- Reports: [R2](nexus-pay/docs/release-2-report.md) · [R3](nexus-pay/docs/release-3-report.md) · [R4](nexus-pay/docs/release-4-report.md) · [R5](nexus-pay/docs/release-5-report.md) · [R6](nexus-pay/docs/release-6-report.md)
+- Subscriptions: [Guide](nexus-pay/docs/subscription-guide.md) · [Billing engine](nexus-pay/docs/subscription-billing.md) · [Assessment](nexus-pay/docs/release-7-assessment.md)
+- Reports: [R2](nexus-pay/docs/release-2-report.md) · [R3](nexus-pay/docs/release-3-report.md) · [R4](nexus-pay/docs/release-4-report.md) · [R5](nexus-pay/docs/release-5-report.md) · [R6](nexus-pay/docs/release-6-report.md) · [R7](nexus-pay/docs/release-7-report.md)
+
