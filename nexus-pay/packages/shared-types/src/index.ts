@@ -143,3 +143,4 @@ export * from "./merchant";
 export * from "./subscription";
 export * from "./rewards";
 export * from "./finance-intelligence";
+export * from "./accounts";

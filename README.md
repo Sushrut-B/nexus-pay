@@ -2,11 +2,11 @@
 
 # Nexus Pay
 
-**Consumer payments · Social finance · Personal intelligence · Merchant ecosystem · Subscriptions · Rewards · Financial Intelligence · Cluster operations**
+**Consumer payments · Social finance · Personal intelligence · Merchant ecosystem · Subscriptions · Rewards · Financial Intelligence · Unified Accounts · Cluster operations**
 
 [![Stack](https://img.shields.io/badge/stack-Next.js%2015%20%7C%20React%2019%20%7C%20TypeScript-blue)](https://nextjs.org/)
 [![Ledger](https://img.shields.io/badge/ledger-Raftline%205--node-green)](#architecture)
-[![Tests](https://img.shields.io/badge/tests-68%20unit%20%7C%2089%20integration%20%7C%2014%20E2E-brightgreen)](#verification)
+[![Tests](https://img.shields.io/badge/tests-73%20unit%20%7C%20100%20integration%20%7C%2016%20E2E-brightgreen)](#verification)
 [![Mode](https://img.shields.io/badge/mode-SIMULATED%20SANDBOX-orange)](#sandbox-notice)
 
 [Overview](#overview) · [Quick start](#quick-start) · [Features](#features) · [Architecture](#architecture) · [Verification](#verification) · [Docs](#documentation)
@@ -19,7 +19,7 @@
 
 ## Overview
 
-Nexus Pay is a full payments and finance platform backed by a live five-node **Raftline** cluster. It evolved across nine releases without rebuilding earlier work.
+Nexus Pay is a full payments and finance platform backed by a live five-node **Raftline** cluster. It evolved across ten releases without rebuilding earlier work.
 
 | Release | Delivered |
 | --- | --- |
@@ -32,6 +32,7 @@ Nexus Pay is a full payments and finance platform backed by a live five-node **R
 | **R7** | **Subscriptions & recurring billing** — plans, trials, intro pricing, subscription checkout, durable billing worker, invoices, dunning, customer portal, recurring revenue analytics |
 | **R8** | **Rewards & loyalty** — points ledger, cashback, campaigns, promo codes, offers marketplace, tiers, referrals, fraud indicators, Nexus Control rewards operations |
 | **R9** | **Financial intelligence** — transaction classification, cash flow, spending analytics, recurring detection, goals, forecasts, anomalies, health score, Finance Assistant, reports |
+| **R10** | **Unified financial hub** — provider abstraction, sandbox external accounts, consent management, durable sync, deduplication, internal transfers, privacy centre, Control provider operations |
 
 > [!IMPORTANT]
 > <a name="sandbox-notice"></a>
@@ -154,9 +155,9 @@ flowchart LR
 | Gate | Result |
 | --- | --- |
 | `pnpm typecheck` / `pnpm lint` / `pnpm build` | Passed |
-| `pnpm test:unit` | **68 passed** |
-| `pnpm test:integration` | **89 passed** (live Raftline + PostgreSQL) |
-| Playwright E2E | **14 passed** (production mode) |
+| `pnpm test:unit` | **73 passed** |
+| `pnpm test:integration` | **100 passed** (live Raftline + PostgreSQL) |
+| Playwright E2E | **16 passed** (production mode) |
 | Live failover drill | Leader failure → new term → heal → payment settled → reconciled → audited |
 
 ```powershell
@@ -177,7 +178,11 @@ pnpm exec playwright test --config playwright.prod.config.ts
 - Subscriptions: [Guide](nexus-pay/docs/subscription-guide.md) · [Billing engine](nexus-pay/docs/subscription-billing.md) · [Assessment](nexus-pay/docs/release-7-assessment.md)
 - Rewards: [Architecture](nexus-pay/docs/rewards-architecture.md) · [Points ledger](nexus-pay/docs/points-ledger.md) · [Cashback](nexus-pay/docs/cashback-processing.md) · [Campaigns](nexus-pay/docs/campaign-guide.md) · [Referrals](nexus-pay/docs/referral-qualification.md) · [Runbook](nexus-pay/docs/reward-reconciliation-runbook.md)
 - Financial Intelligence: [Data architecture](nexus-pay/docs/financial-data-architecture.md) · [Classification rules](nexus-pay/docs/transaction-classification-rules.md) · [Cash-flow definitions](nexus-pay/docs/cash-flow-calculations.md) · [Forecasting & detection](nexus-pay/docs/forecasting-and-detection.md) · [Assistant & reports](nexus-pay/docs/assistant-and-reports.md)
-- Reports: [R2](nexus-pay/docs/release-2-report.md) · [R3](nexus-pay/docs/release-3-report.md) · [R4](nexus-pay/docs/release-4-report.md) · [R5](nexus-pay/docs/release-5-report.md) · [R6](nexus-pay/docs/release-6-report.md) · [R7](nexus-pay/docs/release-7-report.md) · [R8](nexus-pay/docs/release-8-report.md) · [R9](nexus-pay/docs/release-9-report.md)
+- External accounts: [Architecture](nexus-pay/docs/external-financial-architecture.md) · [Provider guide](nexus-pay/docs/provider-adapter-guide.md) · [Setup & prerequisites](nexus-pay/docs/provider-setup.md) · [Encryption & retention](nexus-pay/docs/encryption-and-retention.md)
+- Reports: [R2](nexus-pay/docs/release-2-report.md) · [R3](nexus-pay/docs/release-3-report.md) · [R4](nexus-pay/docs/release-4-report.md) · [R5](nexus-pay/docs/release-5-report.md) · [R6](nexus-pay/docs/release-6-report.md) · [R7](nexus-pay/docs/release-7-report.md) · [R8](nexus-pay/docs/release-8-report.md) · [R9](nexus-pay/docs/release-9-report.md) · [R10](nexus-pay/docs/release-10-report.md)
+
+
+
 
 
 

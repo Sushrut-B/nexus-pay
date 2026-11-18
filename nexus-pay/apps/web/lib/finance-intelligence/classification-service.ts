@@ -51,11 +51,12 @@ export async function loadClassifiedTransactions(
   userId: string,
   from: Date,
   to: Date,
+  options: { includeExternal?: boolean } = {},
 ): Promise<ClassifiedResult> {
   const records: ClassifiedRecord[] = [];
   const issues: QualityIssue[] = [];
 
-  const [transactions, merchantPayments, groupSettlements, cashback, categorizations, rewards, dataQuality] =
+  const [transactions, merchantPayments, groupSettlements, cashback, categorizations, rewards, dataQuality, externalTransactions, confirmedTransfers] =
     await Promise.all([
       prisma.transactionRecord.findMany({
         where: { userId, status: "SUCCESSFUL", occurredAt: { gte: from, lte: to } },
@@ -84,6 +85,15 @@ export async function loadClassifiedTransactions(
         orderBy: { createdAt: "desc" },
         take: 50,
       }),
+      options.includeExternal
+        ? prisma.externalTransaction.findMany({
+            where: { userId, transactionAt: { gte: from, lte: to } },
+            include: { account: true },
+          })
+        : Promise.resolve([]),
+      options.includeExternal
+        ? prisma.internalTransferMatch.findMany({ where: { userId, status: "CONFIRMED" } })
+        : Promise.resolve([]),
     ]);
 
   const categorized = new Set(categorizations.map((row) => row.paymentRef));
@@ -203,6 +213,31 @@ export async function loadClassifiedTransactions(
       paymentRef: entitlement.paymentRef,
       isAdjustment: false,
       classificationSource: "VERIFIED_SETTLEMENT",
+    });
+  }
+
+  // External transactions are reported provider data, never Nexus Pay payments.
+  // Only confirmed internal transfers are excluded from consolidated totals.
+  const excludedExternal = new Set(
+    confirmedTransfers.flatMap((match) => [match.debitTxId, match.creditTxId]),
+  );
+  for (const transaction of externalTransactions) {
+    if (excludedExternal.has(transaction.id)) continue;
+    const received = transaction.direction === "IN";
+    const category = received ? "INCOME" : "EXPENSE";
+    records.push({
+      sourceType: "EXTERNAL_TRANSACTION",
+      sourceId: transaction.id,
+      category,
+      direction: received ? "IN" : "OUT",
+      amountMinor: transaction.amountMinor,
+      currency: transaction.currency,
+      occurredAt: transaction.transactionAt,
+      description: transaction.description,
+      merchantName: transaction.merchant ?? transaction.account.institutionName,
+      paymentRef: transaction.externalRef,
+      isAdjustment: false,
+      classificationSource: "PROVIDER_REPORTED",
     });
   }
 

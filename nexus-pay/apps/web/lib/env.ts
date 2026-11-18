@@ -55,6 +55,13 @@ const envSchema = z.object({
   ADMIN_BOOTSTRAP_EMAIL: z.string().trim().email().optional(),
   ADMIN_BOOTSTRAP_USERNAME: z.string().trim().min(3).max(30).optional(),
   ADMIN_BOOTSTRAP_PASSWORD: z.string().min(12).optional(),
+
+  // Release 10 — external account aggregation
+  TOKEN_ENCRYPTION_KEY: z.string().min(32).optional(),
+  NEXUS_EXTERNAL_SANDBOX_ENABLED: z
+    .enum(["true", "false"])
+    .default("false")
+    .transform((value) => value === "true"),
 });
 
 let cached: z.infer<typeof envSchema> | null = null;

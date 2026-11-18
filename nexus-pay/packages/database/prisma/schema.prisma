@@ -437,6 +437,11 @@ enum NotificationType {
   FINANCE_GOAL_REMINDER
   FINANCE_REPORT_READY
   FINANCE_RECURRING_DETECTED
+  EXTERNAL_ACCOUNT_CONNECTED
+  EXTERNAL_ACCOUNT_SYNC_FAILED
+  EXTERNAL_ACCOUNT_CONSENT_EXPIRING
+  EXTERNAL_ACCOUNT_DISCONNECTED
+  INTERNAL_TRANSFER_SUGGESTED
 }
 
 enum GroupActivityEventType {
@@ -2795,6 +2800,362 @@ model FinancialPreference {
   updatedAt                     DateTime @updatedAt
 
   @@map("financial_preferences")
+}
+
+// ---------------------------------------------------------------------------
+// Release 10 — Unified financial hub & external account aggregation.
+// External balances/transactions are reported, read-only provider data.
+// Raftline remains authoritative for Nexus Pay wallet money.
+// ---------------------------------------------------------------------------
+
+enum ExternalProviderMode {
+  SANDBOX
+  PRODUCTION
+}
+
+enum ExternalAccountType {
+  NEXUS_WALLET
+  SAVINGS
+  CURRENT
+  FIXED_DEPOSIT
+  RECURRING_DEPOSIT
+  CREDIT_CARD
+  LOAN
+  OTHER
+}
+
+enum ExternalConnectionStatus {
+  NOT_CONNECTED
+  INITIATING
+  AWAITING_USER_AUTHORIZATION
+  AUTHORIZED
+  SYNC_PENDING
+  ACTIVE
+  PARTIALLY_CONNECTED
+  EXPIRED
+  REVOKED
+  FAILED
+  REQUIRES_ATTENTION
+}
+
+enum ExternalConsentStatus {
+  PENDING
+  ACTIVE
+  EXPIRED
+  REVOKED
+  REJECTED
+}
+
+enum SyncJobStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+  DEAD_LETTER
+}
+
+enum ProviderCallbackStatus {
+  RECEIVED
+  PROCESSED
+  REPLAYED
+  FAILED
+}
+
+enum DedupDecision {
+  DUPLICATE
+  DISTINCT
+  UNREVIEWED
+}
+
+enum InternalTransferStatus {
+  SUGGESTED
+  CONFIRMED
+  REJECTED
+}
+
+model ExternalFinancialProvider {
+  id           String              @id @default(cuid())
+  code         String              @unique @db.VarChar(60)
+  displayName  String              @db.VarChar(120)
+  mode         ExternalProviderMode @default(SANDBOX)
+  capabilities Json
+  status       String              @db.VarChar(30) @default("AVAILABLE")
+  config       Json?
+  createdAt    DateTime            @default(now())
+  updatedAt    DateTime            @updatedAt
+
+  connections ExternalAccountConnection[]
+  health      ProviderHealthSnapshot[]
+  callbacks   ProviderCallbackEvent[]
+
+  @@map("external_financial_providers")
+}
+
+model ExternalAccountConnection {
+  id                    String                  @id @default(cuid())
+  userId                String
+  providerId            String
+  status                ExternalConnectionStatus @default(INITIATING)
+  providerConnectionRef String?                 @db.VarChar(160)
+  callbackStateHash     String?                 @db.VarChar(64)
+  stateExpiresAt        DateTime?
+  lastSyncAt            DateTime?
+  lastError             String?                 @db.VarChar(500)
+  createdAt             DateTime                @default(now())
+  updatedAt             DateTime                @updatedAt
+
+  provider ExternalFinancialProvider @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  accounts ExternalFinancialAccount[]
+  consents ExternalAccountConsent[]
+  jobs     AccountSyncJob[]
+  checkpoints AccountSyncCheckpoint[]
+
+  @@unique([providerId, providerConnectionRef])
+  @@index([userId, status])
+  @@map("external_account_connections")
+}
+
+model ExternalAccountConsent {
+  id                   String                @id @default(cuid())
+  connectionId         String
+  userId               String
+  providerConsentRef   String?               @db.VarChar(160)
+  status               ExternalConsentStatus @default(PENDING)
+  purpose              String                @db.VarChar(300)
+  dataCategories       String[]
+  periodFrom           DateTime
+  periodTo             DateTime
+  durationDays         Int                   @default(90)
+  refreshFrequencyMinutes Int               @default(360)
+  termsVersion         String                @db.VarChar(40)
+  createdAt            DateTime              @default(now())
+  expiresAt            DateTime
+  revokedAt            DateTime?
+
+  connection ExternalAccountConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+  events     ConsentEvent[]
+
+  @@index([userId, status])
+  @@map("external_account_consents")
+}
+
+model ConsentEvent {
+  id        String   @id @default(cuid())
+  consentId String
+  event     String   @db.VarChar(60)
+  actor     String   @db.VarChar(80)
+  metadata  Json?
+  createdAt DateTime @default(now())
+
+  consent ExternalAccountConsent @relation(fields: [consentId], references: [id], onDelete: Cascade)
+
+  @@index([consentId, createdAt])
+  @@map("consent_events")
+}
+
+model ExternalFinancialAccount {
+  id                  String             @id @default(cuid())
+  connectionId        String
+  userId              String
+  providerAccountRef  String             @db.VarChar(160)
+  accountType         ExternalAccountType
+  institutionName     String             @db.VarChar(160)
+  maskedIdentifier    String             @db.VarChar(40)
+  encryptedAccountRef String             @db.VarChar(512)
+  currency            String             @db.VarChar(3)
+  status              String             @db.VarChar(30) @default("ACTIVE")
+  createdAt           DateTime           @default(now())
+  updatedAt           DateTime           @updatedAt
+
+  connection   ExternalAccountConnection    @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+  balances     ExternalAccountBalanceSnapshot[]
+  transactions ExternalTransaction[]
+  checkpoints  AccountSyncCheckpoint[]
+
+  @@unique([connectionId, providerAccountRef])
+  @@index([userId, accountType])
+  @@map("external_financial_accounts")
+}
+
+model ExternalAccountBalanceSnapshot {
+  id                   String   @id @default(cuid())
+  accountId            String
+  reportedBalanceMinor BigInt
+  availableBalanceMinor BigInt?
+  currency             String   @db.VarChar(3)
+  providerReportedAt   DateTime
+  capturedAt           DateTime @default(now())
+  liability            Boolean  @default(false)
+  outstandingMinor     BigInt?
+  availableCreditMinor BigInt?
+  statementMinor       BigInt?
+  minimumDueMinor      BigInt?
+  paymentDueDate       DateTime?
+  statementPeriodStart DateTime?
+  statementPeriodEnd   DateTime?
+
+  account ExternalFinancialAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@index([accountId, capturedAt])
+  @@map("external_account_balance_snapshots")
+}
+
+model ExternalTransaction {
+  id              String   @id @default(cuid())
+  accountId       String
+  userId          String
+  providerTxRef   String   @db.VarChar(180)
+  importId        String?
+  amountMinor     Int
+  currency        String   @db.VarChar(3)
+  direction       String   @db.VarChar(20)
+  description     String   @db.VarChar(300)
+  merchant        String?  @db.VarChar(120)
+  category        String   @db.VarChar(40)
+  postedAt        DateTime?
+  transactionAt   DateTime
+  status          String   @db.VarChar(30)
+  externalRef     String?  @db.VarChar(120)
+  rawPayload      Json?
+  dedupDecision   DedupDecision @default(UNREVIEWED)
+  canonicalOfId   String?
+  createdAt       DateTime @default(now())
+
+  account ExternalFinancialAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@unique([accountId, providerTxRef])
+  @@index([userId, transactionAt])
+  @@index([category, transactionAt])
+  @@map("external_transactions")
+}
+
+model ExternalTransactionImport {
+  id            String    @id @default(cuid())
+  connectionId  String
+  accountId     String
+  cursor        String?   @db.VarChar(500)
+  importedCount Int       @default(0)
+  duplicateCount Int      @default(0)
+  status        SyncJobStatus @default(PROCESSING)
+  startedAt     DateTime  @default(now())
+  finishedAt    DateTime?
+  error         String?   @db.VarChar(500)
+
+  @@index([connectionId, startedAt])
+  @@map("external_transaction_imports")
+}
+
+model TransactionDeduplicationRecord {
+  id            String        @id @default(cuid())
+  userId        String
+  canonicalTxId String
+  candidateKey  String        @db.VarChar(180)
+  decision      DedupDecision
+  confidence    String        @db.VarChar(20)
+  reason        String        @db.VarChar(300)
+  createdAt     DateTime      @default(now())
+
+  @@unique([userId, canonicalTxId, candidateKey])
+  @@map("transaction_deduplication_records")
+}
+
+model InternalTransferMatch {
+  id          String              @id @default(cuid())
+  userId      String
+  debitTxId   String
+  creditTxId  String
+  amountMinor Int
+  currency    String              @db.VarChar(3)
+  confidence  String              @db.VarChar(20)
+  status      InternalTransferStatus @default(SUGGESTED)
+  reason      String              @db.VarChar(300)
+  createdAt   DateTime            @default(now())
+
+  @@unique([userId, debitTxId, creditTxId])
+  @@index([userId, status])
+  @@map("internal_transfer_matches")
+}
+
+model AccountSyncJob {
+  id              String        @id @default(cuid())
+  connectionId    String
+  userId          String
+  kind            String        @db.VarChar(40)
+  status          SyncJobStatus @default(PENDING)
+  attempts        Int           @default(0)
+  nextAttemptAt   DateTime?
+  leaseUntil      DateTime?
+  error           String?       @db.VarChar(500)
+  createdAt       DateTime      @default(now())
+  completedAt     DateTime?
+
+  connection ExternalAccountConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+
+  @@index([status, nextAttemptAt])
+  @@map("account_sync_jobs")
+}
+
+model AccountSyncCheckpoint {
+  id               String   @id @default(cuid())
+  connectionId     String
+  accountId        String
+  cursor           String?  @db.VarChar(500)
+  lastTransactionAt DateTime?
+  updatedAt        DateTime @updatedAt
+
+  connection ExternalAccountConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+  account    ExternalFinancialAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@unique([connectionId, accountId])
+  @@map("account_sync_checkpoints")
+}
+
+model ProviderCallbackEvent {
+  id            String                 @id @default(cuid())
+  providerId    String
+  eventType     String                 @db.VarChar(80)
+  providerRef   String                 @db.VarChar(180)
+  payload       Json
+  signatureValid Boolean               @default(false)
+  status        ProviderCallbackStatus @default(RECEIVED)
+  processedAt   DateTime?
+  error         String?                @db.VarChar(500)
+  createdAt     DateTime               @default(now())
+
+  provider ExternalFinancialProvider @relation(fields: [providerId], references: [id], onDelete: Cascade)
+
+  @@unique([providerId, providerRef, eventType])
+  @@map("provider_callback_events")
+}
+
+model ProviderHealthSnapshot {
+  id         String   @id @default(cuid())
+  providerId String
+  status     String   @db.VarChar(30)
+  latencyMs  Int?
+  errorRateBps Int?
+  details    String?  @db.VarChar(500)
+  capturedAt DateTime @default(now())
+
+  provider ExternalFinancialProvider @relation(fields: [providerId], references: [id], onDelete: Cascade)
+
+  @@index([providerId, capturedAt])
+  @@map("provider_health_snapshots")
+}
+
+model DataAccessAuditEvent {
+  id         String   @id @default(cuid())
+  userId     String?
+  actorType  String   @db.VarChar(30)
+  actorId    String   @db.VarChar(80)
+  action     String   @db.VarChar(80)
+  targetType String   @db.VarChar(60)
+  targetId   String   @db.VarChar(120)
+  metadata   Json?
+  createdAt  DateTime @default(now())
+
+  @@index([userId, createdAt])
+  @@map("data_access_audit_events")
 }
 
 model Statement {

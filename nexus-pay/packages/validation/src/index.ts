@@ -2,6 +2,7 @@ import { z } from "zod";
 import {
   ADMIN_ROLES,
   API_SCOPES,
+  EXTERNAL_ACCOUNT_TYPES,
   BILLING_FREQUENCIES,
   BUDGET_PERIOD_TYPES,
   CANCELLATION_TIMINGS,
@@ -937,4 +938,58 @@ export type FinancePreferenceUpdateInput = z.infer<typeof financePreferenceUpdat
 export type AnomalyFeedbackInput = z.infer<typeof anomalyFeedbackSchema>;
 export type InsightFeedbackInput = z.infer<typeof insightFeedbackSchema>;
 export type BudgetRecommendationDecisionInput = z.infer<typeof budgetRecommendationDecisionSchema>;
+
+// ---------------------------------------------------------------------------
+// Release 10 — Unified financial hub
+// ---------------------------------------------------------------------------
+
+export const connectAccountSchema = z.object({
+  providerCode: z.string().trim().min(2).max(60),
+  purpose: z.string().trim().min(5).max(300),
+  dataCategories: z.array(z.enum(["ACCOUNT_METADATA", "BALANCES", "TRANSACTIONS"])).min(1),
+  periodFrom: isoDate,
+  periodTo: isoDate,
+  durationDays: z.number().int().min(1).max(365).default(90),
+  refreshFrequencyMinutes: z.number().int().min(15).max(10_080).default(360),
+  termsAccepted: z.literal(true, { errorMap: () => ({ message: "You must accept the data-sharing terms" }) }),
+}).refine((value) => value.periodTo >= value.periodFrom, "Invalid consent period");
+
+export const providerCallbackSchema = z.object({
+  state: z.string().trim().min(8).max(200),
+  code: z.string().trim().max(300).optional(),
+  providerRef: z.string().trim().max(180).optional(),
+  error: z.string().trim().max(200).optional(),
+});
+
+export const accountQuerySchema = z.object({
+  page: z.coerce.number().int().min(1).max(10_000).default(1),
+  pageSize: z.coerce.number().int().min(1).max(50).default(20),
+  status: z.string().max(40).optional(),
+  providerId: z.string().max(64).optional(),
+  accountType: z.enum(EXTERNAL_ACCOUNT_TYPES).optional(),
+  from: isoDate.optional(),
+  to: isoDate.optional(),
+  scope: z.enum(["WALLET", "ACCOUNT", "ALL"]).default("ALL"),
+  accountId: z.string().max(64).optional(),
+});
+
+export const consentActionSchema = z.object({
+  reason: z.string().trim().max(300).optional(),
+});
+
+export const dataDeletionRequestSchema = z.object({
+  reason: z.string().trim().min(5).max(500),
+  accountId: z.string().trim().max(64).optional(),
+});
+
+export const transferDecisionSchema = z.object({
+  decision: z.enum(["CONFIRM", "REJECT"]),
+});
+
+export type ConnectAccountInput = z.infer<typeof connectAccountSchema>;
+export type ProviderCallbackInput = z.infer<typeof providerCallbackSchema>;
+export type AccountQueryInput = z.infer<typeof accountQuerySchema>;
+export type ConsentActionInput = z.infer<typeof consentActionSchema>;
+export type DataDeletionRequestInput = z.infer<typeof dataDeletionRequestSchema>;
+export type TransferDecisionInput = z.infer<typeof transferDecisionSchema>;
 

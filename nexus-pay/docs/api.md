@@ -560,3 +560,33 @@ mutated. Customer routes require `np_session`; Control routes use `finance:read/
 Details: `docs/financial-data-architecture.md`, `docs/transaction-classification-rules.md`,
 `docs/cash-flow-calculations.md`, `docs/forecasting-and-detection.md`,
 `docs/assistant-and-reports.md`.
+
+---
+
+## Release 10 — Unified financial hub
+
+External data is provider-reported and read-only. Only the `sandbox` provider is
+configurable in this release; all other providers return a documented unavailable state.
+
+### Customer
+| Method | Route | Notes |
+| --- | --- | --- |
+| GET | `/api/accounts` / `/api/accounts/[id]` | Nexus wallet plus connected accounts. |
+| POST | `/api/accounts/connect` | Consent review + initiate connection. |
+| GET | `/api/accounts/callback` | Verified provider callback (state + replay protection). |
+| GET | `/api/accounts/connections` / `/consents` / `/consents/[id]` | Connection and consent state. |
+| POST | `/api/accounts/consents/[id]/renew` / `/revoke` | Consent lifecycle. |
+| POST | `/api/accounts/[id]/sync` | Enqueue durable sync job. |
+| GET | `/api/accounts/[id]/sync-status` / `/sync-history` | Sync monitoring. |
+| GET | `/api/accounts/transactions` / `/transactions/[id]` | Unified transaction history. |
+| GET | `/api/accounts/analytics/overview` / `/balances` / `/cashflow` / `/transfers` | Scoped analytics. |
+| POST | `/api/accounts/transfers/[id]/decide` | Confirm/reject transfer suggestion. |
+| GET | `/api/accounts/providers` / `/dedupe` | Provider availability and duplicates. |
+| GET | `/api/privacy/data-access` / `/consent-history` | Privacy centre. |
+| POST | `/api/privacy/data-deletion-request` | Record deletion request. |
+
+### Nexus Control (`accounts:read/write`)
+| GET | `/api/control/accounts/overview` `/health` `/jobs` `/callbacks` `/audits` | Operational health. |
+| POST | `/api/control/accounts/run` | Run worker / retry failed jobs (audited). |
+
+Details: `docs/external-financial-architecture.md`, `docs/provider-setup.md`.

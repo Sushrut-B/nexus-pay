@@ -141,11 +141,12 @@ const PERMISSIONS: Record<AdminRole, string[]> = {
     "reconciliation:read", "reconciliation:write", "chaos:read", "chaos:write",
     "chaos:heal", "alerts:read", "alerts:write", "audit:read", "diagnostics:read",
     "rewards:read", "rewards:write", "finance:read", "finance:write",
+    "accounts:read", "accounts:write",
   ],
   VIEWER: [
     "cluster:read", "nodes:read", "leader:read", "metrics:read",
     "payments:read", "reconciliation:read", "chaos:read", "alerts:read", "diagnostics:read",
-    "rewards:read", "finance:read",
+    "rewards:read", "finance:read", "accounts:read",
   ],
 };
 
