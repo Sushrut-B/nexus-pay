@@ -462,3 +462,56 @@ Signing and delivery follow `docs/merchant-webhooks.md`.
 | GET | `/api/control/subscription-invoices?status=` | `payments:read` |
 
 Details: `docs/subscription-guide.md`, `docs/subscription-billing.md`.
+
+---
+
+## Release 8 — Rewards, cashback, loyalty & offers
+
+Points are non-cash loyalty units; cashback is a separate sandbox wallet credit.
+All amounts are integer paise. Customer routes require `np_session`, merchant routes
+additionally require merchant ownership, and Control routes use `rewards:read/write`.
+
+### Customer
+
+| Method | Route | Notes |
+| --- | --- | --- |
+| GET | `/api/rewards/summary` | Points, cashback, offers, membership snapshot. |
+| GET | `/api/rewards/ledger` | Paginated append-only ledger. |
+| GET | `/api/rewards/activity` | Paginated activity with event/status filters. |
+| GET/POST | `/api/rewards/catalogue` | List items / atomic redemption. |
+| GET | `/api/rewards/redemptions` | User's redemptions and voucher hints. |
+| GET | `/api/rewards/offers` / `/offers/[id]` | Eligible offers only. |
+| POST | `/api/rewards/promo/validate` | Server-calculated discount + reservation. |
+| GET | `/api/rewards/membership` | Tier, progress and history. |
+| GET | `/api/rewards/referrals` / `/summary` | Code, link and rewards. |
+| GET | `/api/rewards/cashback` | Entitlement history. |
+
+### Merchant
+
+| Method | Route | Notes |
+| --- | --- | --- |
+| GET/POST | `/api/merchant/rewards/campaigns` | List / create drafts. |
+| GET/PATCH | `/api/merchant/rewards/campaigns/[id]` | Details / edit draft. |
+| POST | `/api/merchant/rewards/campaigns/[id]/submit` | Submit for approval. |
+| POST | `/api/merchant/rewards/campaigns/[id]/pause` | Pause active campaign. |
+| GET | `/api/merchant/rewards/analytics` | Merchant-scoped performance. |
+| GET | `/api/merchant/rewards/redemptions` | Merchant-scoped redemptions. |
+
+### Nexus Control
+
+| Method | Route | Permission |
+| --- | --- | --- |
+| GET | `/api/control/rewards/overview` | `rewards:read` |
+| GET | `/api/control/rewards/campaigns` | `rewards:read` |
+| POST | `/api/control/rewards/campaigns/[id]/approve` | `rewards:write`, SUPER_ADMIN |
+| POST | `/api/control/rewards/campaigns/[id]/reject` | `rewards:write` |
+| POST | `/api/control/rewards/campaigns/[id]/pause` | `rewards:write` |
+| GET/POST | `/api/control/rewards/investigations` | `rewards:read/write` |
+| POST | `/api/control/rewards/adjustments` | `rewards:write` |
+| GET | `/api/control/rewards/reconciliation` | `rewards:read` |
+| GET | `/api/control/rewards/cashback` | `rewards:read` |
+| GET | `/api/control/rewards/risk-events` | `rewards:read` |
+| POST | `/api/control/rewards/run` | `rewards:write` |
+
+Details: `docs/rewards-architecture.md`, `docs/points-ledger.md`,
+`docs/cashback-processing.md`, `docs/campaign-guide.md`.

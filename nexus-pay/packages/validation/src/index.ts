@@ -21,6 +21,9 @@ import {
   MIN_FUNDING_MINOR,
   MIN_PAYMENT_MINOR,
   PAYMENT_REQUEST_STATUSES,
+  REWARD_ACTIVITY_TYPES,
+  REWARD_CAMPAIGN_STATUSES,
+  REWARD_CAMPAIGN_TYPES,
   RULE_CONDITION_TYPES,
   SAVINGS_GOAL_STATUSES,
   SCHEDULE_FREQUENCIES,
@@ -770,3 +773,97 @@ export type SubscriptionCheckoutConfirmInput = z.infer<typeof subscriptionChecko
 export type SubscriptionCancelInput = z.infer<typeof subscriptionCancelSchema>;
 export type SubscriptionPlanChangeInput = z.infer<typeof subscriptionPlanChangeSchema>;
 export type SubscriptionRangeInput = z.infer<typeof subscriptionRangeSchema>;
+
+// ---------------------------------------------------------------------------
+// Release 8 — Rewards, cashback, loyalty and offers
+// ---------------------------------------------------------------------------
+
+export const rewardListQuerySchema = z.object({
+  page: z.coerce.number().int().min(1).max(10_000).default(1),
+  pageSize: z.coerce.number().int().min(1).max(50).default(20),
+  type: z.string().max(60).optional(),
+  status: z.string().max(60).optional(),
+  merchantId: z.string().max(64).optional(),
+  from: isoDate.optional(),
+  to: isoDate.optional(),
+});
+
+const rewardMinor = z
+  .number({ required_error: "Enter an amount" })
+  .int("Amounts must be whole paise")
+  .min(0)
+  .max(10_000_000);
+
+const rewardPoints = z.number().int().min(0).max(10_000_000);
+
+const rewardCampaignBase = z.object({
+  name: z.string().trim().min(2).max(160),
+  description: z.string().trim().min(2).max(1000),
+  type: z.enum(REWARD_CAMPAIGN_TYPES),
+  startAt: z.string().datetime(),
+  endAt: z.string().datetime(),
+  minSpendMinor: rewardMinor.default(0),
+  maxRewardMinor: rewardMinor.default(0),
+  pointsPerMinor: rewardPoints.default(0),
+  cashbackBps: z.number().int().min(0).max(10_000).default(0),
+  bonusPoints: rewardPoints.default(0),
+  discountBps: z.number().int().min(0).max(10_000).default(0),
+  discountMinor: rewardMinor.default(0),
+  budgetMinor: rewardMinor.default(0),
+  pointsBudget: rewardPoints.default(0),
+  perUserLimit: z.number().int().min(1).max(1000).default(1),
+  globalRedemptionLimit: z.number().int().min(1).max(1_000_000).optional(),
+  eligibleCategories: z.array(z.string().max(40)).max(30).default([]),
+  customerSegments: z.array(z.string().max(40)).max(30).default([]),
+  promoCode: z.string().trim().min(4).max(60).regex(/^[A-Za-z0-9_-]+$/).optional(),
+  terms: z.string().trim().max(2000).optional(),
+});
+
+export const rewardCampaignCreateSchema = rewardCampaignBase.refine((value) => new Date(value.endAt) > new Date(value.startAt), "endAt must be after startAt")
+  .refine(
+    (value) => value.pointsPerMinor > 0 || value.cashbackBps > 0 || value.bonusPoints > 0 || value.discountBps > 0 || value.discountMinor > 0,
+    "Configure at least one reward",
+  );
+
+export const rewardCampaignUpdateSchema = rewardCampaignBase.partial();
+
+export const rewardCampaignStatusSchema = z.object({
+  status: z.enum(REWARD_CAMPAIGN_STATUSES),
+  reason: z.string().trim().max(500).optional(),
+});
+
+export const rewardRedeemSchema = z.object({
+  catalogueItemId: z.string().trim().min(1).max(64),
+  idempotencyKey: z.string().trim().min(8).max(120),
+});
+
+export const rewardPromoValidateSchema = z.object({
+  code: z.string().trim().min(3).max(60),
+  amountMinor: rewardMinor.refine((value) => value > 0, "Amount must be positive"),
+  orderId: z.string().trim().min(3).max(64),
+  merchantId: z.string().trim().max(64).optional(),
+});
+
+export const rewardAdjustmentSchema = z.object({
+  userId: z.string().trim().min(1).max(64),
+  points: z.number().int().refine((value) => value !== 0, "Points must not be zero"),
+  reason: z.string().trim().min(5).max(500),
+  idempotencyKey: z.string().trim().min(8).max(120),
+});
+
+export const rewardInvestigationCreateSchema = z.object({
+  type: z.string().trim().min(2).max(60),
+  subjectId: z.string().trim().min(1).max(120),
+  riskEventId: z.string().trim().max(64).optional(),
+  notes: z.string().trim().max(2000).optional(),
+});
+
+export type RewardListQuery = z.infer<typeof rewardListQuerySchema>;
+export type RewardCampaignCreateInput = z.infer<typeof rewardCampaignCreateSchema>;
+export type RewardCampaignUpdateInput = z.infer<typeof rewardCampaignUpdateSchema>;
+export type RewardCampaignStatusInput = z.infer<typeof rewardCampaignStatusSchema>;
+export type RewardRedeemInput = z.infer<typeof rewardRedeemSchema>;
+export type RewardPromoValidateInput = z.infer<typeof rewardPromoValidateSchema>;
+export type RewardAdjustmentInput = z.infer<typeof rewardAdjustmentSchema>;
+export type RewardInvestigationCreateInput = z.infer<typeof rewardInvestigationCreateSchema>;
+

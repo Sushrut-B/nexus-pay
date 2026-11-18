@@ -141,3 +141,4 @@ export * from "./finance";
 export * from "./control";
 export * from "./merchant";
 export * from "./subscription";
+export * from "./rewards";

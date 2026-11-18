@@ -3,8 +3,10 @@ export async function register() {
     const { startScheduler } = await import("@/lib/finance/schedule-worker");
     const { startWebhookWorker } = await import("@/lib/merchant/webhook-worker");
     const { startBillingWorker } = await import("@/lib/subscription/billing-worker");
+    const { startRewardsWorker } = await import("@/lib/rewards/rewards-worker-bootstrap");
     startScheduler();
     startWebhookWorker();
     startBillingWorker();
+    startRewardsWorker();
   }
 }

@@ -119,6 +119,7 @@ model User {
   merchantPayments    MerchantPayment[]   @relation("MerchantCustomer")
   subscriptions       Subscription[]      @relation("SubscriptionCustomer")
   invoices            Invoice[]           @relation("InvoiceCustomer")
+  rewardAccount       RewardAccount?
 
   @@index([accountStatus])
   @@index([createdAt])
@@ -415,6 +416,20 @@ enum NotificationType {
   SUBSCRIPTION_CANCELLED
   SUBSCRIPTION_PLAN_CHANGED
   SUBSCRIPTION_INVOICE_AVAILABLE
+  REWARD_POINTS_EARNED
+  REWARD_POINTS_REDEEMED
+  REWARD_POINTS_EXPIRING
+  REWARD_CASHBACK_PENDING
+  REWARD_CASHBACK_CREDITED
+  REWARD_CASHBACK_FAILED
+  REWARD_CAMPAIGN_ACTIVATED
+  REWARD_OFFER_AVAILABLE
+  REWARD_TIER_UPGRADED
+  REWARD_TIER_DOWNGRADED
+  REWARD_REFERRAL_QUALIFIED
+  REWARD_REFERRAL_ISSUED
+  REWARD_PROMO_APPLIED
+  REWARD_REDEMPTION_CONFIRMED
 }
 
 enum GroupActivityEventType {
@@ -1842,6 +1857,562 @@ model PlanChange {
 
   @@index([subscriptionId, createdAt])
   @@map("plan_changes")
+}
+
+// ---------------------------------------------------------------------------
+// Release 8 — Rewards, cashback, loyalty and offers.
+// Reward points are non-cash loyalty units in a separate append-only ledger.
+// Raftline remains authoritative for all wallet money movement.
+// ---------------------------------------------------------------------------
+
+enum RewardEntryType {
+  EARN
+  REDEEM
+  EXPIRE
+  REVERSE
+  ADJUST
+  BONUS
+}
+
+enum RewardActivityType {
+  POINTS_EARNED
+  POINTS_REDEEMED
+  POINTS_EXPIRED
+  POINTS_REVERSED
+  CASHBACK_PENDING
+  CASHBACK_CREDITED
+  CASHBACK_FAILED
+  PROMO_DISCOUNT
+  REFERRAL_REWARD
+  CAMPAIGN_BONUS
+  MANUAL_ADJUSTMENT
+}
+
+enum RewardCampaignType {
+  POINTS_MULTIPLIER
+  CASHBACK
+  FIXED_DISCOUNT
+  PERCENTAGE_DISCOUNT
+  BONUS_POINTS
+  REFERRAL_BONUS
+  FIRST_TRANSACTION
+  MERCHANT_SPECIFIC
+  LIMITED_TIME_OFFER
+}
+
+enum RewardCampaignStatus {
+  DRAFT
+  PENDING_APPROVAL
+  APPROVED
+  SCHEDULED
+  ACTIVE
+  PAUSED
+  EXHAUSTED
+  EXPIRED
+  REJECTED
+  CANCELLED
+}
+
+enum CashbackStatus {
+  ELIGIBILITY_PENDING
+  ELIGIBLE
+  PENDING_CREDIT
+  PROCESSING
+  CREDITED
+  FAILED
+  REQUIRES_RECONCILIATION
+  REVERSED
+  CANCELLED
+}
+
+enum RewardRedemptionStatus {
+  PENDING
+  COMPLETED
+  EXPIRED
+  CANCELLED
+}
+
+enum VoucherStatus {
+  ACTIVE
+  REDEEMED
+  EXPIRED
+  VOID
+}
+
+enum PromoCodeStatus {
+  DRAFT
+  ACTIVE
+  PAUSED
+  EXHAUSTED
+  EXPIRED
+  CANCELLED
+}
+
+enum ReservationStatus {
+  HELD
+  COMMITTED
+  RELEASED
+  EXPIRED
+}
+
+enum RiskSeverity {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum RewardInvestigationStatus {
+  OPEN
+  UNDER_REVIEW
+  ACTION_REQUIRED
+  RESOLVED
+  DISMISSED
+}
+
+enum ReferralRewardStatus {
+  PENDING
+  QUALIFIED
+  ISSUED
+  REJECTED
+  CANCELLED
+}
+
+model RewardAccount {
+  id                    String   @id @default(cuid())
+  userId                String   @unique
+  availablePoints       Int      @default(0)
+  lifetimeEarnedPoints  Int      @default(0)
+  lifetimeRedeemedPoints Int     @default(0)
+  pendingPoints         Int      @default(0)
+  tierId                String?
+  qualifyingSpendMinor  Int      @default(0)
+  qualifyingTxCount     Int      @default(0)
+  periodStart           DateTime @default(now())
+  reviewAt              DateTime?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([tierId])
+  @@map("reward_accounts")
+}
+
+model RewardLedgerEntry {
+  id             String          @id @default(cuid())
+  userId         String
+  accountId      String
+  type           RewardEntryType
+  points         Int
+  balanceAfter   Int
+  referenceType  String          @db.VarChar(40)
+  referenceId    String          @db.VarChar(120)
+  description    String          @db.VarChar(300)
+  idempotencyKey String          @unique @db.VarChar(160)
+  merchantId     String?
+  campaignId     String?
+  transactionRef String?         @db.VarChar(80)
+  expiresAt      DateTime?
+  reversedById   String?
+  createdAt      DateTime        @default(now())
+
+  @@unique([referenceType, referenceId, type])
+  @@index([userId, createdAt])
+  @@index([expiresAt])
+  @@map("reward_ledger_entries")
+}
+
+model RewardActivity {
+  id            String            @id @default(cuid())
+  userId        String
+  type          RewardActivityType
+  description   String            @db.VarChar(300)
+  points        Int?
+  amountMinor   Int?
+  currency      String?           @db.VarChar(3)
+  merchantId    String?
+  merchantName  String?           @db.VarChar(120)
+  campaignId    String?
+  transactionRef String?          @db.VarChar(80)
+  referenceId   String            @db.VarChar(120)
+  status        String            @db.VarChar(40)
+  expiresAt     DateTime?
+  createdAt     DateTime          @default(now())
+
+  @@unique([type, referenceId])
+  @@index([userId, createdAt])
+  @@map("reward_activities")
+}
+
+model RewardExpiryPolicy {
+  id             String   @id @default(cuid())
+  name           String   @db.VarChar(120)
+  kind           String   @db.VarChar(20)
+  fixedDate      DateTime?
+  relativeDays   Int      @default(0)
+  campaignId     String?
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([campaignId, isActive])
+  @@map("reward_expiry_policies")
+}
+
+model RewardCatalogueItem {
+  id               String   @id @default(cuid())
+  merchantId       String?
+  name             String   @db.VarChar(160)
+  description      String   @db.VarChar(1000)
+  type             String   @db.VarChar(40)
+  pointsCost       Int
+  discountMinor    Int?
+  discountBps      Int?
+  quantityTotal    Int?
+  quantityRedeemed Int      @default(0)
+  expiresAt        DateTime?
+  terms            String?  @db.VarChar(1000)
+  imageUrl         String?  @db.VarChar(2048)
+  isActive         Boolean  @default(true)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@index([isActive, expiresAt])
+  @@map("reward_catalogue_items")
+}
+
+model RewardRedemption {
+  id             String                @id @default(cuid())
+  userId         String
+  catalogueItemId String
+  pointsCost     Int
+  reference      String                @unique @db.VarChar(80)
+  status         RewardRedemptionStatus @default(PENDING)
+  expiresAt      DateTime?
+  redeemedAt     DateTime?
+  createdAt      DateTime              @default(now())
+
+  voucher RewardVoucher?
+
+  @@index([userId, createdAt])
+  @@map("reward_redemptions")
+}
+
+model RewardVoucher {
+  id          String        @id @default(cuid())
+  redemptionId String       @unique
+  tokenHash   String        @unique @db.VarChar(64)
+  codeHint    String        @db.VarChar(24)
+  status      VoucherStatus @default(ACTIVE)
+  expiresAt   DateTime
+  redeemedAt  DateTime?
+  createdAt   DateTime      @default(now())
+
+  redemption RewardRedemption @relation(fields: [redemptionId], references: [id], onDelete: Cascade)
+
+  @@map("reward_vouchers")
+}
+
+model RewardCampaign {
+  id                    String                @id @default(cuid())
+  merchantId            String?
+  ownerType             String                @db.VarChar(20)
+  name                  String                @db.VarChar(160)
+  description           String                @db.VarChar(1000)
+  type                  RewardCampaignType
+  status                RewardCampaignStatus  @default(DRAFT)
+  startAt               DateTime
+  endAt                 DateTime
+  minSpendMinor         Int                   @default(0)
+  maxRewardMinor        Int                   @default(0)
+  pointsPerMinor        Int                   @default(0)
+  cashbackBps           Int                   @default(0)
+  bonusPoints           Int                   @default(0)
+  discountBps           Int                   @default(0)
+  discountMinor         Int                   @default(0)
+  budgetMinor           Int                   @default(0)
+  reservedMinor         Int                   @default(0)
+  consumedMinor         Int                   @default(0)
+  pointsBudget          Int                   @default(0)
+  perUserLimit          Int                   @default(1)
+  globalRedemptionLimit Int?
+  eligibleCategories    String[]
+  customerSegments      String[]
+  promoCode             String?               @unique @db.VarChar(60)
+  eligibilityRules      Json?
+  terms                 String?               @db.VarChar(2000)
+  createdBy             String
+  approvedBy            String?
+  approvedAt            DateTime?
+  rejectionReason       String?               @db.VarChar(500)
+  createdAt             DateTime              @default(now())
+  updatedAt             DateTime              @updatedAt
+
+  budget                CampaignBudget?
+
+  @@index([merchantId, status])
+  @@index([status, startAt, endAt])
+  @@map("reward_campaigns")
+}
+
+model CampaignEligibilityRule {
+  id         String   @id @default(cuid())
+  campaignId String
+  kind       String   @db.VarChar(40)
+  value      Json
+  isActive   Boolean  @default(true)
+  createdAt  DateTime @default(now())
+
+  @@index([campaignId, isActive])
+  @@map("campaign_eligibility_rules")
+}
+
+model CampaignMerchant {
+  id         String   @id @default(cuid())
+  campaignId String
+  merchantId String
+
+  @@unique([campaignId, merchantId])
+  @@map("campaign_merchants")
+}
+
+model CampaignBudget {
+  id             String   @id @default(cuid())
+  campaignId     String   @unique
+  allocatedMinor Int      @default(0)
+  reservedMinor  Int      @default(0)
+  consumedMinor  Int      @default(0)
+  pointsAllocated Int     @default(0)
+  pointsReserved Int      @default(0)
+  pointsConsumed Int      @default(0)
+  updatedAt      DateTime @updatedAt
+
+  campaign RewardCampaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+
+  @@map("campaign_budgets")
+}
+
+model CampaignBudgetReservation {
+  id            String            @id @default(cuid())
+  campaignId    String
+  userId        String
+  referenceType String            @db.VarChar(40)
+  referenceId   String            @db.VarChar(120)
+  amountMinor   Int               @default(0)
+  points        Int               @default(0)
+  status        ReservationStatus @default(HELD)
+  expiresAt     DateTime
+  createdAt     DateTime          @default(now())
+
+  @@unique([campaignId, referenceType, referenceId])
+  @@index([status, expiresAt])
+  @@map("campaign_budget_reservations")
+}
+
+model CashbackEntitlement {
+  id                   String         @id @default(cuid())
+  userId               String
+  campaignId           String
+  transactionRef       String         @db.VarChar(80)
+  merchantId           String?
+  amountMinor          Int
+  currency             String         @db.VarChar(3)
+  status               CashbackStatus @default(ELIGIBILITY_PENDING)
+  idempotencyKey       String         @unique @db.VarChar(160)
+  fundingOperationId   String?
+  paymentRef           String?        @db.VarChar(80)
+  attemptCount         Int            @default(0)
+  lastErrorCode        String?        @db.VarChar(80)
+  failureCategory      String?        @db.VarChar(60)
+  nextAttemptAt        DateTime?
+  leaseUntil           DateTime?
+  createdAt            DateTime       @default(now())
+  resolvedAt           DateTime?
+
+  @@unique([userId, campaignId, transactionRef])
+  @@index([status, nextAttemptAt])
+  @@map("cashback_entitlements")
+}
+
+model CashbackProcessingAttempt {
+  id            String   @id @default(cuid())
+  entitlementId String
+  attempt       Int
+  status        String   @db.VarChar(40)
+  error         String?  @db.VarChar(500)
+  paymentRef    String?  @db.VarChar(80)
+  createdAt     DateTime @default(now())
+
+  @@index([entitlementId, attempt])
+  @@map("cashback_processing_attempts")
+}
+
+model PromoCodeRedemption {
+  id           String   @id @default(cuid())
+  promoCodeId  String
+  userId       String
+  paymentRef   String?  @db.VarChar(80)
+  discountMinor Int
+  createdAt    DateTime @default(now())
+
+  @@unique([promoCodeId, paymentRef])
+  @@index([userId, createdAt])
+  @@map("promo_code_redemptions")
+}
+
+model LoyaltyTier {
+  id                String   @id @default(cuid())
+  name              String   @unique @db.VarChar(40)
+  rank              Int      @unique
+  minSpendMinor     Int      @default(0)
+  minTransactions   Int      @default(0)
+  minLifetimePoints Int      @default(0)
+  pointsMultiplierBps Int     @default(10000)
+  benefits          Json?
+  isActive          Boolean  @default(true)
+  createdAt         DateTime @default(now())
+
+  tierHistory LoyaltyTierHistory[] @relation("TierHistoryTo")
+
+  @@map("loyalty_tiers")
+}
+
+model UserLoyaltyStatus {
+  id                   String   @id @default(cuid())
+  userId               String   @unique
+  tierId               String
+  qualifyingSpendMinor Int      @default(0)
+  qualifyingTxCount    Int      @default(0)
+  periodStart          DateTime @default(now())
+  periodEnd            DateTime?
+  reviewAt             DateTime?
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  @@map("user_loyalty_statuses")
+}
+
+model LoyaltyTierHistory {
+  id                String   @id @default(cuid())
+  userId            String
+  fromTierId        String?
+  toTierId          String
+  direction         String   @db.VarChar(20)
+  reason            String   @db.VarChar(300)
+  qualificationData Json
+  actor             String   @db.VarChar(80)
+  createdAt         DateTime @default(now())
+
+  toTier LoyaltyTier @relation("TierHistoryTo", fields: [toTierId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@map("loyalty_tier_history")
+}
+
+model ReferralCode {
+  id        String   @id @default(cuid())
+  userId    String   @unique
+  code      String   @unique @db.VarChar(40)
+  createdAt DateTime @default(now())
+  revokedAt DateTime?
+
+  attributions ReferralAttribution[]
+
+  @@map("referral_codes")
+}
+
+model ReferralAttribution {
+  id            String   @id @default(cuid())
+  codeId        String
+  referredUserId String  @unique
+  referredAt    DateTime @default(now())
+  status        String   @db.VarChar(40)
+
+  code           ReferralCode            @relation(fields: [codeId], references: [id], onDelete: Cascade)
+  qualifications ReferralQualification[]
+
+  @@index([codeId])
+  @@map("referral_attributions")
+}
+
+model ReferralQualification {
+  id              String    @id @default(cuid())
+  attributionId   String
+  qualificationType String  @db.VarChar(40)
+  transactionRef  String?   @db.VarChar(80)
+  qualifiedAt     DateTime?
+  status          String    @db.VarChar(40)
+  createdAt       DateTime  @default(now())
+
+  attribution ReferralAttribution @relation(fields: [attributionId], references: [id], onDelete: Cascade)
+
+  @@unique([attributionId, qualificationType])
+  @@map("referral_qualifications")
+}
+
+model ReferralReward {
+  id            String              @id @default(cuid())
+  attributionId String
+  userId        String
+  type          String              @db.VarChar(20)
+  points        Int                 @default(0)
+  cashbackMinor Int                 @default(0)
+  status        ReferralRewardStatus @default(PENDING)
+  idempotencyKey String             @unique @db.VarChar(160)
+  createdAt     DateTime            @default(now())
+
+  @@unique([attributionId, userId, type])
+  @@map("referral_rewards")
+}
+
+model RewardRiskEvent {
+  id             String              @id @default(cuid())
+  userId         String?
+  relatedUserId  String?
+  campaignId     String?
+  transactionRef String?             @db.VarChar(80)
+  redemptionId   String?
+  severity       RiskSeverity
+  reasonCode     String              @db.VarChar(60)
+  description    String              @db.VarChar(500)
+  status         RewardInvestigationStatus @default(OPEN)
+  notes          String?             @db.VarChar(1000)
+  resolvedBy     String?
+  resolvedAt     DateTime?
+  createdAt      DateTime            @default(now())
+
+  @@index([status, createdAt])
+  @@map("reward_risk_events")
+}
+
+model RewardInvestigation {
+  id          String                   @id @default(cuid())
+  type        String                   @db.VarChar(60)
+  subjectId   String                   @db.VarChar(120)
+  riskEventId String?
+  status      RewardInvestigationStatus @default(OPEN)
+  notes       String?                  @db.VarChar(2000)
+  assignedTo  String?
+  createdBy   String
+  createdAt   DateTime                 @default(now())
+  resolvedAt  DateTime?
+
+  @@index([status, createdAt])
+  @@map("reward_investigations")
+}
+
+model RewardNotificationEvent {
+  id        String   @id @default(cuid())
+  userId    String
+  eventType String   @db.VarChar(60)
+  eventKey  String   @unique @db.VarChar(180)
+  payload   Json
+  status    String   @db.VarChar(30) @default("PENDING")
+  createdAt DateTime @default(now())
+
+  @@index([userId, createdAt])
+  @@map("reward_notification_events")
 }
 
 model Statement {

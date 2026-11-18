@@ -29,6 +29,7 @@ const NAV = [
   { href: "/control/merchant-refunds", label: "Merchant Refunds", icon: Shield },
   { href: "/control/subscriptions", label: "Subscriptions", icon: Repeat },
   { href: "/control/billing", label: "Billing Operations", icon: CreditCard },
+  { href: "/control/rewards", label: "Rewards", icon: Repeat },
   { href: "/control/admin", label: "Administration", icon: Users, adminOnly: true },
 ];
 

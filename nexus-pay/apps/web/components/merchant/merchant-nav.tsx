@@ -13,6 +13,7 @@ const LINKS = [
   { href: "/merchant/subscriptions", label: "Subscriptions" },
   { href: "/merchant/invoices", label: "Invoices" },
   { href: "/merchant/billing", label: "Billing" },
+  { href: "/merchant/rewards", label: "Offers & Loyalty" },
   { href: "/merchant/customers", label: "Customers" },
   { href: "/merchant/refunds", label: "Refunds" },
   { href: "/merchant/analytics", label: "Analytics" },
