@@ -12,8 +12,10 @@ authorization, subscription lifecycle state machine with append-only event histo
 durable PostgreSQL-backed recurring billing engine with atomic claims and per-period
 idempotency, invoices with atomic merchant-scoped numbering and PDF documents,
 dunning/failure classification with configured retry windows, customer self-service
-portal with cancellation, plan changes effective at the next period, revenue recovery
-dashboard, and recurring revenue analytics with documented metric definitions.
+portal with cancellation, plan upgrades/downgrades effective at the next period with
+recorded direction, revenue recovery dashboard, recurring revenue analytics with
+documented metric definitions, subscription lifecycle webhook events, and Nexus
+Control subscription/billing monitoring.
 
 ## Architecture changes
 
@@ -31,6 +33,8 @@ dashboard, and recurring revenue analytics with documented metric definitions.
 - `20261118044405_release7_subscriptions` (plans, subscriptions, events, billing
   occurrences, invoices, line items, invoice-number sequences, plan changes,
   notification types).
+- `20261118055606_release7_plan_change_direction` (explicit UPGRADE/DOWNGRADE/
+  SIDEWAYS direction on plan-change history).
 
 ## New API endpoints
 
@@ -43,6 +47,9 @@ resume, cancel, plan-change, events, occurrences), `/api/merchant/invoices`
 Public/customer: `/api/subscribe/[token]` (+ `/confirm`), `/api/subscriptions`
 (+ `[id]`, events, occurrences, cancel, invoices), `/api/invoices`,
 `/api/invoices/[id]/pdf`.
+
+Nexus Control: `/api/control/subscriptions`, `/api/control/billing-metrics`,
+`/api/control/subscription-invoices` (read-only, `payments:read` RBAC).
 
 ## Raftline capabilities integrated
 
@@ -61,7 +68,8 @@ transaction lookup using the original payment intent before any further attempt.
 ## Financial integrity
 
 - One `BillingOccurrence` per subscription period enforced by a unique constraint on
-  `(subscriptionId, occurrenceNumber)` and a unique idempotency key.
+  `(subscriptionId, occurrenceNumber)` and a unique idempotency key. Concurrency is
+  tested by processing one occurrence from two parallel workers: exactly one settles.
 - The occurrence idempotency key is stable and never regenerated. A confirmed
   rejection gets a deterministic per-attempt request id on a later dunning retry;
   an uncertain outcome always reuses the exact original request id.
@@ -76,8 +84,8 @@ transaction lookup using the original payment intent before any further attempt.
 - No proration: plan changes take effect at the next billing period.
 - Dunning delays are fixed default windows (1/3/5 days), not per-merchant configurable.
 - Invoice PDFs are sandbox documents with no tax-registration claims.
-- Developer API for subscriptions and Nexus Control subscription screens were not
-  part of the received (truncated) specification.
+- Developer API key scopes for subscriptions were not part of the received
+  (truncated) specification; merchant dashboard APIs are session-authenticated.
 
 ## Verification
 
@@ -85,8 +93,8 @@ transaction lookup using the original payment intent before any further attempt.
 | --- | --- |
 | typecheck / lint / build | Passed |
 | unit | 61 passed (8 new calendar tests) |
-| integration | 64 passed (8 new live billing tests) |
-| E2E | 9 passed (1 new subscription smoke) |
+| integration | 68 passed (12 new live billing tests) |
+| E2E | 10 passed (2 new subscription/Control smokes) |
 
 ## Commands
 
@@ -97,3 +105,4 @@ pnpm test:unit
 pnpm test:integration
 pnpm exec playwright test --config playwright.prod.config.ts
 ```
+

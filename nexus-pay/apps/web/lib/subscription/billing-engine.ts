@@ -287,6 +287,22 @@ async function finalizeSettlement(occurrenceId: string, paymentRef: string): Pro
     subscriptionId: subscription.id,
     occurrenceId,
   });
+  const paidInvoice = await prisma.invoice.findFirst({ where: { occurrenceId } });
+  if (paidInvoice) {
+    await createWebhookEvent(subscription.merchantId, "invoice.paid", {
+      invoiceId: paidInvoice.id,
+      invoiceNumber: paidInvoice.invoiceNumber,
+      totalMinor: paidInvoice.totalMinor,
+      subscriptionId: subscription.id,
+      paymentRef,
+    });
+  }
+  if (occurrence.occurrenceNumber === 1) {
+    await createWebhookEvent(subscription.merchantId, "subscription.activated", {
+      subscriptionId: subscription.id,
+      paymentRef,
+    });
+  }
   return { occurrenceId, outcome: "settled", detail: paymentRef };
 }
 
@@ -341,6 +357,19 @@ async function handleFailure(
     category,
     executed: false,
   });
+  await createWebhookEvent(subscription.merchantId, "subscription.past_due", {
+    subscriptionId: subscription.id,
+    occurrenceId,
+    failureCategory: category,
+  });
+  const failedInvoice = await prisma.invoice.findFirst({ where: { occurrenceId } });
+  if (failedInvoice) {
+    await createWebhookEvent(subscription.merchantId, "invoice.past_due", {
+      invoiceId: failedInvoice.id,
+      invoiceNumber: failedInvoice.invoiceNumber,
+      subscriptionId: subscription.id,
+    });
+  }
   return { occurrenceId, outcome: "failed", detail: code };
 }
 
@@ -371,6 +400,8 @@ export async function runBillingWorker(limit = 25): Promise<{ processed: number;
       body: "Your subscription is moving to its first paid billing period.",
       data: { subscriptionId: subscription.id },
     });
+    await createWebhookEvent(subscription.merchantId, "subscription.trial_ended", { subscriptionId: subscription.id });
+    await createWebhookEvent(subscription.merchantId, "subscription.activated", { subscriptionId: subscription.id });
   }
 
   // End-of-period cancellations become final without charging again.
@@ -392,6 +423,10 @@ export async function runBillingWorker(limit = 25): Promise<{ processed: number;
       title: "Subscription cancelled",
       body: "Your subscription has ended. No further payments will be collected.",
       data: { subscriptionId: subscription.id },
+    });
+    await createWebhookEvent(subscription.merchantId, "subscription.cancelled", {
+      subscriptionId: subscription.id,
+      reason: "end_of_period",
     });
   }
 

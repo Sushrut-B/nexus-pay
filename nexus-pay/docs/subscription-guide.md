@@ -13,8 +13,9 @@ new subscriptions but does not affect existing subscribers.
 
 **Pricing snapshots.** When a customer subscribes, the plan's exact price is copied
 into the subscription as an immutable snapshot. Editing or archiving a plan never
-changes what an existing subscriber pays. A plan change is recorded and takes effect
-at the next billing period.
+changes what an existing subscriber pays. A plan change is recorded with an explicit
+`UPGRADE`, `DOWNGRADE` or `SIDEWAYS` direction (based on normalized monthly value) and
+takes effect at the next billing period. No proration is attempted.
 
 ## Checkout
 
@@ -57,3 +58,16 @@ wallet unavailable, customer action required, temporary infrastructure failure,
 unknown outcome, or permanent rejection. Retry windows default to 1, 3 and 5 days;
 uncertain outcomes are never retried until reconciled. Retried attempts are never
 reported as successful payments.
+
+## Webhooks & Nexus Control
+
+Subscribers can subscribe endpoints to `subscription.created`, `subscription.trial_started`,
+`subscription.activated`, `subscription.trial_ended`, `subscription.past_due`,
+`subscription.paused`, `subscription.resumed`, `subscription.plan_changed`,
+`subscription.cancellation_scheduled`, `subscription.cancelled`, `invoice.created`,
+`invoice.paid` and `invoice.past_due`, in addition to the existing payment events.
+Events are HMAC-SHA256 signed and delivered by the shared durable outbox worker.
+
+Nexus Control → **Subscriptions** and **Billing Operations** provide read-only,
+RBAC-protected visibility into subscriptions, invoices and unresolved outcomes across
+all merchants. No privileged settlement action is exposed there.

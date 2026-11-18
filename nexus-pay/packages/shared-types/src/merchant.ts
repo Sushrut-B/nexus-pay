@@ -46,6 +46,10 @@ export const WEBHOOK_EVENT_TYPES = [
   "payment.created", "payment.processing", "payment.succeeded", "payment.failed",
   "order.created", "order.paid", "payment_link.created", "payment_link.paid",
   "refund.requested", "refund.succeeded", "refund.failed",
+  "subscription.created", "subscription.trial_started", "subscription.activated",
+  "subscription.past_due", "subscription.paused", "subscription.resumed",
+  "subscription.plan_changed", "subscription.cancellation_scheduled", "subscription.cancelled", "subscription.trial_ended",
+  "invoice.created", "invoice.paid", "invoice.past_due",
 ] as const;
 export type WebhookEventType = (typeof WEBHOOK_EVENT_TYPES)[number];
 

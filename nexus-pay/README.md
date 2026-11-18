@@ -6,7 +6,7 @@
 
 [![Stack](https://img.shields.io/badge/stack-Next.js%2015%20%7C%20React%2019%20%7C%20TypeScript-blue)](https://nextjs.org/)
 [![Ledger](https://img.shields.io/badge/ledger-Raftline%205--node-green)](#architecture)
-[![Tests](https://img.shields.io/badge/tests-61%20unit%20%7C%2064%20integration%20%7C%209%20E2E-brightgreen)](#verification)
+[![Tests](https://img.shields.io/badge/tests-61%20unit%20%7C%2068%20integration%20%7C%2010%20E2E-brightgreen)](#verification)
 [![Mode](https://img.shields.io/badge/mode-SIMULATED%20SANDBOX-orange)](#sandbox-notice)
 
 [Overview](#overview) · [Quick start](#quick-start) · [Features](#features) · [Architecture](#architecture) · [Verification](#verification) · [Docs](#documentation)
@@ -151,8 +151,8 @@ flowchart LR
 | --- | --- |
 | `pnpm typecheck` / `pnpm lint` / `pnpm build` | Passed |
 | `pnpm test:unit` | **61 passed** |
-| `pnpm test:integration` | **64 passed** (live Raftline + PostgreSQL) |
-| Playwright E2E | **9 passed** (production mode) |
+| `pnpm test:integration` | **68 passed** (live Raftline + PostgreSQL) |
+| Playwright E2E | **10 passed** (production mode) |
 | Live failover drill | Leader failure → new term → heal → payment settled → reconciled → audited |
 
 ```powershell
@@ -170,4 +170,6 @@ pnpm exec playwright test --config playwright.prod.config.ts
 - Merchant: [Guide](docs/merchant-guide.md) · [Refunds](docs/merchant-refunds.md) · [Webhooks](docs/merchant-webhooks.md) · [Developer API](docs/merchant-developer-api.md) · [Assessment](docs/release-6-assessment.md)
 - Subscriptions: [Guide](docs/subscription-guide.md) · [Billing engine](docs/subscription-billing.md) · [Assessment](docs/release-7-assessment.md)
 - Reports: [R2](docs/release-2-report.md) · [R3](docs/release-3-report.md) · [R4](docs/release-4-report.md) · [R5](docs/release-5-report.md) · [R6](docs/release-6-report.md) · [R7](docs/release-7-report.md)
+
+
 

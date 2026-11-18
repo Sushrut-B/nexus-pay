@@ -446,4 +446,19 @@ renewal is a separate, explicitly authorised sandbox wallet settlement.
 | POST | `/api/subscriptions/[id]/cancel` | End-of-period cancellation. |
 | GET | `/api/invoices` / `/api/invoices/[id]/pdf` | Customer's own invoices. |
 
+### Subscription webhooks & Nexus Control
+
+Webhook event types additionally include `subscription.created`,
+`subscription.trial_started`, `subscription.activated`, `subscription.trial_ended`,
+`subscription.past_due`, `subscription.paused`, `subscription.resumed`,
+`subscription.plan_changed`, `subscription.cancellation_scheduled`,
+`subscription.cancelled`, `invoice.created`, `invoice.paid`, `invoice.past_due`.
+Signing and delivery follow `docs/merchant-webhooks.md`.
+
+| Method | Route | Permission |
+| --- | --- | --- |
+| GET | `/api/control/subscriptions?q=&status=` | `payments:read` |
+| GET | `/api/control/billing-metrics` | `payments:read` |
+| GET | `/api/control/subscription-invoices?status=` | `payments:read` |
+
 Details: `docs/subscription-guide.md`, `docs/subscription-billing.md`.

@@ -29,3 +29,18 @@ test("subscription management and customer portal pages render", async ({ page }
   await page.goto("/merchant/plans");
   await expect(page.getByRole("button", { name: "New plan" })).toBeVisible();
 });
+
+test("Nexus Control billing operations render", async ({ page }) => {
+  await page.goto("/control/login");
+  const adminEmail = process.env.ADMIN_BOOTSTRAP_EMAIL ?? "admin@nexuspay.local";
+  const adminPassword = process.env.ADMIN_BOOTSTRAP_PASSWORD ?? "Control!2026Admin";
+  await page.getByLabel("Email or username").fill(adminEmail);
+  await page.getByLabel("Password", { exact: true }).fill(adminPassword);
+  await page.getByRole("button", { name: "Sign in to Nexus Control" }).click();
+  await expect(page).toHaveURL(/\/control$/);
+
+  await page.goto("/control/subscriptions");
+  await expect(page.getByRole("heading", { name: "Subscriptions" })).toBeVisible();
+  await page.goto("/control/billing");
+  await expect(page.getByRole("heading", { name: "Billing operations" })).toBeVisible();
+});

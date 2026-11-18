@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { createServer, type Server } from "node:http";
 import path from "node:path";
 import dotenv from "dotenv";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -205,8 +206,9 @@ describe.skipIf(!enabled)("Release 7 subscription billing verification", () => {
       await svc.subscription.changePlan(ownerId, created.subscription.id, { planId: newPlan.id, reason: "Upgrade" });
       const afterChange = await prisma.subscription.findUniqueOrThrow({ where: { id: created.subscription.id } });
       expect((afterChange.pricingSnapshot as { amountMinor: number }).amountMinor).toBe(70_000);
-      const changes = await prisma.planChange.count({ where: { subscriptionId: created.subscription.id } });
-      expect(changes).toBe(1);
+      const changes = await prisma.planChange.findMany({ where: { subscriptionId: created.subscription.id } });
+      expect(changes).toHaveLength(1);
+      expect(changes[0]!.direction).toBe("UPGRADE");
       const historicalInvoice = await prisma.invoice.findFirstOrThrow({ where: { occurrenceId: created.occurrenceId! } });
       expect(historicalInvoice.totalMinor).toBe(40_000);
     },
@@ -292,6 +294,9 @@ describe.skipIf(!enabled)("Release 7 subscription billing verification", () => {
       expect(analytics.mrrMinor).toBeGreaterThan(0);
       expect(analytics.currency).toBe("INR");
       expect(analytics.definitions.mrrMinor).toMatch(/monthly equivalent/);
+      expect(analytics.arrMinor).toBe(analytics.mrrMinor * 12);
+      expect(analytics.churnRate === null || typeof analytics.churnRate === "number").toBe(true);
+      expect(analytics.definitions.churnRate).toMatch(/cancelledSubscriptions/);
       expect(analytics.activeSubscriptions).toBeGreaterThan(0);
       const recovery = await svc.analytics.getRecoveryDashboard(ownerId);
       expect(typeof recovery.failedRenewalCount).toBe("number");
@@ -303,5 +308,103 @@ describe.skipIf(!enabled)("Release 7 subscription billing verification", () => {
       await expectApiError(svc.subscription.getSubscriptionForCustomer(stranger.id, mine.id), 404);
     },
     60_000,
+  );
+
+  it(
+    "SUB-09: concurrent processing of one occurrence settles exactly once",
+    async () => {
+      const plan = await createPlan({ amountMinor: 15_000, name: "Concurrency plan" });
+      const planRow = await prisma.subscriptionPlan.findUniqueOrThrow({ where: { id: plan.id } });
+      const created = await svc.subscription.createSubscriptionFromCheckout(customerId, planRow, randomUUID());
+      const intentCountBefore = await prisma.paymentIntent.count({ where: { userId: customerId } });
+
+      const results = await Promise.allSettled([
+        svc.billing.processBillingOccurrence(created.occurrenceId!),
+        svc.billing.processBillingOccurrence(created.occurrenceId!),
+      ]);
+      const outcomes = results.map((result) => (result.status === "fulfilled" ? result.value.outcome : "error"));
+      expect(outcomes.filter((outcome) => outcome === "settled")).toHaveLength(1);
+      expect(outcomes).toContain("skipped");
+      expect(await prisma.paymentIntent.count({ where: { userId: customerId } })).toBe(intentCountBefore + 1);
+      expect(await prisma.invoice.count({ where: { occurrenceId: created.occurrenceId! } })).toBe(1);
+      expect(await prisma.merchantPayment.count({ where: { idempotencyKey: `r7sub:${created.subscription.id}:1` } })).toBe(1);
+    },
+    180_000,
+  );
+
+  it(
+    "SUB-10: introductory price applies only to configured periods",
+    async () => {
+      const plan = await createPlan({
+        name: "Intro plan", amountMinor: 50_000, introPriceMinor: 20_000, introPeriods: 1,
+      });
+      const created = await subscribe(plan.id);
+      const first = await prisma.billingOccurrence.findUniqueOrThrow({ where: { id: created.occurrenceId! } });
+      expect(first.amountMinor).toBe(20_000);
+      const firstInvoice = await prisma.invoice.findFirstOrThrow({ where: { occurrenceId: first.id } });
+      expect(firstInvoice.totalMinor).toBe(20_000);
+
+      await svc.billing.runBillingWorker(25);
+      const second = await prisma.billingOccurrence.findFirstOrThrow({
+        where: { subscriptionId: created.subscription.id, occurrenceNumber: 2 },
+      });
+      expect(second.amountMinor).toBe(50_000);
+      expect(second.status).toBe("SETTLED");
+    },
+    180_000,
+  );
+
+  it(
+    "SUB-11: downgrades are recorded with direction and keep historical pricing",
+    async () => {
+      const high = await createPlan({ name: "High tier", amountMinor: 100_000 });
+      const low = await createPlan({ name: "Low tier", amountMinor: 30_000 });
+      const created = await subscribe(high.id);
+      await svc.subscription.changePlan(ownerId, created.subscription.id, { planId: low.id, reason: "Downgrade" });
+      const change = await prisma.planChange.findFirstOrThrow({ where: { subscriptionId: created.subscription.id } });
+      expect(change.direction).toBe("DOWNGRADE");
+      const historical = await prisma.invoice.findFirstOrThrow({ where: { occurrenceId: created.occurrenceId! } });
+      expect(historical.totalMinor).toBe(100_000);
+    },
+    180_000,
+  );
+
+  it(
+    "SUB-12: subscription lifecycle events reach subscribed webhook endpoints",
+    async () => {
+      const webhook = await import("../../apps/web/lib/merchant/webhook-service");
+      let delivered = 0;
+      const server: Server = createServer((request, response) => {
+        request.resume();
+        request.on("end", () => {
+          delivered += 1;
+          response.writeHead(200).end("ok");
+        });
+      });
+      await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+      const address = server.address();
+      const port = typeof address === "object" && address ? address.port : 0;
+      const endpoint = await webhook.createEndpoint(ownerId, {
+        url: `http://127.0.0.1:${port}/hook`,
+        events: ["subscription.created", "subscription.activated", "invoice.paid"],
+      });
+
+      const plan = await createPlan({ name: "Webhook plan", amountMinor: 45_000 });
+      await subscribe(plan.id);
+
+      const events = await prisma.merchantWebhookEvent.findMany({
+        where: { merchantId, eventType: { in: ["subscription.created", "subscription.activated", "invoice.paid"] } },
+      });
+      expect(events.some((event) => event.eventType === "subscription.created")).toBe(true);
+      expect(events.some((event) => event.eventType === "subscription.activated")).toBe(true);
+      expect(events.some((event) => event.eventType === "invoice.paid")).toBe(true);
+
+      await webhook.runWebhookWorker(25);
+      expect(delivered).toBeGreaterThanOrEqual(3);
+      const deliveries = await prisma.merchantWebhookDelivery.findMany({ where: { endpointId: endpoint.id } });
+      expect(deliveries.some((delivery) => delivery.status === "DELIVERED")).toBe(true);
+      server.close();
+    },
+    120_000,
   );
 });

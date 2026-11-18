@@ -6,8 +6,8 @@ import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@nexus/ui";
 import {
-  Activity, AlertTriangle, BellRing, ChevronRight, FileClock, Gauge, GitBranch,
-  LockKeyhole, Search, Shield, SlidersHorizontal, Store, Terminal, Users, Zap,
+  Activity, AlertTriangle, BellRing, ChevronRight, CreditCard, FileClock, Gauge, GitBranch,
+  LockKeyhole, Repeat, Search, Shield, SlidersHorizontal, Store, Terminal, Users, Zap,
 } from "lucide-react";
 import { apiFetch, ApiClientError } from "@/lib/api/client";
 
@@ -27,6 +27,8 @@ const NAV = [
   { href: "/control/diagnostics", label: "Diagnostics", icon: Terminal },
   { href: "/control/merchants", label: "Merchants", icon: Store },
   { href: "/control/merchant-refunds", label: "Merchant Refunds", icon: Shield },
+  { href: "/control/subscriptions", label: "Subscriptions", icon: Repeat },
+  { href: "/control/billing", label: "Billing Operations", icon: CreditCard },
   { href: "/control/admin", label: "Administration", icon: Users, adminOnly: true },
 ];
 

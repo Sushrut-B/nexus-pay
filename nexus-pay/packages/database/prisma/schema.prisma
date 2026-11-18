@@ -1829,6 +1829,7 @@ model PlanChange {
   fromPlanId      String
   toPlanId        String
   reason          String?  @db.VarChar(500)
+  direction       String   @default("SIDEWAYS") @db.VarChar(20)
   effectiveDate   DateTime
   pricingSnapshot Json
   actor           String   @db.VarChar(80)

@@ -3,7 +3,8 @@ import type { BillingOccurrenceView, SubscriptionEventView, SubscriptionView } f
 import type { SubscriptionCancelInput, SubscriptionPlanChangeInput } from "@nexus/validation";
 import { ApiError } from "@/lib/api/response";
 import { requireMerchantForUser } from "@/lib/merchant/merchant-service";
-import { addBillingInterval } from "@/lib/subscription/billing-calendar";
+import { createWebhookEvent } from "@/lib/merchant/webhook-service";
+import { addBillingInterval, normalizeToMonthly } from "@/lib/subscription/billing-calendar";
 import {
   appendEvent,
   buildPricingSnapshot,
@@ -83,6 +84,12 @@ export async function createSubscriptionFromCheckout(
     trialing ? "subscription.trial_started" : "subscription.created",
     customerUserId,
     { clientRequestId, planId: plan.id },
+  );
+
+  await createWebhookEvent(
+    plan.merchantId,
+    trialing ? "subscription.trial_started" : "subscription.created",
+    { subscriptionId: subscription.id, planId: plan.id, customerUserId },
   );
 
   let occurrenceId: string | null = null;
@@ -182,6 +189,7 @@ export async function pauseSubscription(userId: string, subscriptionId: string):
     await transitionStatus(tx, row, "PAUSED", userId);
     await tx.subscription.update({ where: { id: row.id }, data: { nextBillingDate: null } });
   });
+  await createWebhookEvent(row.merchantId, "subscription.paused", { subscriptionId: row.id });
   return getSubscriptionForMerchant(userId, subscriptionId);
 }
 
@@ -196,6 +204,7 @@ export async function resumeSubscription(userId: string, subscriptionId: string)
       data: { nextBillingDate: new Date(), currentPeriodEnd: new Date() },
     });
   });
+  await createWebhookEvent(row.merchantId, "subscription.resumed", { subscriptionId: row.id });
   return getSubscriptionForMerchant(userId, subscriptionId);
 }
 
@@ -251,6 +260,11 @@ export async function cancelSubscription(
       },
     });
   });
+  await createWebhookEvent(
+    row.merchantId,
+    input.timing === "IMMEDIATE" ? "subscription.cancelled" : "subscription.cancellation_scheduled",
+    { subscriptionId: row.id, reason: input.reason ?? null, effective: row.currentPeriodEnd.toISOString() },
+  );
   return prisma.subscription
     .findUniqueOrThrow({ where: { id: row.id }, include: { plan: true } })
     .then(toSubscriptionView);
@@ -277,6 +291,14 @@ export async function changePlan(
   if (newPlan.id === row.planId) throw new ApiError(400, "VALIDATION_ERROR", "Already subscribed to this plan.");
 
   const snapshot = buildPricingSnapshot(newPlan);
+  const previous = row.pricingSnapshot as unknown as {
+    amountMinor: number;
+    frequency: "DAILY" | "WEEKLY" | "MONTHLY" | "QUARTERLY" | "YEARLY" | "CUSTOM";
+    intervalCount: number;
+  };
+  const previousMonthly = normalizeToMonthly(previous.amountMinor, previous.frequency, previous.intervalCount);
+  const nextMonthly = normalizeToMonthly(snapshot.amountMinor, snapshot.frequency, snapshot.intervalCount);
+  const direction = nextMonthly > previousMonthly ? "UPGRADE" : nextMonthly < previousMonthly ? "DOWNGRADE" : "SIDEWAYS";
   await prisma.$transaction(async (tx) => {
     await tx.planChange.create({
       data: {
@@ -285,6 +307,7 @@ export async function changePlan(
         fromPlanId: row.planId,
         toPlanId: newPlan.id,
         reason: input.reason ?? null,
+        direction,
         effectiveDate: row.currentPeriodEnd,
         pricingSnapshot: snapshot as object,
         actor: userId,
@@ -299,6 +322,14 @@ export async function changePlan(
       toPlanId: newPlan.id,
       effective: row.currentPeriodEnd.toISOString(),
     });
+  });
+  await createWebhookEvent(merchant.id, "subscription.plan_changed", {
+    subscriptionId: row.id,
+    fromPlanId: row.planId,
+    toPlanId: newPlan.id,
+    direction,
+    effective: row.currentPeriodEnd.toISOString(),
+    pricingSnapshot: snapshot,
   });
   return getSubscriptionForMerchant(userId, subscriptionId);
 }
