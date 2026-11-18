@@ -3,7 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
-import { Alert, AlertDescription, Button, Card, CardContent, CardDescription, CardHeader, CardTitle } from "@nexus/ui";
+import { Alert, AlertDescription, Button, Card, CardContent, CardDescription, CardHeader, CardTitle, Input } from "@nexus/ui";
 import { formatMoney, initials } from "@/lib/format";
 import { apiFetch, ApiClientError } from "@/lib/api/client";
 
@@ -24,6 +24,7 @@ export function CheckoutView({ token }: { token: string }) {
   const [payment, setPayment] = useState<{ paymentRef: string; amountMinor: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+  const [promoCode, setPromoCode] = useState("");
 
   async function confirm() {
     setPending(true);
@@ -32,7 +33,14 @@ export function CheckoutView({ token }: { token: string }) {
     try {
       const result = await apiFetch<{ payment: { paymentRef: string; amountMinor: number } }>(
         `/api/checkout/${encodeURIComponent(token)}/confirm`,
-        { method: "POST", body: JSON.stringify({ clientRequestId }) },
+        {
+          method: "POST",
+          body: JSON.stringify({
+            clientRequestId,
+            promoCode: promoCode.trim() || undefined,
+            promoOrderId: promoCode.trim() ? clientRequestId : undefined,
+          }),
+        },
       );
       setPayment(result.payment);
     } catch (failure) {
@@ -82,6 +90,7 @@ export function CheckoutView({ token }: { token: string }) {
               </div>
             ) : (
               <>
+                <Input value={promoCode} onChange={(event) => setPromoCode(event.target.value)} placeholder="Promo code (optional)" aria-label="Promo code" />
                 {error ? <Alert variant="destructive"><AlertDescription>{error}</AlertDescription></Alert> : null}
                 {data.signedIn ? (
                   <Button className="w-full" onClick={() => void confirm()} disabled={pending}>

@@ -657,6 +657,8 @@ export const merchantPaymentLinkCreateSchema = z.object({
 
 export const checkoutConfirmSchema = z.object({
   clientRequestId: clientRequestIdSchema,
+  promoCode: z.string().trim().min(3).max(60).optional(),
+  promoOrderId: z.string().trim().min(3).max(64).optional(),
 });
 
 export const refundCreateSchema = z.object({

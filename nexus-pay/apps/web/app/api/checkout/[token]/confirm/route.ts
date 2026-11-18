@@ -8,6 +8,8 @@ import { ApiError, getRequestId, handleRouteError, jsonOk } from "@/lib/api/resp
 import { getAuthenticatedUser } from "@/lib/auth/session";
 import { resolvePublicLink } from "@/lib/merchant/payment-link-service";
 import { processMerchantPayment } from "@/lib/merchant/payment-service";
+import { validatePromoCode, consumePromoCode } from "@/lib/rewards/promo-service";
+import { releaseReservation } from "@/lib/rewards/campaign-service";
 import { checkoutConfirmSchema } from "@nexus/validation";
 
 export const runtime = "nodejs";
@@ -56,12 +58,33 @@ export async function POST(request: NextRequest, context: { params: Promise<{ to
       return jsonOk({ payment: existing, receipt: `/transactions/${encodeURIComponent(existing.paymentRef)}` }, requestId);
     }
 
+    let promo: { campaignId: string; discountMinor: number; reservationId: string } | null = null;
+    if (input.promoCode) {
+      if (!input.promoOrderId) throw new ApiError(400, "VALIDATION_ERROR", "A promo order reference is required.");
+      const validated = await validatePromoCode(auth.user.id, {
+        code: input.promoCode,
+        amountMinor: link.amountMinor,
+        orderId: input.promoOrderId,
+        merchantId: link.merchantId,
+      });
+      if (!validated.valid || !validated.campaignId || !validated.reservationId) {
+        if (validated.reservationId) await releaseReservation(prisma, validated.reservationId);
+        throw new ApiError(400, "VALIDATION_ERROR", validated.reason ?? "This promo code cannot be applied.");
+      }
+      promo = {
+        campaignId: validated.campaignId,
+        discountMinor: validated.discountMinor,
+        reservationId: validated.reservationId,
+      };
+    }
+    const payableMinor = promo ? link.amountMinor - promo.discountMinor : link.amountMinor;
+
     let payment;
     try {
       payment = await processMerchantPayment({
         customerUserId: auth.user.id,
         merchantId: link.merchantId,
-        amountMinor: link.amountMinor,
+        amountMinor: payableMinor,
         clientRequestId: input.clientRequestId,
         description: link.title,
         source: "PAYMENT_LINK",
@@ -69,12 +92,29 @@ export async function POST(request: NextRequest, context: { params: Promise<{ to
         linkId: link.id,
       });
     } catch (error) {
-      if (!(error instanceof ApiError && error.status === 409)) throw error;
+      if (!(error instanceof ApiError && error.status === 409)) {
+        if (promo) await releaseReservation(prisma, promo.reservationId);
+        throw error;
+      }
       const recovered = await prisma.merchantPayment.findFirst({
         where: { merchantId: link.merchantId, paymentIntentId: input.clientRequestId },
       });
-      if (!recovered) throw error;
+      if (!recovered) {
+        if (promo) await releaseReservation(prisma, promo.reservationId);
+        throw error;
+      }
       payment = recovered;
+    }
+
+    if (promo && payment.paymentRef) {
+      await consumePromoCode({
+        campaignId: promo.campaignId,
+        userId: auth.user.id,
+        orderId: input.promoOrderId!,
+        reservationId: promo.reservationId,
+        discountMinor: promo.discountMinor,
+        paymentRef: payment.paymentRef,
+      });
     }
 
     await prisma.merchantCheckoutSession.update({
