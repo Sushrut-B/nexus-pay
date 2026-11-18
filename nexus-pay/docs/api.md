@@ -515,3 +515,48 @@ additionally require merchant ownership, and Control routes use `rewards:read/wr
 
 Details: `docs/rewards-architecture.md`, `docs/points-ledger.md`,
 `docs/cashback-processing.md`, `docs/campaign-guide.md`.
+
+---
+
+## Release 9 — Financial intelligence
+
+All values are derived read models in integer paise; no source transaction is
+mutated. Customer routes require `np_session`; Control routes use `finance:read/write`.
+
+### Customer
+
+| Method | Route | Notes |
+| --- | --- | --- |
+| GET | `/api/finance/overview` | Period overview with previous-period comparison. |
+| GET | `/api/finance/cashflow` | Daily inflow/outflow/net series. |
+| GET | `/api/finance/categories` / `/merchants` / `/trends` | Spending breakdowns. |
+| GET | `/api/finance/data-quality` | Completeness and unresolved records. |
+| GET | `/api/finance/recurring` | Detect + list patterns (never schedules payments). |
+| POST | `/api/finance/recurring/[id]/confirm` / `/ignore` | User decisions. |
+| PATCH | `/api/finance/recurring/[id]` | Edit a confirmed pattern. |
+| GET | `/api/finance/subscriptions/overview` / `/upcoming` | Commitment intelligence. |
+| GET/POST | `/api/finance/goals` | Planned vs recorded savings goals. |
+| POST | `/api/finance/goals/[id]/contributions` | Planned or recorded contribution. |
+| GET | `/api/finance/forecasts` / POST `/refresh` | Forecast with assumptions. |
+| GET | `/api/finance/anomalies` / POST `/[id]/feedback` | Informational deviations. |
+| GET | `/api/finance/health-score` / `/history` | Explainable wellbeing score. |
+| GET | `/api/finance/insights` / POST `/[id]/feedback` | Generated insights. |
+| GET | `/api/finance/budget-recommendations` / POST `/[id]/decide` | Approval required. |
+| POST | `/api/finance/assistant/chat` | Deterministic structured-query assistant. |
+| GET | `/api/finance/assistant/conversations` / `/[id]` | Conversation history. |
+| GET/POST | `/api/finance/reports` | Create/list reports. |
+| GET | `/api/finance/reports/[id]/download` | Ownership-protected PDF/CSV. |
+| GET/PATCH | `/api/finance/preferences` | User preferences. |
+
+### Nexus Control
+
+| Method | Route | Permission |
+| --- | --- | --- |
+| GET | `/api/control/finance/operations` | `finance:read` |
+| GET | `/api/control/finance/jobs` | `finance:read` |
+| GET | `/api/control/finance/data-quality` | `finance:read` |
+| POST | `/api/control/finance/run` | `finance:write` |
+
+Details: `docs/financial-data-architecture.md`, `docs/transaction-classification-rules.md`,
+`docs/cash-flow-calculations.md`, `docs/forecasting-and-detection.md`,
+`docs/assistant-and-reports.md`.

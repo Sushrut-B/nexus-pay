@@ -10,6 +10,7 @@ import {
   CHAOS_SCENARIOS,
   CONTRIBUTION_TYPES,
   EXPENSE_CATEGORIES,
+  FINANCE_PERIODS,
   GROUP_CATEGORIES,
   HISTORY_FILTERS,
   HISTORY_SORTS,
@@ -425,6 +426,7 @@ export const savingsGoalCreateSchema = z.object({
   targetDate: z.string().datetime().optional(),
   description: z.string().trim().max(400).optional(),
   icon: z.string().trim().max(40).optional(),
+  priority: z.enum(["LOW", "MEDIUM", "HIGH"]).default("MEDIUM"),
 });
 
 export const savingsGoalUpdateSchema = z
@@ -868,4 +870,71 @@ export type RewardRedeemInput = z.infer<typeof rewardRedeemSchema>;
 export type RewardPromoValidateInput = z.infer<typeof rewardPromoValidateSchema>;
 export type RewardAdjustmentInput = z.infer<typeof rewardAdjustmentSchema>;
 export type RewardInvestigationCreateInput = z.infer<typeof rewardInvestigationCreateSchema>;
+
+// ---------------------------------------------------------------------------
+// Release 9 — Financial intelligence
+// ---------------------------------------------------------------------------
+
+export const financeQuerySchema = z.object({
+  period: z.enum(FINANCE_PERIODS).default("month"),
+  from: isoDate.optional(),
+  to: isoDate.optional(),
+  page: z.coerce.number().int().min(1).max(10_000).default(1),
+  pageSize: z.coerce.number().int().min(1).max(50).default(20),
+});
+
+export const recurringPatternUpdateSchema = z.object({
+  merchant: z.string().trim().min(2).max(160).optional(),
+  amountMinor: z.number().int().min(1).max(10_000_000).optional(),
+  frequency: z.enum(["WEEKLY", "FORTNIGHTLY", "MONTHLY", "QUARTERLY", "YEARLY", "CUSTOM"]).optional(),
+  status: z.enum(["CONFIRMED", "PAUSED", "DELETED"]).optional(),
+}).refine((value) => Object.keys(value).length > 0, "Nothing to update");
+
+export const assistantChatSchema = z.object({
+  message: z.string().trim().min(3).max(500),
+  conversationId: z.string().trim().max(64).optional(),
+});
+
+export const financialReportCreateSchema = z.object({
+  type: z.enum([
+    "MONTHLY_SUMMARY", "ANNUAL_SUMMARY", "CATEGORY_EXPENDITURE", "MERCHANT_EXPENDITURE",
+    "SUBSCRIPTION", "RECURRING_PAYMENT", "BUDGET_PERFORMANCE", "SAVINGS_GOAL",
+  ]),
+  format: z.enum(["PDF", "CSV"]),
+  period: z.enum(FINANCE_PERIODS).default("month"),
+  from: isoDate.optional(),
+  to: isoDate.optional(),
+});
+
+export const financePreferenceUpdateSchema = z.object({
+  defaultPeriod: z.enum(FINANCE_PERIODS).optional(),
+  insightNotifications: z.boolean().optional(),
+  forecastNotifications: z.boolean().optional(),
+  budgetRecommendationNotifications: z.boolean().optional(),
+  recurringDetection: z.boolean().optional(),
+  goalReminders: z.boolean().optional(),
+}).refine((value) => Object.keys(value).length > 0, "Nothing to update");
+
+export const anomalyFeedbackSchema = z.object({
+  status: z.enum(["EXPECTED", "DISMISSED", "REVIEWED"]),
+  note: z.string().trim().max(300).optional(),
+});
+
+export const insightFeedbackSchema = z.object({
+  useful: z.boolean(),
+  note: z.string().trim().max(300).optional(),
+});
+
+export const budgetRecommendationDecisionSchema = z.object({
+  decision: z.enum(["APPROVE", "REJECT"]),
+});
+
+export type FinanceQueryInput = z.infer<typeof financeQuerySchema>;
+export type RecurringPatternUpdateInput = z.infer<typeof recurringPatternUpdateSchema>;
+export type AssistantChatInput = z.infer<typeof assistantChatSchema>;
+export type FinancialReportCreateInput = z.infer<typeof financialReportCreateSchema>;
+export type FinancePreferenceUpdateInput = z.infer<typeof financePreferenceUpdateSchema>;
+export type AnomalyFeedbackInput = z.infer<typeof anomalyFeedbackSchema>;
+export type InsightFeedbackInput = z.infer<typeof insightFeedbackSchema>;
+export type BudgetRecommendationDecisionInput = z.infer<typeof budgetRecommendationDecisionSchema>;
 

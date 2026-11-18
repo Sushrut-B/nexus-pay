@@ -23,8 +23,9 @@ blob-report/
 *.log
 logs/
 
-# generated statement files
+# generated statement and report files
 apps/web/.statements/
+.reports/
 
 # prisma
 packages/database/prisma/dev.db

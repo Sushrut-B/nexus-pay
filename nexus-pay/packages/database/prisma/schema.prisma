@@ -430,6 +430,13 @@ enum NotificationType {
   REWARD_REFERRAL_ISSUED
   REWARD_PROMO_APPLIED
   REWARD_REDEMPTION_CONFIRMED
+  FINANCE_INSIGHT_AVAILABLE
+  FINANCE_ANOMALY_DETECTED
+  FINANCE_FORECAST_READY
+  FINANCE_BUDGET_RECOMMENDATION
+  FINANCE_GOAL_REMINDER
+  FINANCE_REPORT_READY
+  FINANCE_RECURRING_DETECTED
 }
 
 enum GroupActivityEventType {
@@ -841,6 +848,7 @@ model SavingsGoal {
   targetAmountMinor BigInt
   currency          String            @db.VarChar(3)
   targetDate        DateTime?
+  priority          String           @default("MEDIUM") @db.VarChar(20)
   description       String?           @db.VarChar(400)
   icon              String?           @db.VarChar(40)
   status            SavingsGoalStatus @default(ACTIVE)
@@ -2413,6 +2421,380 @@ model RewardNotificationEvent {
 
   @@index([userId, createdAt])
   @@map("reward_notification_events")
+}
+
+// ---------------------------------------------------------------------------
+// Release 9 — Financial intelligence & smart money management.
+// All records below are derived/read models. Raftline remains authoritative
+// for balances and settlement; nothing here is a second financial ledger.
+// ---------------------------------------------------------------------------
+
+enum RecurrenceFrequency {
+  WEEKLY
+  FORTNIGHTLY
+  MONTHLY
+  QUARTERLY
+  YEARLY
+  CUSTOM
+}
+
+enum RecurrencePatternStatus {
+  DETECTED
+  CONFIRMED
+  IGNORED
+  PAUSED
+  DELETED
+}
+
+enum AnomalySeverity {
+  LOW
+  MEDIUM
+  HIGH
+}
+
+enum AnomalyStatus {
+  OPEN
+  EXPECTED
+  DISMISSED
+  REVIEWED
+}
+
+enum HealthAvailability {
+  AVAILABLE
+  INSUFFICIENT_DATA
+}
+
+enum InsightStatus {
+  ACTIVE
+  DISMISSED
+  USEFUL
+}
+
+enum RecommendationStatus {
+  SUGGESTED
+  APPROVED
+  REJECTED
+}
+
+enum FinancialReportType {
+  MONTHLY_SUMMARY
+  ANNUAL_SUMMARY
+  CATEGORY_EXPENDITURE
+  MERCHANT_EXPENDITURE
+  SUBSCRIPTION
+  RECURRING_PAYMENT
+  BUDGET_PERFORMANCE
+  SAVINGS_GOAL
+}
+
+enum FinancialReportFormat {
+  PDF
+  CSV
+}
+
+enum FinancialReportStatus {
+  PENDING
+  PROCESSING
+  READY
+  FAILED
+}
+
+model FinancialTransactionClassification {
+  id              String   @id @default(cuid())
+  userId          String
+  sourceType      String   @db.VarChar(40)
+  sourceId        String   @db.VarChar(120)
+  category        String   @db.VarChar(40)
+  direction       String   @db.VarChar(20)
+  amountMinor     Int
+  currency        String   @db.VarChar(3)
+  occurredAt      DateTime
+  description     String?  @db.VarChar(300)
+  merchantName    String?  @db.VarChar(120)
+  classificationSource String @db.VarChar(40)
+  createdAt       DateTime @default(now())
+
+  @@unique([sourceType, sourceId])
+  @@index([userId, occurredAt])
+  @@index([userId, category, occurredAt])
+  @@map("financial_transaction_classifications")
+}
+
+model FinancialCategoryMapping {
+  id            String   @id @default(cuid())
+  userId        String
+  pattern       String   @db.VarChar(120)
+  targetCategory String  @db.VarChar(40)
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+
+  @@unique([userId, pattern])
+  @@map("financial_category_mappings")
+}
+
+model FinancialDataQualityEvent {
+  id          String   @id @default(cuid())
+  userId      String?
+  sourceType  String   @db.VarChar(40)
+  sourceId    String   @db.VarChar(120)
+  issueCode   String   @db.VarChar(60)
+  severity    String   @db.VarChar(20)
+  details     String?  @db.VarChar(500)
+  status      String   @db.VarChar(30) @default("OPEN")
+  createdAt   DateTime @default(now())
+
+  @@unique([sourceType, sourceId, issueCode])
+  @@index([status, createdAt])
+  @@map("financial_data_quality_events")
+}
+
+model FinancialAggregationSnapshot {
+  id          String   @id @default(cuid())
+  userId      String
+  periodKey   String   @db.VarChar(60)
+  kind        String   @db.VarChar(40)
+  periodStart DateTime
+  periodEnd   DateTime
+  payload     Json
+  checksum    String   @db.VarChar(64)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([userId, periodKey, kind])
+  @@index([userId, kind, periodEnd])
+  @@map("financial_aggregation_snapshots")
+}
+
+model RecurringExpensePattern {
+  id              String                  @id @default(cuid())
+  userId          String
+  merchantKey     String                  @db.VarChar(160)
+  descriptionKey  String?                 @db.VarChar(160)
+  amountMinor     Int
+  currency        String                  @db.VarChar(3)
+  frequency       RecurrenceFrequency
+  intervalCount   Int                     @default(1)
+  confidence      String                  @db.VarChar(20)
+  status          RecurrencePatternStatus @default(DETECTED)
+  lastSeenAt      DateTime
+  nextExpectedAt  DateTime?
+  createdAt       DateTime                @default(now())
+  updatedAt       DateTime                @updatedAt
+
+  evidence RecurringExpenseEvidence[]
+
+  @@unique([userId, merchantKey, frequency])
+  @@index([userId, status])
+  @@map("recurring_expense_patterns")
+}
+
+model RecurringExpenseEvidence {
+  id          String   @id @default(cuid())
+  patternId   String
+  sourceType  String   @db.VarChar(40)
+  sourceId    String   @db.VarChar(120)
+  amountMinor Int
+  occurredAt  DateTime
+  createdAt   DateTime @default(now())
+
+  pattern RecurringExpensePattern @relation(fields: [patternId], references: [id], onDelete: Cascade)
+
+  @@unique([patternId, sourceId])
+  @@map("recurring_expense_evidence")
+}
+
+model FinancialForecast {
+  id           String   @id @default(cuid())
+  userId       String
+  kind         String   @db.VarChar(40)
+  periodStart  DateTime
+  periodEnd    DateTime
+  predictedMinor Int
+  lowMinor     Int
+  highMinor    Int
+  method       String   @db.VarChar(80)
+  assumptions  Json
+  historyCount Int      @default(0)
+  createdAt    DateTime @default(now())
+
+  @@index([userId, kind, createdAt])
+  @@map("financial_forecasts")
+}
+
+model SpendingAnomaly {
+  id             String          @id @default(cuid())
+  userId         String
+  sourceType     String          @db.VarChar(40)
+  sourceId       String          @db.VarChar(120)
+  category       String          @db.VarChar(40)
+  severity       AnomalySeverity
+  reason         String          @db.VarChar(300)
+  baselineMinor  Int
+  observedMinor  Int
+  confidence     String          @db.VarChar(20)
+  status         AnomalyStatus   @default(OPEN)
+  createdAt      DateTime        @default(now())
+
+  @@unique([sourceType, sourceId, reason])
+  @@index([userId, status, createdAt])
+  @@map("spending_anomalies")
+}
+
+model FinancialHealthSnapshot {
+  id          String            @id @default(cuid())
+  userId      String
+  overallScore Int?
+  availability HealthAvailability
+  computedAt  DateTime
+  payload     Json
+  createdAt   DateTime          @default(now())
+
+  dimensions FinancialHealthDimension[]
+
+  @@index([userId, computedAt])
+  @@map("financial_health_snapshots")
+}
+
+model FinancialHealthDimension {
+  id          String @id @default(cuid())
+  snapshotId  String
+  key         String @db.VarChar(40)
+  score       Int
+  weight      Int
+  explanation Json
+
+  snapshot FinancialHealthSnapshot @relation(fields: [snapshotId], references: [id], onDelete: Cascade)
+
+  @@unique([snapshotId, key])
+  @@map("financial_health_dimensions")
+}
+
+model FinancialInsight {
+  id        String        @id @default(cuid())
+  userId    String
+  kind      String        @db.VarChar(60)
+  title     String        @db.VarChar(160)
+  body      String        @db.VarChar(1000)
+  severity  String        @db.VarChar(20)
+  data      Json
+  status    InsightStatus @default(ACTIVE)
+  createdAt DateTime      @default(now())
+
+  feedback FinancialInsightFeedback[]
+
+  @@unique([userId, kind, title])
+  @@index([userId, status, createdAt])
+  @@map("financial_insights")
+}
+
+model FinancialInsightFeedback {
+  id        String   @id @default(cuid())
+  insightId String
+  userId    String
+  useful    Boolean
+  note      String?  @db.VarChar(300)
+  createdAt DateTime @default(now())
+
+  insight FinancialInsight @relation(fields: [insightId], references: [id], onDelete: Cascade)
+
+  @@unique([insightId, userId])
+  @@map("financial_insight_feedback")
+}
+
+model BudgetRecommendation {
+  id                   String              @id @default(cuid())
+  userId               String
+  category             String              @db.VarChar(40)
+  suggestedMinor       Int
+  historicalAverageMinor Int
+  reason               String              @db.VarChar(500)
+  confidence           String              @db.VarChar(20)
+  status               RecommendationStatus @default(SUGGESTED)
+  budgetId             String?
+  createdAt            DateTime            @default(now())
+
+  @@unique([userId, category])
+  @@map("budget_recommendations")
+}
+
+model FinanceAssistantConversation {
+  id        String   @id @default(cuid())
+  userId    String
+  title     String   @db.VarChar(160)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  messages FinanceAssistantMessage[]
+
+  @@index([userId, updatedAt])
+  @@map("finance_assistant_conversations")
+}
+
+model FinanceAssistantMessage {
+  id             String   @id @default(cuid())
+  conversationId String
+  role           String   @db.VarChar(20)
+  content        String   @db.VarChar(4000)
+  data           Json?
+  createdAt      DateTime @default(now())
+
+  conversation FinanceAssistantConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId, createdAt])
+  @@map("finance_assistant_messages")
+}
+
+model FinancialReport {
+  id          String              @id @default(cuid())
+  userId      String
+  type        FinancialReportType
+  format      FinancialReportFormat
+  periodStart DateTime
+  periodEnd   DateTime
+  status      FinancialReportStatus @default(PENDING)
+  fileName    String?             @db.VarChar(200)
+  fileSize    Int?
+  error       String?             @db.VarChar(500)
+  createdAt   DateTime            @default(now())
+  completedAt DateTime?
+
+  job FinancialReportJob?
+
+  @@index([userId, createdAt])
+  @@map("financial_reports")
+}
+
+model FinancialReportJob {
+  id           String   @id @default(cuid())
+  reportId     String   @unique
+  status       String   @db.VarChar(30) @default("PENDING")
+  attempts     Int      @default(0)
+  nextAttemptAt DateTime?
+  leaseUntil   DateTime?
+  error        String?  @db.VarChar(500)
+  createdAt    DateTime @default(now())
+
+  report FinancialReport @relation(fields: [reportId], references: [id], onDelete: Cascade)
+
+  @@index([status, nextAttemptAt])
+  @@map("financial_report_jobs")
+}
+
+model FinancialPreference {
+  id                            String   @id @default(cuid())
+  userId                        String   @unique
+  defaultPeriod                 String   @db.VarChar(30) @default("month")
+  dashboardLayout               Json?
+  insightNotifications          Boolean  @default(true)
+  forecastNotifications         Boolean  @default(false)
+  budgetRecommendationNotifications Boolean @default(true)
+  recurringDetection            Boolean  @default(true)
+  goalReminders                 Boolean  @default(true)
+  timezone                      String   @default("Asia/Kolkata") @db.VarChar(64)
+  createdAt                     DateTime @default(now())
+  updatedAt                     DateTime @updatedAt
+
+  @@map("financial_preferences")
 }
 
 model Statement {

@@ -2,11 +2,11 @@
 
 # Nexus Pay
 
-**Consumer payments · Social finance · Personal intelligence · Merchant ecosystem · Subscriptions · Rewards · Cluster operations**
+**Consumer payments · Social finance · Personal intelligence · Merchant ecosystem · Subscriptions · Rewards · Financial Intelligence · Cluster operations**
 
 [![Stack](https://img.shields.io/badge/stack-Next.js%2015%20%7C%20React%2019%20%7C%20TypeScript-blue)](https://nextjs.org/)
 [![Ledger](https://img.shields.io/badge/ledger-Raftline%205--node-green)](#architecture)
-[![Tests](https://img.shields.io/badge/tests-63%20unit%20%7C%2079%20integration%20%7C%2012%20E2E-brightgreen)](#verification)
+[![Tests](https://img.shields.io/badge/tests-68%20unit%20%7C%2089%20integration%20%7C%2014%20E2E-brightgreen)](#verification)
 [![Mode](https://img.shields.io/badge/mode-SIMULATED%20SANDBOX-orange)](#sandbox-notice)
 
 [Overview](#overview) · [Quick start](#quick-start) · [Features](#features) · [Architecture](#architecture) · [Verification](#verification) · [Docs](#documentation)
@@ -17,7 +17,7 @@
 
 ## Overview
 
-Nexus Pay is a full payments and finance platform backed by a live five-node **Raftline** cluster. It evolved across eight releases without rebuilding earlier work.
+Nexus Pay is a full payments and finance platform backed by a live five-node **Raftline** cluster. It evolved across nine releases without rebuilding earlier work.
 
 | Release | Delivered |
 | --- | --- |
@@ -29,6 +29,7 @@ Nexus Pay is a full payments and finance platform backed by a live five-node **R
 | **R6** | **Merchant ecosystem** — business accounts, orders, payment links, merchant QR, checkout, verified settlement, refund requests, analytics, webhooks, scoped developer APIs |
 | **R7** | **Subscriptions & recurring billing** — plans, trials, intro pricing, subscription checkout, durable billing worker, invoices, dunning, customer portal, recurring revenue analytics |
 | **R8** | **Rewards & loyalty** — points ledger, cashback, campaigns, promo codes, offers marketplace, tiers, referrals, fraud indicators, Nexus Control rewards operations |
+| **R9** | **Financial intelligence** — transaction classification, cash flow, spending analytics, recurring detection, goals, forecasts, anomalies, health score, Finance Assistant, reports |
 
 > [!IMPORTANT]
 > <a name="sandbox-notice"></a>
@@ -151,9 +152,9 @@ flowchart LR
 | Gate | Result |
 | --- | --- |
 | `pnpm typecheck` / `pnpm lint` / `pnpm build` | Passed |
-| `pnpm test:unit` | **63 passed** |
-| `pnpm test:integration` | **79 passed** (live Raftline + PostgreSQL) |
-| Playwright E2E | **12 passed** (production mode) |
+| `pnpm test:unit` | **68 passed** |
+| `pnpm test:integration` | **89 passed** (live Raftline + PostgreSQL) |
+| Playwright E2E | **14 passed** (production mode) |
 | Live failover drill | Leader failure → new term → heal → payment settled → reconciled → audited |
 
 ```powershell
@@ -171,7 +172,9 @@ pnpm exec playwright test --config playwright.prod.config.ts
 - Merchant: [Guide](docs/merchant-guide.md) · [Refunds](docs/merchant-refunds.md) · [Webhooks](docs/merchant-webhooks.md) · [Developer API](docs/merchant-developer-api.md) · [Assessment](docs/release-6-assessment.md)
 - Subscriptions: [Guide](docs/subscription-guide.md) · [Billing engine](docs/subscription-billing.md) · [Assessment](docs/release-7-assessment.md)
 - Rewards: [Architecture](docs/rewards-architecture.md) · [Points ledger](docs/points-ledger.md) · [Cashback](docs/cashback-processing.md) · [Campaigns](docs/campaign-guide.md) · [Referrals](docs/referral-qualification.md) · [Runbook](docs/reward-reconciliation-runbook.md)
-- Reports: [R2](docs/release-2-report.md) · [R3](docs/release-3-report.md) · [R4](docs/release-4-report.md) · [R5](docs/release-5-report.md) · [R6](docs/release-6-report.md) · [R7](docs/release-7-report.md) · [R8](docs/release-8-report.md)
+- Financial Intelligence: [Data architecture](docs/financial-data-architecture.md) · [Classification rules](docs/transaction-classification-rules.md) · [Cash-flow definitions](docs/cash-flow-calculations.md) · [Forecasting & detection](docs/forecasting-and-detection.md) · [Assistant & reports](docs/assistant-and-reports.md)
+- Reports: [R2](docs/release-2-report.md) · [R3](docs/release-3-report.md) · [R4](docs/release-4-report.md) · [R5](docs/release-5-report.md) · [R6](docs/release-6-report.md) · [R7](docs/release-7-report.md) · [R8](docs/release-8-report.md) · [R9](docs/release-9-report.md)
+
 
 
 
