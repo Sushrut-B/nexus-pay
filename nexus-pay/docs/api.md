@@ -590,3 +590,37 @@ configurable in this release; all other providers return a documented unavailabl
 | POST | `/api/control/accounts/run` | Run worker / retry failed jobs (audited). |
 
 Details: `docs/external-financial-architecture.md`, `docs/provider-setup.md`.
+
+---
+
+## Release 11 — Credit marketplace
+
+Nexus Pay is not a lender. Only the env-gated `sandbox-lender` is available;
+all other providers return a documented unavailable state.
+
+### Customer
+| Method | Route | Notes |
+| --- | --- | --- |
+| GET | `/api/credit/providers` | Configured lender providers. |
+| GET | `/api/credit/products` / `/products/[id]` | Provider-backed products / labelled fixtures. |
+| GET | `/api/credit/offers` / `/offers/[id]` | Active offers. |
+| POST | `/api/credit/offers/compare` | 2–4 offers, documented EMI assumptions. |
+| POST | `/api/credit/eligibility` / GET `/eligibility/[id]` | Pre-assessment only, never approval. |
+| GET/POST | `/api/credit/applications` | Create/list applications. |
+| GET/PATCH | `/api/credit/applications/[id]` | Details / edit before submission. |
+| POST | `/api/credit/applications/[id]/submit` | Idempotent provider submission. |
+| POST | `/api/credit/applications/[id]/withdraw` | Customer withdrawal. |
+| GET/POST | `/api/credit/applications/[id]/documents` | Encrypted document management. |
+| GET/DELETE | `/api/credit/documents/[id]` | Signed download link / delete. |
+| GET | `/api/credit/documents/[id]/download` | Short-lived authorised download. |
+| GET | `/api/credit/loans` / `/loans/[id]` | Verified active loans. |
+| GET | `/api/credit/loans/[id]/schedule` / `/repayments` / `/documents` | Servicing data. |
+| GET/POST | `/api/credit/affordability/scenarios` | Release 9-backed scenarios. |
+| GET | `/api/credit/borrowing` | Borrowing overview. |
+| POST | `/api/credit/webhooks/[providerCode]` | Signature-verified provider events. |
+
+### Nexus Control (`credit:read/write`)
+| GET | `/api/control/credit/overview` `/applications` `/events` `/consents` | Operations monitoring. |
+| POST | `/api/control/credit/run` | Audited provider sync. |
+
+Details: `docs/credit-marketplace-architecture.md`, `docs/loan-calculations-and-servicing.md`.

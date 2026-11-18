@@ -144,3 +144,4 @@ export * from "./subscription";
 export * from "./rewards";
 export * from "./finance-intelligence";
 export * from "./accounts";
+export * from "./credit";

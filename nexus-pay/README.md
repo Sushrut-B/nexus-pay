@@ -2,11 +2,11 @@
 
 # Nexus Pay
 
-**Consumer payments · Social finance · Personal intelligence · Merchant ecosystem · Subscriptions · Rewards · Financial Intelligence · Unified Accounts · Cluster operations**
+**Consumer payments · Social finance · Personal intelligence · Merchant ecosystem · Subscriptions · Rewards · Financial Intelligence · Unified Accounts · Credit Marketplace · Cluster operations**
 
 [![Stack](https://img.shields.io/badge/stack-Next.js%2015%20%7C%20React%2019%20%7C%20TypeScript-blue)](https://nextjs.org/)
 [![Ledger](https://img.shields.io/badge/ledger-Raftline%205--node-green)](#architecture)
-[![Tests](https://img.shields.io/badge/tests-73%20unit%20%7C%20100%20integration%20%7C%2016%20E2E-brightgreen)](#verification)
+[![Tests](https://img.shields.io/badge/tests-80%20unit%20%7C%20110%20integration%20%7C%2018%20E2E-brightgreen)](#verification)
 [![Mode](https://img.shields.io/badge/mode-SIMULATED%20SANDBOX-orange)](#sandbox-notice)
 
 [Overview](#overview) · [Quick start](#quick-start) · [Features](#features) · [Architecture](#architecture) · [Verification](#verification) · [Docs](#documentation)
@@ -17,7 +17,7 @@
 
 ## Overview
 
-Nexus Pay is a full payments and finance platform backed by a live five-node **Raftline** cluster. It evolved across ten releases without rebuilding earlier work.
+Nexus Pay is a full payments and finance platform backed by a live five-node **Raftline** cluster. It evolved across eleven releases without rebuilding earlier work.
 
 | Release | Delivered |
 | --- | --- |
@@ -31,6 +31,7 @@ Nexus Pay is a full payments and finance platform backed by a live five-node **R
 | **R8** | **Rewards & loyalty** — points ledger, cashback, campaigns, promo codes, offers marketplace, tiers, referrals, fraud indicators, Nexus Control rewards operations |
 | **R9** | **Financial intelligence** — transaction classification, cash flow, spending analytics, recurring detection, goals, forecasts, anomalies, health score, Finance Assistant, reports |
 | **R10** | **Unified financial hub** — provider abstraction, sandbox external accounts, consent management, durable sync, deduplication, internal transfers, privacy centre, Control provider operations |
+| **R11** | **Credit marketplace** — lender provider abstraction, offers and comparison, pre-assessment, application workflow, encrypted documents, loan servicing, affordability, Control credit operations |
 
 > [!IMPORTANT]
 > <a name="sandbox-notice"></a>
@@ -153,9 +154,9 @@ flowchart LR
 | Gate | Result |
 | --- | --- |
 | `pnpm typecheck` / `pnpm lint` / `pnpm build` | Passed |
-| `pnpm test:unit` | **73 passed** |
-| `pnpm test:integration` | **100 passed** (live Raftline + PostgreSQL) |
-| Playwright E2E | **16 passed** (production mode) |
+| `pnpm test:unit` | **80 passed** |
+| `pnpm test:integration` | **110 passed** (live Raftline + PostgreSQL) |
+| Playwright E2E | **18 passed** (production mode) |
 | Live failover drill | Leader failure → new term → heal → payment settled → reconciled → audited |
 
 ```powershell
@@ -175,7 +176,10 @@ pnpm exec playwright test --config playwright.prod.config.ts
 - Rewards: [Architecture](docs/rewards-architecture.md) · [Points ledger](docs/points-ledger.md) · [Cashback](docs/cashback-processing.md) · [Campaigns](docs/campaign-guide.md) · [Referrals](docs/referral-qualification.md) · [Runbook](docs/reward-reconciliation-runbook.md)
 - Financial Intelligence: [Data architecture](docs/financial-data-architecture.md) · [Classification rules](docs/transaction-classification-rules.md) · [Cash-flow definitions](docs/cash-flow-calculations.md) · [Forecasting & detection](docs/forecasting-and-detection.md) · [Assistant & reports](docs/assistant-and-reports.md)
 - External accounts: [Architecture](docs/external-financial-architecture.md) · [Provider guide](docs/provider-adapter-guide.md) · [Setup & prerequisites](docs/provider-setup.md) · [Encryption & retention](docs/encryption-and-retention.md)
-- Reports: [R2](docs/release-2-report.md) · [R3](docs/release-3-report.md) · [R4](docs/release-4-report.md) · [R5](docs/release-5-report.md) · [R6](docs/release-6-report.md) · [R7](docs/release-7-report.md) · [R8](docs/release-8-report.md) · [R9](docs/release-9-report.md) · [R10](docs/release-10-report.md)
+- Credit: [Architecture](docs/credit-marketplace-architecture.md) · [Provider onboarding](docs/lending-provider-and-onboarding.md) · [Calculations & servicing](docs/loan-calculations-and-servicing.md) · [Privacy](docs/credit-privacy-and-reconciliation.md)
+- Reports: [R2](docs/release-2-report.md) · [R3](docs/release-3-report.md) · [R4](docs/release-4-report.md) · [R5](docs/release-5-report.md) · [R6](docs/release-6-report.md) · [R7](docs/release-7-report.md) · [R8](docs/release-8-report.md) · [R9](docs/release-9-report.md) · [R10](docs/release-10-report.md) · [R11](docs/release-11-report.md)
+
+
 
 
 

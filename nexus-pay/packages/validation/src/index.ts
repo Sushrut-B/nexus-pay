@@ -993,3 +993,77 @@ export type ConsentActionInput = z.infer<typeof consentActionSchema>;
 export type DataDeletionRequestInput = z.infer<typeof dataDeletionRequestSchema>;
 export type TransferDecisionInput = z.infer<typeof transferDecisionSchema>;
 
+// ---------------------------------------------------------------------------
+// Release 11 — Credit marketplace and loan management
+// ---------------------------------------------------------------------------
+
+export const creditQuerySchema = z.object({
+  page: z.coerce.number().int().min(1).max(10_000).default(1),
+  pageSize: z.coerce.number().int().min(1).max(50).default(20),
+  type: z.string().max(60).optional(),
+  status: z.string().max(60).optional(),
+  providerId: z.string().max(64).optional(),
+});
+
+export const eligibilitySchema = z.object({
+  productId: z.string().trim().min(1).max(64),
+  employmentCategory: z.enum(["SALARIED", "SELF_EMPLOYED", "BUSINESS", "OTHER"]),
+  monthlyIncomeRange: z.enum(["BELOW_25000", "25000_50000", "50000_100000", "ABOVE_100000"]),
+  employmentMonths: z.number().int().min(0).max(600),
+  existingObligationsMinor: z.number().int().min(0).max(10_000_000).default(0),
+  requestedAmountMinor: z.number().int().min(1000).max(100_000_000),
+  requestedTenureMonths: z.number().int().min(1).max(360),
+  purpose: z.string().trim().min(3).max(120),
+});
+
+export const applicationCreateSchema = z.object({
+  offerId: z.string().trim().min(1).max(64),
+  employmentCategory: z.enum(["SALARIED", "SELF_EMPLOYED", "BUSINESS", "OTHER"]),
+  monthlyIncomeRange: z.enum(["BELOW_25000", "25000_50000", "50000_100000", "ABOVE_100000"]),
+  employmentMonths: z.number().int().min(0).max(600),
+  existingObligationsMinor: z.number().int().min(0).max(10_000_000).default(0),
+  requestedAmountMinor: z.number().int().min(1000).max(100_000_000),
+  requestedTenureMonths: z.number().int().min(1).max(360),
+  purpose: z.string().trim().min(3).max(120),
+  idempotencyKey: z.string().trim().min(8).max(160),
+  disclosuresAccepted: z.literal(true, { errorMap: () => ({ message: "You must accept the lending disclosures" }) }),
+  consentVersion: z.string().trim().min(3).max(40),
+});
+
+export const applicationUpdateSchema = z.object({
+  employmentCategory: z.enum(["SALARIED", "SELF_EMPLOYED", "BUSINESS", "OTHER"]).optional(),
+  monthlyIncomeRange: z.enum(["BELOW_25000", "25000_50000", "50000_100000", "ABOVE_100000"]).optional(),
+  employmentMonths: z.number().int().min(0).max(600).optional(),
+  existingObligationsMinor: z.number().int().min(0).max(10_000_000).optional(),
+  requestedAmountMinor: z.number().int().min(1000).max(100_000_000).optional(),
+  requestedTenureMonths: z.number().int().min(1).max(360).optional(),
+  purpose: z.string().trim().min(3).max(120).optional(),
+}).refine((value) => Object.keys(value).length > 0, "Nothing to update");
+
+export const documentUploadSchema = z.object({
+  category: z.enum(["IDENTITY", "ADDRESS", "INCOME", "EMPLOYMENT", "BANK_STATEMENT", "BUSINESS", "AGREEMENT", "SCHEDULE", "OTHER"]),
+});
+
+export const affordabilitySchema = z.object({
+  amountMinor: z.number().int().min(1000).max(100_000_000),
+  tenureMonths: z.number().int().min(1).max(360),
+  interestRateBps: z.number().int().min(0).max(10_000),
+});
+
+export const creditWebhookSchema = z.object({
+  eventType: z.string().trim().min(3).max(80),
+  eventId: z.string().trim().min(3).max(180),
+  providerRef: z.string().trim().max(180).optional(),
+  signature: z.string().trim().min(8).max(500),
+  timestamp: z.string().trim().min(3).max(40),
+  payload: z.record(z.unknown()),
+});
+
+export type CreditQueryInput = z.infer<typeof creditQuerySchema>;
+export type EligibilityInput = z.infer<typeof eligibilitySchema>;
+export type ApplicationCreateInput = z.infer<typeof applicationCreateSchema>;
+export type ApplicationUpdateInput = z.infer<typeof applicationUpdateSchema>;
+export type DocumentUploadInput = z.infer<typeof documentUploadSchema>;
+export type AffordabilityInput = z.infer<typeof affordabilitySchema>;
+export type CreditWebhookInput = z.infer<typeof creditWebhookSchema>;
+

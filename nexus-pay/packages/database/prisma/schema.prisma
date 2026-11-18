@@ -442,6 +442,12 @@ enum NotificationType {
   EXTERNAL_ACCOUNT_CONSENT_EXPIRING
   EXTERNAL_ACCOUNT_DISCONNECTED
   INTERNAL_TRANSFER_SUGGESTED
+  CREDIT_APPLICATION_STATUS_CHANGED
+  CREDIT_ADDITIONAL_INFORMATION_REQUESTED
+  CREDIT_OFFER_AVAILABLE
+  CREDIT_REPAYMENT_REMINDER
+  CREDIT_REPAYMENT_CONFIRMED
+  CREDIT_LOAN_DISBURSED
 }
 
 enum GroupActivityEventType {
@@ -3156,6 +3162,455 @@ model DataAccessAuditEvent {
 
   @@index([userId, createdAt])
   @@map("data_access_audit_events")
+}
+
+// ---------------------------------------------------------------------------
+// Release 11 — Credit marketplace & loan management.
+// Nexus Pay is a discovery/workflow platform, never the lender. All loan state
+// follows verified provider evidence; no wallet is debited for repayments.
+// ---------------------------------------------------------------------------
+
+enum LendingProviderMode {
+  SANDBOX
+  PRODUCTION
+}
+
+enum CreditProductType {
+  PERSONAL
+  CONSUMER_DURABLE
+  EDUCATION
+  VEHICLE
+  BUSINESS
+  SECURED
+  CREDIT_LINE
+  OTHER
+}
+
+enum InterestRateType {
+  REDUCING_BALANCE
+  FLAT
+  VARIABLE
+  PROVIDER_DEFINED
+}
+
+enum LoanApplicationStatus {
+  DRAFT
+  READY_FOR_SUBMISSION
+  SUBMITTED
+  ACKNOWLEDGED
+  UNDER_REVIEW
+  ADDITIONAL_INFORMATION_REQUIRED
+  APPROVED
+  REJECTED
+  OFFERED
+  ACCEPTED
+  DISBURSEMENT_PENDING
+  DISBURSED
+  WITHDRAWN
+  EXPIRED
+  CANCELLED
+}
+
+enum EligibilityOutcome {
+  PRE_ASSESSMENT_ONLY
+  PROVIDER_ELIGIBLE
+  PROVIDER_INELIGIBLE
+  INSUFFICIENT_DATA
+}
+
+enum LoanDocumentStatus {
+  UPLOADING
+  READY
+  FAILED
+  DELETED
+}
+
+enum LoanStatus {
+  ACTIVE
+  CLOSED
+  REQUIRES_RECONCILIATION
+}
+
+enum LoanRepaymentStatus {
+  UPCOMING
+  DUE
+  PROCESSING
+  PAID
+  OVERDUE
+  FAILED
+  WAIVED
+  UNKNOWN
+  REQUIRES_RECONCILIATION
+}
+
+enum LenderEventStatus {
+  RECEIVED
+  PROCESSED
+  REPLAYED
+  FAILED
+}
+
+model LendingProvider {
+  id           String              @id @default(cuid())
+  code         String              @unique @db.VarChar(60)
+  displayName  String              @db.VarChar(160)
+  mode         LendingProviderMode @default(SANDBOX)
+  capabilities Json
+  status       String              @db.VarChar(30) @default("UNAVAILABLE")
+  config       Json?
+  createdAt    DateTime            @default(now())
+  updatedAt    DateTime            @updatedAt
+
+  capabilitiesRows LendingProviderCapability[]
+  products    CreditProduct[]
+  offers      CreditOffer[]
+  applications LoanApplication[]
+  loans       ActiveLoan[]
+  webhookEvents LenderWebhookEvent[]
+  syncJobs    ProviderSyncJob[]
+  servicingEvents LoanServicingEvent[]
+
+  @@map("lending_providers")
+}
+
+model LendingProviderCapability {
+  id         String   @id @default(cuid())
+  providerId String
+  capability String   @db.VarChar(60)
+  enabled    Boolean  @default(false)
+
+  provider LendingProvider @relation(fields: [providerId], references: [id], onDelete: Cascade)
+
+  @@unique([providerId, capability])
+  @@map("lending_provider_capabilities")
+}
+
+model CreditProduct {
+  id                  String            @id @default(cuid())
+  providerId          String
+  code                String            @unique @db.VarChar(80)
+  name                String            @db.VarChar(160)
+  type                CreditProductType
+  minAmountMinor      Int
+  maxAmountMinor      Int
+  interestRateBps     Int
+  interestRateType    InterestRateType  @default(REDUCING_BALANCE)
+  aprBps              Int?
+  minTenureMonths     Int
+  maxTenureMonths     Int
+  processingFeeMinor  Int               @default(0)
+  processingFeeBps    Int               @default(0)
+  otherChargesMinor   Int               @default(0)
+  repaymentFrequency  String            @db.VarChar(30) @default("MONTHLY")
+  eligibilityCriteria Json?
+  prepaymentTerms     String?           @db.VarChar(1000)
+  latePaymentTerms    String?           @db.VarChar(1000)
+  requiredDocuments   String[]
+  terms               String?           @db.VarChar(3000)
+  validFrom           DateTime
+  validTo             DateTime
+  status              String            @db.VarChar(20) @default("ACTIVE")
+  source              String            @db.VarChar(30) @default("SANDBOX_FIXTURE")
+  createdAt           DateTime          @default(now())
+  updatedAt           DateTime          @updatedAt
+
+  provider LendingProvider @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  offers   CreditOffer[]
+
+  @@index([providerId, status])
+  @@map("credit_products")
+}
+
+model CreditOffer {
+  id                String   @id @default(cuid())
+  productId         String
+  providerId        String
+  providerOfferRef  String   @db.VarChar(160)
+  amountMinor       Int
+  interestRateBps   Int
+  aprBps            Int?
+  tenureMonths      Int
+  emiMinor          Int?
+  totalRepaymentMinor Int?
+  totalInterestMinor Int?
+  feesMinor         Int
+  status            String   @db.VarChar(30) @default("ACTIVE")
+  expiresAt         DateTime
+  terms             Json
+  createdAt         DateTime @default(now())
+
+  product CreditProduct @relation(fields: [productId], references: [id], onDelete: Cascade)
+  provider LendingProvider @relation(fields: [providerId], references: [id], onDelete: Cascade)
+
+  @@unique([providerId, providerOfferRef])
+  @@index([status, expiresAt])
+  @@map("credit_offers")
+}
+
+model EligibilityAssessment {
+  id              String             @id @default(cuid())
+  userId          String
+  productId       String
+  outcome         EligibilityOutcome
+  source          String             @db.VarChar(40)
+  answers         Json
+  observedData    Json?
+  result          Json
+  providerRef     String?            @db.VarChar(160)
+  createdAt       DateTime           @default(now())
+
+  @@index([userId, createdAt])
+  @@map("eligibility_assessments")
+}
+
+model LoanApplication {
+  id                     String                @id @default(cuid())
+  userId                 String
+  offerId                String
+  productId              String
+  providerId             String
+  status                 LoanApplicationStatus @default(DRAFT)
+  providerApplicationRef String?               @db.VarChar(160)
+  idempotencyKey         String                @unique @db.VarChar(160)
+  submittedAt            DateTime?
+  decidedAt              DateTime?
+  lastError              String?               @db.VarChar(500)
+  createdAt              DateTime              @default(now())
+  updatedAt              DateTime              @updatedAt
+
+  provider LendingProvider          @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  applicant LoanApplicantInformation?
+  history   LoanApplicationStatusHistory[]
+  consents  LoanConsent[]
+  documents LoanDocument[]
+  events    LoanServicingEvent[]
+
+  @@unique([providerId, providerApplicationRef])
+  @@index([userId, createdAt])
+  @@map("loan_applications")
+}
+
+model LoanApplicantInformation {
+  id                       String @id @default(cuid())
+  applicationId            String @unique
+  employmentCategory       String @db.VarChar(40)
+  monthlyIncomeRange       String @db.VarChar(40)
+  employmentMonths         Int
+  existingObligationsMinor Int    @default(0)
+  requestedAmountMinor     Int
+  requestedTenureMonths    Int
+  purpose                  String @db.VarChar(120)
+  declaredAt               DateTime @default(now())
+
+  application LoanApplication @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  @@map("loan_applicant_information")
+}
+
+model LoanApplicationStatusHistory {
+  id          String                @id @default(cuid())
+  applicationId String
+  fromStatus  LoanApplicationStatus?
+  toStatus    LoanApplicationStatus
+  actor       String                @db.VarChar(80)
+  reason      String?               @db.VarChar(500)
+  evidence    String?               @db.VarChar(160)
+  createdAt   DateTime              @default(now())
+
+  application LoanApplication @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  @@index([applicationId, createdAt])
+  @@map("loan_application_status_history")
+}
+
+model LoanConsent {
+  id               String   @id @default(cuid())
+  applicationId    String
+  userId           String
+  purpose          String   @db.VarChar(300)
+  disclosures      Json
+  dataShared       Json
+  consentVersion   String   @db.VarChar(40)
+  createdAt        DateTime @default(now())
+  revokedAt        DateTime?
+
+  application LoanApplication @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  @@map("loan_consents")
+}
+
+model LoanDocument {
+  id               String              @id @default(cuid())
+  applicationId    String
+  userId           String
+  category         String              @db.VarChar(60)
+  fileName         String              @db.VarChar(200)
+  contentType      String              @db.VarChar(100)
+  sizeBytes        Int
+  encryptedStorage String              @db.VarChar(1024)
+  status           LoanDocumentStatus  @default(UPLOADING)
+  scanStatus       String              @db.VarChar(30) @default("NOT_AVAILABLE")
+  uploadedAt       DateTime            @default(now())
+  expiresAt        DateTime?
+  deletedAt        DateTime?
+
+  application LoanApplication @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  @@index([userId, status])
+  @@map("loan_documents")
+}
+
+model ActiveLoan {
+  id                      String     @id @default(cuid())
+  userId                  String
+  applicationId           String
+  providerId              String
+  providerLoanRef         String     @db.VarChar(160)
+  originalPrincipalMinor  Int
+  outstandingPrincipalMinor Int
+  interestRateBps         Int
+  aprBps                  Int?
+  tenureMonths            Int
+  emiMinor                Int
+  nextDueDate             DateTime?
+  totalRepaidMinor        Int        @default(0)
+  totalRemainingMinor     Int
+  status                  LoanStatus @default(ACTIVE)
+  providerReportedAt      DateTime
+  createdAt               DateTime   @default(now())
+  updatedAt               DateTime   @updatedAt
+
+  provider LendingProvider @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  schedule LoanRepaymentSchedule[]
+  repayments LoanRepayment[]
+  events   LoanServicingEvent[]
+
+  @@unique([providerId, providerLoanRef])
+  @@index([userId, status])
+  @@map("active_loans")
+}
+
+model LoanRepaymentSchedule {
+  id             String              @id @default(cuid())
+  loanId         String
+  installmentNo  Int
+  dueDate        DateTime
+  principalMinor Int
+  interestMinor  Int
+  feesMinor      Int                 @default(0)
+  totalMinor     Int
+  status         LoanRepaymentStatus @default(UPCOMING)
+  paymentRef     String?             @db.VarChar(120)
+  providerRef    String              @db.VarChar(160)
+  updatedAt      DateTime            @updatedAt
+
+  loan ActiveLoan @relation(fields: [loanId], references: [id], onDelete: Cascade)
+
+  @@unique([loanId, providerRef])
+  @@unique([loanId, installmentNo])
+  @@map("loan_repayment_schedules")
+}
+
+model LoanRepayment {
+  id          String              @id @default(cuid())
+  loanId      String
+  scheduleId  String?
+  amountMinor Int
+  paidAt      DateTime
+  paymentRef  String?             @db.VarChar(120)
+  providerRef String              @unique @db.VarChar(160)
+  status      LoanRepaymentStatus @default(PAID)
+  createdAt   DateTime            @default(now())
+
+  loan ActiveLoan @relation(fields: [loanId], references: [id], onDelete: Cascade)
+
+  @@map("loan_repayments")
+}
+
+model LoanServicingEvent {
+  id            String   @id @default(cuid())
+  providerId    String
+  applicationId String?
+  loanId        String?
+  eventType     String   @db.VarChar(80)
+  payload       Json
+  providerRef   String?  @db.VarChar(160)
+  createdAt     DateTime @default(now())
+
+  provider LendingProvider @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  application LoanApplication? @relation(fields: [applicationId], references: [id], onDelete: SetNull)
+  loan ActiveLoan? @relation(fields: [loanId], references: [id], onDelete: SetNull)
+
+  @@map("loan_servicing_events")
+}
+
+model LenderWebhookEvent {
+  id             String           @id @default(cuid())
+  providerId     String
+  eventType      String           @db.VarChar(80)
+  providerEventId String          @db.VarChar(180)
+  payload        Json
+  signatureValid Boolean          @default(false)
+  status         LenderEventStatus @default(RECEIVED)
+  processedAt    DateTime?
+  error          String?          @db.VarChar(500)
+  createdAt      DateTime         @default(now())
+
+  provider LendingProvider @relation(fields: [providerId], references: [id], onDelete: Cascade)
+
+  @@unique([providerId, providerEventId])
+  @@map("lender_webhook_events")
+}
+
+model ProviderSyncJob {
+  id             String   @id @default(cuid())
+  providerId     String
+  kind           String   @db.VarChar(60)
+  status         String   @db.VarChar(30) @default("PENDING")
+  attempts       Int      @default(0)
+  nextAttemptAt  DateTime?
+  leaseUntil     DateTime?
+  error          String?  @db.VarChar(500)
+  createdAt      DateTime @default(now())
+
+  provider LendingProvider @relation(fields: [providerId], references: [id], onDelete: Cascade)
+
+  @@index([status, nextAttemptAt])
+  @@map("provider_sync_jobs")
+}
+
+model BorrowingOverviewSnapshot {
+  id                      String   @id @default(cuid())
+  userId                  String   @unique
+  activeLoans             Int      @default(0)
+  outstandingMinor        Int      @default(0)
+  monthlyCommitmentMinor  Int      @default(0)
+  upcomingMinor           Int      @default(0)
+  completedLoans          Int      @default(0)
+  payload                 Json
+  createdAt               DateTime @default(now())
+  updatedAt               DateTime @updatedAt
+
+  @@map("borrowing_overview_snapshots")
+}
+
+model LoanAffordabilityScenario {
+  id                    String   @id @default(cuid())
+  userId                String
+  amountMinor           Int
+  tenureMonths          Int
+  interestRateBps       Int
+  emiMinor              Int
+  currentInflowMinor    Int
+  currentOutflowMinor   Int
+  commitmentsMinor      Int
+  remainingMinor        Int
+  assumptions           Json
+  dataCoverageBps       Int
+  createdAt             DateTime @default(now())
+
+  @@index([userId, createdAt])
+  @@map("loan_affordability_scenarios")
 }
 
 model Statement {

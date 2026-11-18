@@ -32,6 +32,7 @@ const NAV = [
   { href: "/control/rewards", label: "Rewards", icon: Repeat },
   { href: "/control/finance", label: "Financial Intelligence", icon: BrainCircuit },
   { href: "/control/accounts", label: "External Accounts", icon: Landmark },
+  { href: "/control/credit", label: "Credit Operations", icon: CreditCard },
   { href: "/control/admin", label: "Administration", icon: Users, adminOnly: true },
 ];
 

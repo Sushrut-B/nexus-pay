@@ -35,3 +35,7 @@ packages/database/prisma/dev.db
 Thumbs.db
 .vscode/
 .idea/
+
+# generated encrypted loan documents
+.loan-documents/
+
