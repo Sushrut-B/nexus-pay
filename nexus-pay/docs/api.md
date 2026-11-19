@@ -624,3 +624,55 @@ all other providers return a documented unavailable state.
 | POST | `/api/control/credit/run` | Audited provider sync. |
 
 Details: `docs/credit-marketplace-architecture.md`, `docs/loan-calculations-and-servicing.md`.
+
+## Release 12 — Insurance Marketplace
+
+All endpoints use the common `{ data, requestId }` envelope. Mutations require CSRF and authenticated merchant users. Provider-backed operations are unavailable (503) unless `NEXUS_INSURANCE_SANDBOX_ENABLED=true`; sandbox values are labelled fixtures, not real coverage.
+
+### Marketplace / catalogue
+| Method | Route | Notes |
+| --- | --- | --- |
+| GET | `/api/insurance/categories` `/providers` | Categories and provider availability. |
+| GET | `/api/insurance/products` `/products/[id]` | Provider-backed products / labelled fixtures. |
+| GET | `/api/insurance/products/[id]/documents` | Official product documents. |
+| POST | `/api/insurance/products/compare` | 2–4 products; same category only; no ranking score. |
+
+### Quotes & applications
+| Method | Route | Notes |
+| --- | --- | --- |
+| GET/POST | `/api/insurance/quotes` | List / create provider quote with recorded consent. |
+| GET | `/api/insurance/quotes/[id]` | Quote detail (validity, premium breakdown). |
+| POST | `/api/insurance/quotes/[id]/refresh` | Refresh from provider. |
+| GET/POST | `/api/insurance/applications` | List / create application with disclosures. |
+| GET | `/api/insurance/applications/[id]` | Application detail. |
+| POST | `/api/insurance/applications/[id]/submit` `/cancel` | Idempotent submission / cancellation. |
+| GET/POST | `/api/insurance/applications/[id]/documents` | Encrypted document management. |
+
+### Policies, premiums & renewals
+| Method | Route | Notes |
+| --- | --- | --- |
+| GET | `/api/insurance/policies` `/policies/[id]` | Provider-confirmed policies only. |
+| GET | `/api/insurance/policies/[id]/premiums` `/renewals` | Premium schedule / renewals. |
+| POST | `/api/insurance/policies/[id]/renewal/quote` | Provider renewal info; requires confirmation. |
+| GET/POST | `/api/insurance/policies/[id]/documents` | Encrypted document management. |
+
+### Claims, consents & documents
+| Method | Route | Notes |
+| --- | --- | --- |
+| GET/POST | `/api/insurance/claims` | List / initiate claims. |
+| GET | `/api/insurance/claims/[id]` `/history` | Claim detail / verified status history. |
+| POST | `/api/insurance/claims/[id]/submit` | Claim submission where supported. |
+| GET/POST | `/api/insurance/consents` | Consent history / grant. |
+| POST | `/api/insurance/consents/[id]/revoke` | Stops future provider sharing. |
+| GET | `/api/insurance/activity` `/preferences` | Activity feed / notification preferences. |
+| GET/DELETE | `/api/insurance/documents/[id]` | Signed download link / delete. |
+| GET | `/api/insurance/documents/[id]/download` | Short-lived authorised download. |
+| POST | `/api/insurance/webhooks/[providerCode]` | Signature-verified, deduplicated provider events. |
+
+### Nexus Control (`insurance:read/write`)
+| Method | Route | Notes |
+| --- | --- | --- |
+| GET | `/api/control/insurance/overview` `/applications` `/events` `/consents` | Operations monitoring (no PII). |
+| POST | `/api/control/insurance/run` | Audited provider sync. |
+
+Details: `docs/insurance-marketplace-architecture.md`, `docs/insurance-provider-onboarding.md`, `docs/release-12-report.md`.

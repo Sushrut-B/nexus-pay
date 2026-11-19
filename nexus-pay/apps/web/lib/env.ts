@@ -66,6 +66,10 @@ const envSchema = z.object({
     .enum(["true", "false"])
     .default("false")
     .transform((value) => value === "true"),
+  NEXUS_INSURANCE_SANDBOX_ENABLED: z
+    .enum(["true", "false"])
+    .default("false")
+    .transform((value) => value === "true"),
 });
 
 let cached: z.infer<typeof envSchema> | null = null;

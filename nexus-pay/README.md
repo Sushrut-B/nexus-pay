@@ -17,7 +17,7 @@
 
 ## Overview
 
-Nexus Pay is a full payments and finance platform backed by a live five-node **Raftline** cluster. It evolved across eleven releases without rebuilding earlier work.
+Nexus Pay is a full payments and finance platform backed by a live five-node **Raftline** cluster. It evolved across twelve releases without rebuilding earlier work.
 
 | Release | Delivered |
 | --- | --- |
@@ -32,10 +32,11 @@ Nexus Pay is a full payments and finance platform backed by a live five-node **R
 | **R9** | **Financial intelligence** — transaction classification, cash flow, spending analytics, recurring detection, goals, forecasts, anomalies, health score, Finance Assistant, reports |
 | **R10** | **Unified financial hub** — provider abstraction, sandbox external accounts, consent management, durable sync, deduplication, internal transfers, privacy centre, Control provider operations |
 | **R11** | **Credit marketplace** — lender provider abstraction, offers and comparison, pre-assessment, application workflow, encrypted documents, loan servicing, affordability, Control credit operations |
+| **R12** | **Insurance marketplace** — provider-ready insurance catalogue, comparison, quotes, applications, provider-confirmed policies, premiums/renewals, claims, consent centre, signed document storage, Control insurance operations (sandbox only) |
 
 > [!IMPORTANT]
 > <a name="sandbox-notice"></a>
-> **Sandbox only.** Funding is labelled **SIMULATED SANDBOX FUNDING**. There is no bank, UPI, card or real-money integration, and no regulatory claim. Merchant approval is application-level (not KYC), merchant QR is a Nexus Pay QR (not UPI), and **Raftline has no refund/reversal capability** — refunds stop at request/review with no money moved. Subscriptions use explicit sandbox authorization - no UPI AutoPay, bank mandate or card-on-file is established. Reward points are non-cash loyalty units; cashback is a sandbox wallet credit via the existing Raftline funding path.
+> **Sandbox only.** Funding is labelled **SIMULATED SANDBOX FUNDING**. There is no bank, UPI, card or real-money integration, and no regulatory claim. Merchant approval is application-level (not KYC), merchant QR is a Nexus Pay QR (not UPI), and **Raftline has no refund/reversal capability** — refunds stop at request/review with no money moved. Subscriptions use explicit sandbox authorization - no UPI AutoPay, bank mandate or card-on-file is established. Reward points are non-cash loyalty units; cashback is a sandbox wallet credit via the existing Raftline funding path. Insurance data is metadata only; the insurance marketplace uses a clearly labelled sandbox demonstration insurer and no real insurer, quote, policy or claim is fabricated. Nexus Pay is not an insurer, broker, corporate agent or web aggregator.
 
 <details>
 <summary><b>Core financial rules</b> (click to expand)</summary>
@@ -177,7 +178,8 @@ pnpm exec playwright test --config playwright.prod.config.ts
 - Financial Intelligence: [Data architecture](docs/financial-data-architecture.md) · [Classification rules](docs/transaction-classification-rules.md) · [Cash-flow definitions](docs/cash-flow-calculations.md) · [Forecasting & detection](docs/forecasting-and-detection.md) · [Assistant & reports](docs/assistant-and-reports.md)
 - External accounts: [Architecture](docs/external-financial-architecture.md) · [Provider guide](docs/provider-adapter-guide.md) · [Setup & prerequisites](docs/provider-setup.md) · [Encryption & retention](docs/encryption-and-retention.md)
 - Credit: [Architecture](docs/credit-marketplace-architecture.md) · [Provider onboarding](docs/lending-provider-and-onboarding.md) · [Calculations & servicing](docs/loan-calculations-and-servicing.md) · [Privacy](docs/credit-privacy-and-reconciliation.md)
-- Reports: [R2](docs/release-2-report.md) · [R3](docs/release-3-report.md) · [R4](docs/release-4-report.md) · [R5](docs/release-5-report.md) · [R6](docs/release-6-report.md) · [R7](docs/release-7-report.md) · [R8](docs/release-8-report.md) · [R9](docs/release-9-report.md) · [R10](docs/release-10-report.md) · [R11](docs/release-11-report.md)
+- Insurance: [Architecture](docs/insurance-marketplace-architecture.md) · [Provider onboarding](docs/insurance-provider-onboarding.md) · [Release report](docs/release-12-report.md)
+- Reports: [R2](docs/release-2-report.md) · [R3](docs/release-3-report.md) · [R4](docs/release-4-report.md) · [R5](docs/release-5-report.md) · [R6](docs/release-6-report.md) · [R7](docs/release-7-report.md) · [R8](docs/release-8-report.md) · [R9](docs/release-9-report.md) · [R10](docs/release-10-report.md) · [R11](docs/release-11-report.md) · [R12](docs/release-12-report.md)
 
 
 

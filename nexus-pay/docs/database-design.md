@@ -15,6 +15,14 @@ balances or transaction history. Raftline remains the financial source of truth.
 - Schema: `packages/database/prisma/schema.prisma`
 - Applied migration: `20261117034837_init`
 
+> **Later releases:** Release 12 adds 22 insurance metadata models (providers,
+> products, quotes, applications, policies, premiums, renewals, claims, consent,
+> documents, webhooks and sync jobs) via migrations
+> `20261119054748_release12_insurance_marketplace` and
+> `20261119055821_release12_insurance_relations`. All money is integer minor
+> units; insurance metadata never represents a wallet balance. See the Prisma
+> schema and `docs/release-12-report.md`.
+
 ## 2. Ownership boundary
 
 | Concern | PostgreSQL | Raftline |

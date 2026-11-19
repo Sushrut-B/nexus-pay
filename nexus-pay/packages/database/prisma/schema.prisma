@@ -448,6 +448,20 @@ enum NotificationType {
   CREDIT_REPAYMENT_REMINDER
   CREDIT_REPAYMENT_CONFIRMED
   CREDIT_LOAN_DISBURSED
+  INSURANCE_QUOTE_RECEIVED
+  INSURANCE_QUOTE_EXPIRING
+  INSURANCE_APPLICATION_SUBMITTED
+  INSURANCE_APPLICATION_STATUS_CHANGED
+  INSURANCE_DOCUMENTS_REQUIRED
+  INSURANCE_POLICY_ISSUED
+  INSURANCE_POLICY_ACTIVATED
+  INSURANCE_PREMIUM_DUE
+  INSURANCE_RENEWAL_APPROACHING
+  INSURANCE_POLICY_EXPIRED
+  INSURANCE_CLAIM_SUBMITTED
+  INSURANCE_CLAIM_STATUS_CHANGED
+  INSURANCE_CLAIM_ADDITIONAL_INFO
+  INSURANCE_CLAIM_COMPLETED
 }
 
 enum GroupActivityEventType {
@@ -3611,6 +3625,502 @@ model LoanAffordabilityScenario {
 
   @@index([userId, createdAt])
   @@map("loan_affordability_scenarios")
+}
+
+// ---------------------------------------------------------------------------
+// Release 12 — Insurance marketplace & policy management.
+// Metadata orchestration only. No insurer, broker or aggregator status claimed.
+// ---------------------------------------------------------------------------
+
+enum InsuranceProviderMode {
+  SANDBOX
+  PRODUCTION
+}
+
+enum InsuranceProductCategory {
+  HEALTH
+  LIFE
+  TERM_LIFE
+  MOTOR
+  TWO_WHEELER
+  CAR
+  TRAVEL
+  PERSONAL_ACCIDENT
+  HOME
+  OTHER
+}
+
+enum InsuranceQuoteStatus {
+  DRAFT
+  INPUT_REQUIRED
+  SUBMITTED
+  PROCESSING
+  QUOTE_AVAILABLE
+  QUOTE_EXPIRED
+  REJECTED
+  FAILED
+  REQUIRES_CUSTOMER_ACTION
+}
+
+enum InsuranceApplicationStatus {
+  DRAFT
+  READY_FOR_SUBMISSION
+  SUBMITTED
+  UNDER_REVIEW
+  ADDITIONAL_INFORMATION_REQUIRED
+  APPROVED
+  REJECTED
+  POLICY_ISSUANCE_PENDING
+  COMPLETED
+  CANCELLED
+  FAILED
+}
+
+enum InsurancePolicyStatus {
+  PENDING_ISSUANCE
+  ACTIVE
+  EXPIRING_SOON
+  EXPIRED
+  LAPSED
+  CANCELLED
+  SUSPENDED
+  UNKNOWN
+}
+
+enum InsurancePremiumStatus {
+  UPCOMING
+  DUE
+  PAYMENT_PENDING
+  PAID
+  OVERDUE
+  FAILED
+  UNKNOWN
+}
+
+enum InsuranceClaimStatus {
+  DRAFT
+  DOCUMENTS_REQUIRED
+  READY_TO_SUBMIT
+  SUBMITTED
+  UNDER_REVIEW
+  ADDITIONAL_INFORMATION_REQUIRED
+  APPROVED
+  PARTIALLY_APPROVED
+  REJECTED
+  SETTLEMENT_PENDING
+  SETTLED
+  CLOSED
+  UNKNOWN
+}
+
+enum InsuranceDocumentStatus {
+  UPLOADING
+  READY
+  FAILED
+  DELETED
+}
+
+enum InsuranceEventStatus {
+  RECEIVED
+  PROCESSED
+  REPLAYED
+  FAILED
+}
+
+model InsuranceProvider {
+  id          String                @id @default(cuid())
+  code        String                @unique @db.VarChar(60)
+  displayName String                @db.VarChar(160)
+  mode        InsuranceProviderMode @default(SANDBOX)
+  status      String                @db.VarChar(30) @default("UNAVAILABLE")
+  capabilities Json
+  config      Json?
+  lastSyncAt  DateTime?
+  createdAt   DateTime              @default(now())
+  updatedAt   DateTime              @updatedAt
+
+  capabilityRows InsuranceProviderCapability[]
+  products   InsuranceProduct[]
+  quotes     InsuranceQuote[]
+  applications InsuranceApplication[]
+  policies   InsurancePolicy[]
+  claims     InsuranceClaim[]
+  consents   InsuranceConsent[]
+  syncJobs   InsuranceProviderSync[]
+  webhooks   InsuranceProviderWebhook[]
+
+  @@map("insurance_providers")
+}
+
+model InsuranceProviderCapability {
+  id         String  @id @default(cuid())
+  providerId String
+  capability String  @db.VarChar(60)
+  enabled    Boolean @default(false)
+
+  provider InsuranceProvider @relation(fields: [providerId], references: [id], onDelete: Cascade)
+
+  @@unique([providerId, capability])
+  @@map("insurance_provider_capabilities")
+}
+
+model InsuranceProduct {
+  id               String                   @id @default(cuid())
+  providerId       String
+  code             String                   @unique @db.VarChar(100)
+  name             String                   @db.VarChar(180)
+  category         InsuranceProductCategory
+  summary          String                   @db.VarChar(1000)
+  coverageSummary  String?                  @db.VarChar(1000)
+  coverageMinor    Int?
+  premiumMinor     Int?
+  premiumFrequency String                   @db.VarChar(30) @default("MONTHLY")
+  durationMonths   Int?
+  benefits         Json?
+  exclusions       Json?
+  waitingPeriods   Json?
+  eligibility      Json?
+  deductibles      Json?
+  addons           Json?
+  claimProcess     String?                  @db.VarChar(2000)
+  renewalTerms     String?                  @db.VarChar(2000)
+  officialDocs     Json?
+  source           String                   @db.VarChar(30) @default("SANDBOX_FIXTURE")
+  sourceUpdatedAt  DateTime
+  status           String                   @db.VarChar(20) @default("ACTIVE")
+  createdAt        DateTime                 @default(now())
+  updatedAt        DateTime                 @updatedAt
+
+  provider InsuranceProvider @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  versions InsuranceProductVersion[]
+  documents InsuranceProductDocument[]
+  quotes   InsuranceQuote[]
+
+  @@index([providerId, category, status])
+  @@map("insurance_products")
+}
+
+model InsuranceProductVersion {
+  id         String   @id @default(cuid())
+  productId  String
+  version    String   @db.VarChar(40)
+  details    Json
+  retrievedAt DateTime @default(now())
+
+  product InsuranceProduct @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@unique([productId, version])
+  @@map("insurance_product_versions")
+}
+
+model InsuranceProductDocument {
+  id          String   @id @default(cuid())
+  productId   String
+  name        String   @db.VarChar(200)
+  url         String   @db.VarChar(2048)
+  documentType String  @db.VarChar(40)
+  retrievedAt DateTime @default(now())
+
+  product InsuranceProduct @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@map("insurance_product_documents")
+}
+
+model InsuranceQuote {
+  id             String             @id @default(cuid())
+  userId         String
+  productId      String
+  providerId     String
+  status         InsuranceQuoteStatus @default(DRAFT)
+  providerRef    String?            @db.VarChar(160)
+  answers        Json
+  premiumMinor   Int?
+  premiumBreakdown Json?
+  coverageMinor  Int?
+  validUntil     DateTime?
+  providerMetadata Json?
+  rawSnapshot    Json?
+  consentId      String?
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+
+  product InsuranceProduct @relation(fields: [productId], references: [id], onDelete: Cascade)
+  provider InsuranceProvider @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  snapshots InsuranceQuoteSnapshot[]
+  applications InsuranceApplication[]
+
+  @@unique([providerId, providerRef])
+  @@index([userId, createdAt])
+  @@map("insurance_quotes")
+}
+
+model InsuranceQuoteSnapshot {
+  id        String   @id @default(cuid())
+  quoteId   String
+  payload   Json
+  capturedAt DateTime @default(now())
+
+  quote InsuranceQuote @relation(fields: [quoteId], references: [id], onDelete: Cascade)
+
+  @@map("insurance_quote_snapshots")
+}
+
+model InsuranceApplication {
+  id               String                    @id @default(cuid())
+  userId           String
+  productId        String
+  quoteId          String?
+  providerId       String
+  status           InsuranceApplicationStatus @default(DRAFT)
+  providerRef      String?                   @db.VarChar(160)
+  idempotencyKey   String                    @unique @db.VarChar(160)
+  applicantData    Json
+  consentId        String?
+  submittedAt      DateTime?
+  completedAt      DateTime?
+  lastError        String?                   @db.VarChar(500)
+  createdAt        DateTime                  @default(now())
+  updatedAt        DateTime                  @updatedAt
+
+  quote InsuranceQuote? @relation(fields: [quoteId], references: [id], onDelete: SetNull)
+  provider InsuranceProvider @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  policies InsurancePolicy[]
+
+  @@unique([providerId, providerRef])
+  @@index([userId, createdAt])
+  @@map("insurance_applications")
+}
+
+model InsurancePolicy {
+  id               String               @id @default(cuid())
+  userId           String
+  applicationId    String?
+  providerId       String
+  providerRef      String               @db.VarChar(160)
+  policyNumberMasked String             @db.VarChar(60)
+  category         InsuranceProductCategory
+  coverageMinor    Int
+  premiumMinor     Int
+  premiumFrequency String               @db.VarChar(30)
+  startDate        DateTime
+  endDate          DateTime
+  renewalDate      DateTime?
+  status           InsurancePolicyStatus @default(PENDING_ISSUANCE)
+  nominee          Json?
+  providerContact  Json?
+  providerReportedAt DateTime
+  createdAt        DateTime             @default(now())
+  updatedAt        DateTime             @updatedAt
+
+  application InsuranceApplication? @relation(fields: [applicationId], references: [id], onDelete: SetNull)
+  provider InsuranceProvider @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  premiums  InsurancePremiumSchedule[]
+  payments  InsurancePremiumPayment[]
+  renewals  InsuranceRenewal[]
+  claims    InsuranceClaim[]
+
+  @@unique([providerId, providerRef])
+  @@index([userId, status])
+  @@map("insurance_policies")
+}
+
+model InsurancePremiumSchedule {
+  id               String                @id @default(cuid())
+  policyId         String
+  installmentNo    Int
+  dueDate          DateTime
+  amountMinor      Int
+  status           InsurancePremiumStatus @default(UPCOMING)
+  providerRef      String                @db.VarChar(160)
+  providerPaymentRef String?             @db.VarChar(160)
+  gracePeriodDays  Int                   @default(0)
+  paymentInstructions String?            @db.VarChar(1000)
+  lastSyncAt       DateTime              @default(now())
+
+  policy InsurancePolicy @relation(fields: [policyId], references: [id], onDelete: Cascade)
+
+  @@unique([policyId, installmentNo])
+  @@unique([policyId, providerRef])
+  @@map("insurance_premium_schedules")
+}
+
+model InsurancePremiumPayment {
+  id             String                @id @default(cuid())
+  policyId       String
+  scheduleId     String?
+  amountMinor    Int
+  paidAt         DateTime
+  paymentRef     String?               @db.VarChar(120)
+  providerRef    String                @unique @db.VarChar(160)
+  status         InsurancePremiumStatus @default(PAID)
+  idempotencyKey String                @unique @db.VarChar(160)
+  createdAt      DateTime              @default(now())
+
+  policy InsurancePolicy @relation(fields: [policyId], references: [id], onDelete: Cascade)
+
+  @@map("insurance_premium_payments")
+}
+
+model InsuranceRenewal {
+  id          String   @id @default(cuid())
+  policyId    String
+  providerRef String   @db.VarChar(160)
+  status      String   @db.VarChar(40) @default("PENDING")
+  renewalDate DateTime
+  quoteRef    String?  @db.VarChar(160)
+  documentRef String?  @db.VarChar(160)
+  userConfirmed Boolean @default(false)
+  createdAt   DateTime @default(now())
+
+  policy InsurancePolicy @relation(fields: [policyId], references: [id], onDelete: Cascade)
+
+  @@unique([policyId, providerRef])
+  @@map("insurance_renewals")
+}
+
+model InsuranceClaim {
+  id              String            @id @default(cuid())
+  userId          String
+  policyId        String
+  providerId      String
+  providerRef     String            @db.VarChar(160)
+  claimType       String            @db.VarChar(80)
+  incidentDate    DateTime
+  status          InsuranceClaimStatus @default(DRAFT)
+  submittedAt     DateTime?
+  requestedDocuments Json?
+  lastUpdate      DateTime          @default(now())
+  providerContact Json?
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+
+  policy InsurancePolicy @relation(fields: [policyId], references: [id], onDelete: Cascade)
+  provider InsuranceProvider @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  history InsuranceClaimStatusHistory[]
+
+  @@unique([providerId, providerRef])
+  @@index([userId, status])
+  @@map("insurance_claims")
+}
+
+model InsuranceClaimStatusHistory {
+  id         String              @id @default(cuid())
+  claimId    String
+  fromStatus InsuranceClaimStatus?
+  toStatus   InsuranceClaimStatus
+  actor      String              @db.VarChar(80)
+  reason     String?             @db.VarChar(500)
+  evidence   String?             @db.VarChar(160)
+  createdAt  DateTime            @default(now())
+
+  claim InsuranceClaim @relation(fields: [claimId], references: [id], onDelete: Cascade)
+
+  @@index([claimId, createdAt])
+  @@map("insurance_claim_status_history")
+}
+
+model InsuranceDocument {
+  id              String                @id @default(cuid())
+  userId          String
+  ownerType       String                @db.VarChar(30)
+  ownerId         String                @db.VarChar(80)
+  category        String                @db.VarChar(60)
+  fileName        String                @db.VarChar(200)
+  contentType     String                @db.VarChar(100)
+  sizeBytes       Int
+  encryptedStorage String               @db.VarChar(1024)
+  status          InsuranceDocumentStatus @default(UPLOADING)
+  scanStatus      String                @db.VarChar(30) @default("NOT_AVAILABLE")
+  uploadedAt      DateTime              @default(now())
+  expiresAt       DateTime?
+  deletedAt       DateTime?
+
+  // ownerType/ownerId are polymorphic references; ownership is enforced in services.
+
+  @@index([userId, ownerType, ownerId])
+  @@map("insurance_documents")
+}
+
+model InsuranceConsent {
+  id             String   @id @default(cuid())
+  userId         String
+  providerId     String
+  purpose        String   @db.VarChar(300)
+  dataCategories String[]
+  sharedFields   Json
+  version        String   @db.VarChar(40)
+  status         String   @db.VarChar(20) @default("ACTIVE")
+  createdAt      DateTime @default(now())
+  expiresAt      DateTime?
+  revokedAt      DateTime?
+
+  provider InsuranceProvider @relation(fields: [providerId], references: [id], onDelete: Cascade)
+
+  @@index([userId, status])
+  @@map("insurance_consents")
+}
+
+model InsuranceProviderWebhook {
+  id             String              @id @default(cuid())
+  providerId     String
+  eventType      String              @db.VarChar(80)
+  eventId        String              @db.VarChar(180)
+  payload        Json
+  signatureValid Boolean             @default(false)
+  status         InsuranceEventStatus @default(RECEIVED)
+  processedAt    DateTime?
+  error          String?             @db.VarChar(500)
+  createdAt      DateTime            @default(now())
+
+  provider InsuranceProvider @relation(fields: [providerId], references: [id], onDelete: Cascade)
+
+  @@unique([providerId, eventId])
+  @@map("insurance_provider_webhooks")
+}
+
+model InsuranceProviderSync {
+  id            String   @id @default(cuid())
+  providerId    String
+  kind          String   @db.VarChar(60)
+  status        String   @db.VarChar(30) @default("PENDING")
+  attempts      Int      @default(0)
+  nextAttemptAt DateTime?
+  leaseUntil    DateTime?
+  error         String?  @db.VarChar(500)
+  createdAt     DateTime @default(now())
+
+  provider InsuranceProvider @relation(fields: [providerId], references: [id], onDelete: Cascade)
+
+  @@index([status, nextAttemptAt])
+  @@map("insurance_provider_syncs")
+}
+
+model InsuranceActivity {
+  id        String   @id @default(cuid())
+  userId    String
+  type      String   @db.VarChar(60)
+  title     String   @db.VarChar(200)
+  body      String?  @db.VarChar(500)
+  reference String?  @db.VarChar(160)
+  createdAt DateTime @default(now())
+
+  @@index([userId, createdAt])
+  @@map("insurance_activities")
+}
+
+model InsuranceNotificationPreference {
+  id                  String   @id @default(cuid())
+  userId              String   @unique
+  quoteNotifications  Boolean  @default(true)
+  applicationNotifications Boolean @default(true)
+  policyNotifications Boolean  @default(true)
+  premiumReminders    Boolean  @default(true)
+  renewalReminders    Boolean  @default(true)
+  claimNotifications  Boolean  @default(true)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  @@map("insurance_notification_preferences")
 }
 
 model Statement {

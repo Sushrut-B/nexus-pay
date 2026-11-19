@@ -994,6 +994,77 @@ export type DataDeletionRequestInput = z.infer<typeof dataDeletionRequestSchema>
 export type TransferDecisionInput = z.infer<typeof transferDecisionSchema>;
 
 // ---------------------------------------------------------------------------
+// Release 12 — Insurance marketplace & policy management
+// ---------------------------------------------------------------------------
+
+export const insuranceQuerySchema = z.object({
+  page: z.coerce.number().int().min(1).max(10_000).default(1),
+  pageSize: z.coerce.number().int().min(1).max(50).default(20),
+  category: z.string().max(60).optional(),
+  status: z.string().max(60).optional(),
+  providerId: z.string().max(64).optional(),
+  from: isoDate.optional(),
+  to: isoDate.optional(),
+});
+
+export const insuranceCompareSchema = z.object({
+  productIds: z.array(z.string().min(1).max(100)).min(2).max(4),
+});
+
+export const insuranceQuoteCreateSchema = z.object({
+  productId: z.string().trim().min(1).max(100),
+  answers: z.record(z.unknown()),
+  consentVersion: z.string().trim().min(3).max(40),
+  termsAccepted: z.literal(true, { errorMap: () => ({ message: "You must accept the privacy notice" }) }),
+});
+
+export const insuranceApplicationCreateSchema = z.object({
+  productId: z.string().trim().min(1).max(100),
+  quoteId: z.string().trim().max(64).optional(),
+  applicantData: z.record(z.unknown()),
+  idempotencyKey: z.string().trim().min(8).max(160),
+  consentVersion: z.string().trim().min(3).max(40),
+  disclosuresAccepted: z.literal(true, { errorMap: () => ({ message: "You must accept the disclosures" }) }),
+});
+
+export const insuranceClaimCreateSchema = z.object({
+  policyId: z.string().trim().min(1).max(64),
+  claimType: z.string().trim().min(2).max(80),
+  incidentDate: z.string().datetime(),
+  description: z.string().trim().max(1000).optional(),
+});
+
+export const insuranceDocumentUploadSchema = z.object({
+  category: z.string().trim().min(2).max(60),
+});
+
+export const insuranceConsentSchema = z.object({
+  providerId: z.string().trim().min(1).max(64),
+  purpose: z.string().trim().min(5).max(300),
+  dataCategories: z.array(z.string().max(60)).min(1).max(10),
+  sharedFields: z.array(z.string().max(80)).max(50).default([]),
+  version: z.string().trim().min(3).max(40),
+});
+
+export const insuranceWebhookSchema = z.object({
+  eventType: z.string().trim().min(3).max(80),
+  eventId: z.string().trim().min(3).max(180),
+  providerRef: z.string().trim().max(180).optional(),
+  signature: z.string().trim().min(8).max(500),
+  timestamp: z.string().trim().min(3).max(40),
+  payload: z.record(z.unknown()),
+});
+
+export type InsuranceQueryInput = z.infer<typeof insuranceQuerySchema>;
+export type InsuranceCompareInput = z.infer<typeof insuranceCompareSchema>;
+export type InsuranceQuoteCreateInput = z.infer<typeof insuranceQuoteCreateSchema>;
+export type InsuranceApplicationCreateInput = z.infer<typeof insuranceApplicationCreateSchema>;
+export type InsuranceClaimCreateInput = z.infer<typeof insuranceClaimCreateSchema>;
+export type InsuranceDocumentUploadInput = z.infer<typeof insuranceDocumentUploadSchema>;
+export type InsuranceConsentInput = z.infer<typeof insuranceConsentSchema>;
+export type InsuranceWebhookInput = z.infer<typeof insuranceWebhookSchema>;
+
+// ---------------------------------------------------------------------------
 // Release 11 — Credit marketplace and loan management
 // ---------------------------------------------------------------------------
 

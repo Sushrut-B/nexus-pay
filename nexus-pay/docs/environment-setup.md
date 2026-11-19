@@ -191,6 +191,21 @@ MAIL_FROM="Nexus Pay <no-reply@nexuspay.local>"
 With Mailpit running, the reset email is visible at `http://localhost:8025`. If
 `SMTP_HOST` is empty, email delivery is disabled.
 
+### Sandbox integration flags (Releases 10–12)
+
+```dotenv
+NEXUS_EXTERNAL_SANDBOX_ENABLED="false"
+NEXUS_CREDIT_SANDBOX_ENABLED="false"
+NEXUS_INSURANCE_SANDBOX_ENABLED="false"
+```
+
+These gates enable clearly labelled test-provider fixtures only. Keep them
+`false` in production. `NEXUS_INSURANCE_SANDBOX_ENABLED=true` enables the
+demonstration insurer; no real insurer, quote, policy or claim exists.
+
+For local end-to-end runs that create several users, set `E2E_TEST_MODE=true`
+to raise the in-memory rate-limit thresholds. Production defaults are unchanged.
+
 ### Raftline settings
 
 Preferred per-node configuration:
