@@ -39,6 +39,7 @@ const NAV = [
   { href: "/control/travel", label: "Travel Operations", icon: Plane },
   { href: "/control/investments", label: "Investment Operations", icon: LineChart },
   { href: "/control/tax", label: "Tax Operations", icon: FileText },
+  { href: "/control/global", label: "Global Finance", icon: Landmark },
   { href: "/control/admin", label: "Administration", icon: Users, adminOnly: true },
 ];
 

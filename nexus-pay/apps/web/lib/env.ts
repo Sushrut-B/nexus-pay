@@ -112,6 +112,22 @@ const envSchema = z.object({
     .default("true")
     .transform((value) => value === "true"),
   NEXUS_TAX_DEFAULT_FINANCIAL_YEAR: z.string().trim().min(7).max(10).default("2025-26"),
+
+  // Release 18 — global finance. All provider capabilities are OFF by default.
+  NEXUS_GLOBAL_ENABLED: z
+    .enum(["true", "false"])
+    .default("true")
+    .transform((value) => value === "true"),
+  NEXUS_GLOBAL_FX_SANDBOX_ENABLED: z
+    .enum(["true", "false"])
+    .default("false")
+    .transform((value) => value === "true"),
+  NEXUS_GLOBAL_PAYMENTS_SANDBOX_ENABLED: z
+    .enum(["true", "false"])
+    .default("false")
+    .transform((value) => value === "true"),
+  NEXUS_GLOBAL_RATE_STALE_HOURS: z.coerce.number().int().min(1).max(720).default(24),
+  NEXUS_GLOBAL_DEFAULT_DISPLAY_CURRENCY: z.string().trim().length(3).regex(/^[A-Z]{3}$/).default("INR"),
 });
 
 let cached: z.infer<typeof envSchema> | null = null;

@@ -97,3 +97,127 @@ function toSafeMinor(amountMinor: number | bigint): bigint {
   }
   return minor;
 }
+
+// ---------------------------------------------------------------------------
+// Release 18 — explicit ISO-4217 minor-unit precision.
+// The legacy helpers above assume 2 decimals (paise/cents). Global finance uses
+// an explicit exponent table so zero-decimal (JPY) and three-decimal (KWD) minor
+// units are handled correctly. No floating-point arithmetic is used.
+// ---------------------------------------------------------------------------
+
+/** Currencies exchanged in Release 18 and their ISO-4217 minor-unit exponents. */
+export const CURRENCY_EXPONENTS: Readonly<Record<string, number>> = Object.freeze({
+  INR: 2, USD: 2, EUR: 2, GBP: 2, SGD: 2, AED: 2, AUD: 2, CAD: 2, CHF: 2,
+  JPY: 0, KWD: 3, BHD: 3, OMR: 3, TND: 3,
+});
+
+/** Default exponent for an unlisted currency (ISO-4217 majority). */
+export const DEFAULT_CURRENCY_EXPONENT = 2;
+
+export function currencyExponent(currency: string): number {
+  const code = currency.trim().toUpperCase();
+  if (!/^[A-Z]{3}$/.test(code)) {
+    throw new RangeError(`Invalid ISO-4217 currency code: ${currency}`);
+  }
+  return CURRENCY_EXPONENTS[code] ?? DEFAULT_CURRENCY_EXPONENT;
+}
+
+export function isValidCurrencyCode(currency: string): boolean {
+  return /^[A-Z]{3}$/.test(currency.trim().toUpperCase());
+}
+
+/** Parses a major-unit decimal string into integer minor units for a currency. */
+export function parseByCurrency(
+  input: string,
+  currency: string,
+  maxMinor = 1_000_000_000_000,
+): MoneyParseResult {
+  const exponent = currencyExponent(currency);
+  const cleaned = input.trim().replace(/[,\s]/g, "");
+  if (!cleaned) return { ok: false, reason: "EMPTY" };
+  const pattern = exponent === 0
+    ? /^\d+$/
+    : new RegExp(`^\\d+(\\.\\d{1,${exponent}})?$`);
+  if (!pattern.test(cleaned)) return { ok: false, reason: "FORMAT" };
+  const [whole = "0", fraction = ""] = cleaned.split(".");
+  const scaled = BigInt(fraction.padEnd(exponent, "0").slice(0, exponent));
+  const amountMinor = BigInt(whole) * 10n ** BigInt(exponent) + scaled;
+  if (amountMinor <= 0n) return { ok: false, reason: "NON_POSITIVE" };
+  if (amountMinor > BigInt(maxMinor)) return { ok: false, reason: "TOO_LARGE" };
+  const numeric = Number(amountMinor);
+  if (!Number.isSafeInteger(numeric)) return { ok: false, reason: "TOO_LARGE" };
+  return { ok: true, amountMinor: numeric };
+}
+
+/** Formats integer minor units for a currency using its explicit exponent. */
+export function formatByCurrency(
+  amountMinor: number | bigint,
+  currency: string,
+  locale = "en-IN",
+): string {
+  const exponent = currencyExponent(currency);
+  const minor = toSafeMinor(amountMinor);
+  const negative = minor < 0n;
+  const absolute = negative ? -minor : minor;
+  const divisor = 10n ** BigInt(exponent);
+  const whole = absolute / divisor;
+  const fraction = exponent === 0 ? "" : (absolute % divisor).toString().padStart(exponent, "0");
+  const wholeText = new Intl.NumberFormat(locale, { maximumFractionDigits: 0 }).format(Number(whole));
+  const symbol = new Intl.NumberFormat(locale, {
+    style: "currency", currency,
+    minimumFractionDigits: exponent, maximumFractionDigits: exponent,
+  }).formatToParts(0).filter((p) => p.type === "currency").map((p) => p.value).join("") || currency;
+  return `${negative ? "-" : ""}${symbol}${wholeText}${fraction ? "." + fraction : ""}`;
+}
+
+export type ConversionRounding = "HALF_UP" | "HALF_EVEN" | "FLOOR" | "CEIL";
+
+/**
+ * Converts integer minor units from one currency to another using a decimal rate
+ * expressed as `rateNumerator / rateDenominator` (both positive integers), so the
+ * rate itself never becomes a float. Rounds to the target currency's exponent.
+ */
+export function convertMinor(
+  amountMinor: number | bigint,
+  sourceCurrency: string,
+  targetCurrency: string,
+  rateNumerator: bigint | number,
+  rateDenominator: bigint | number,
+  rounding: ConversionRounding = "HALF_UP",
+): number {
+  const sourceExp = currencyExponent(sourceCurrency);
+  const targetExp = currencyExponent(targetCurrency);
+  const num = BigInt(rateNumerator);
+  const den = BigInt(rateDenominator);
+  if (num <= 0n || den <= 0n) throw new RangeError("Rate must be positive and finite");
+  const sourceMinor = toSafeMinor(amountMinor);
+  // major(source) = sourceMinor / 10^sourceExp
+  // major(target) = major(source) * num / den
+  // targetMinor  = major(target) * 10^targetExp
+  const scaled = sourceMinor * num * 10n ** BigInt(targetExp);
+  const divisor = den * 10n ** BigInt(sourceExp);
+  const q = scaled / divisor;
+  const remainder = scaled % divisor;
+  let result = q;
+  const twice = remainder * 2n;
+  if (remainder !== 0n) {
+    if (rounding === "CEIL" || (rounding === "HALF_UP" && twice >= divisor)) {
+      result += 1n;
+    } else if (rounding === "HALF_EVEN" && twice > divisor) {
+      result += 1n;
+    } else if (rounding === "HALF_EVEN" && twice === divisor && q % 2n === 1n) {
+      result += 1n;
+    }
+  }
+  const numeric = Number(result);
+  if (!Number.isSafeInteger(numeric)) throw new RangeError("Converted amount exceeds safe integer range");
+  return numeric;
+}
+
+/** Rounds a `numerator / denominator` rational to an integer using HALF_UP. */
+export function roundRatio(numerator: bigint, denominator: bigint): bigint {
+  if (denominator <= 0n) throw new RangeError("Denominator must be positive");
+  const q = numerator / denominator;
+  const r = numerator % denominator;
+  return r * 2n >= denominator ? q + 1n : q;
+}

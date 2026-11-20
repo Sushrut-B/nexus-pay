@@ -189,6 +189,7 @@ pnpm exec playwright test --config playwright.prod.config.ts
 - Travel: [Architecture](docs/travel-architecture.md) · [Provider guide](docs/travel-provider-guide.md) · [Release report](docs/release-15-report.md)
 - Investments: [Architecture](docs/investment-architecture.md) · [Provider guide](docs/investment-provider-guide.md) · [Release report](docs/release-16-report.md)
 - Tax: [Architecture](docs/tax-architecture.md) · [Rule sources](docs/tax-rule-sources.md) · [Release report](docs/release-17-report.md)
+- Global Finance: [Assessment](docs/release-18-assessment.md) / [Release report](docs/release-18-report.md) — tracking and valuation only; INR remains the sole transactable wallet currency.
 - Reports: [R2](docs/release-2-report.md) · [R3](docs/release-3-report.md) · [R4](docs/release-4-report.md) · [R5](docs/release-5-report.md) · [R6](docs/release-6-report.md) · [R7](docs/release-7-report.md) · [R8](docs/release-8-report.md) · [R9](docs/release-9-report.md) · [R10](docs/release-10-report.md) · [R11](docs/release-11-report.md) · [R12](docs/release-12-report.md) · [R13](docs/release-13-report.md) · [R14](docs/release-14-report.md) · [R15](docs/release-15-report.md) · [R16](docs/release-16-report.md) · [R17](docs/release-17-report.md)
 
 

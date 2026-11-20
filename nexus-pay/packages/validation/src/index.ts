@@ -1571,3 +1571,132 @@ export type TaxCreditInput = z.infer<typeof taxCreditSchema>;
 export type TaxScenarioInput = z.infer<typeof taxScenarioSchema>;
 export type TaxProfileInput = z.infer<typeof taxProfileSchema>;
 
+// ---------------------------------------------------------------------------
+// Release 18 — Global finance, FX and international payment readiness.
+// Rates are supplied as exact decimal strings; original amounts are always
+// preserved in integer minor units with their own currency.
+// ---------------------------------------------------------------------------
+
+const G18_CURRENCY = z.string().trim().length(3).regex(/^[A-Z]{3}$/, "Use a 3-letter ISO-4217 code");
+
+export const globalDisplayCurrencySchema = z.object({
+  currency: z.enum(["INR", "USD", "EUR", "GBP", "SGD", "AED", "AUD", "CAD", "JPY", "CHF"]),
+});
+
+export const globalConvertSchema = z.object({
+  from: G18_CURRENCY,
+  to: G18_CURRENCY,
+  amountMinor: z.number().int().min(1).max(1_000_000_000_000),
+  asOf: z.string().datetime().optional(),
+});
+
+export const currencyAccountSchema = z.object({
+  name: z.string().trim().min(2).max(120),
+  providerCode: z.string().trim().min(2).max(60),
+  accountType: z.string().trim().min(2).max(60),
+  currency: G18_CURRENCY,
+  originalBalanceMinor: z.number().int().min(0).max(1_000_000_000_000),
+  classification: z.enum(["VERIFIED_PROVIDER_DATA", "USER_REPORTED", "SANDBOX_DATA", "ESTIMATED_VALUE", "STALE_DATA", "REQUIRES_REVIEW"]).default("USER_REPORTED"),
+  sourceRef: z.string().trim().max(160).optional(),
+  note: z.string().trim().max(500).optional(),
+});
+
+export const currencyWatchlistSchema = z.object({
+  name: z.string().trim().min(2).max(120),
+  pairs: z.array(z.object({
+    baseCurrency: G18_CURRENCY,
+    quoteCurrency: G18_CURRENCY,
+  })).min(1).max(20),
+});
+
+export const currencyWatchlistUpdateSchema = z.object({
+  name: z.string().trim().min(2).max(120).optional(),
+  pairs: z.array(z.object({
+    baseCurrency: G18_CURRENCY,
+    quoteCurrency: G18_CURRENCY,
+  })).min(1).max(20).optional(),
+});
+
+export const rateAlertSchema = z.object({
+  baseCurrency: G18_CURRENCY,
+  quoteCurrency: G18_CURRENCY,
+  direction: z.enum(["ABOVE", "BELOW", "CHANGE_PERCENT"]),
+  targetRate: z.string().trim().regex(/^\d+(\.\d{1,12})?$/).optional(),
+  changePercentBps: z.number().int().min(1).max(1_000_000).optional(),
+  paused: z.boolean().default(false),
+}).refine(
+  (v) => v.direction === "CHANGE_PERCENT" ? v.changePercentBps != null : v.targetRate != null,
+  { message: "targetRate is required for ABOVE/BELOW; changePercentBps for CHANGE_PERCENT" },
+);
+
+export const fxQuoteRequestSchema = z.object({
+  from: G18_CURRENCY,
+  to: G18_CURRENCY,
+  amountMinor: z.number().int().min(1).max(1_000_000_000_000),
+  providerCode: z.string().trim().min(2).max(60).optional(),
+});
+
+export const internationalBeneficiarySchema = z.object({
+  label: z.string().trim().min(2).max(120),
+  country: z.string().trim().length(2).regex(/^[A-Z]{2}$/, "Use a 2-letter country code"),
+  currency: G18_CURRENCY,
+  bankName: z.string().trim().max(160).optional(),
+  accountIdentifier: z.string().trim().min(4).max(120),
+  routingInformation: z.string().trim().max(120).optional(),
+  paymentMethod: z.string().trim().min(2).max(60),
+});
+
+export const internationalTransferSchema = z.object({
+  beneficiaryId: z.string().trim().min(1),
+  sourceCurrency: G18_CURRENCY,
+  targetCurrency: G18_CURRENCY,
+  sourceMinor: z.number().int().min(1).max(1_000_000_000_000),
+  purposeCode: z.string().trim().min(2).max(40),
+  providerCode: z.string().trim().min(2).max(60).optional(),
+  idempotencyKey: z.string().trim().min(8).max(80).regex(/^[A-Za-z0-9][A-Za-z0-9_.:-]{7,79}$/),
+});
+
+export const foreignExpenseSchema = z.object({
+  originalMinor: z.number().int().min(1).max(1_000_000_000_000),
+  originalCurrency: G18_CURRENCY,
+  category: z.enum(["ACCOMMODATION", "FOOD", "TRANSPORT", "SHOPPING", "EDUCATION", "HEALTHCARE", "TRAVEL", "ENTERTAINMENT", "SUBSCRIPTIONS", "PROFESSIONAL", "OTHER"]),
+  merchant: z.string().trim().max(200).optional(),
+  country: z.string().trim().length(2).regex(/^[A-Z]{2}$/),
+  occurredAt: z.string().datetime(),
+  paymentMethod: z.string().trim().max(80).optional(),
+  travelId: z.string().trim().max(80).optional(),
+  sourceRef: z.string().trim().max(160).optional(),
+});
+
+export const foreignAssetSchema = z.object({
+  kind: z.enum(["ASSET", "LIABILITY"]),
+  label: z.string().trim().min(2).max(160),
+  originalMinor: z.number().int().min(0).max(1_000_000_000_000),
+  originalCurrency: G18_CURRENCY,
+  valuationDate: z.string().datetime(),
+  sourceRef: z.string().trim().max(160).optional(),
+  note: z.string().trim().max(500).optional(),
+});
+
+export const travelCashSchema = z.object({
+  tripId: z.string().trim().min(1),
+  currency: G18_CURRENCY,
+  startingMinor: z.number().int().min(0).max(1_000_000_000_000),
+  receivedMinor: z.number().int().min(0).max(1_000_000_000_000).default(0),
+  spentMinor: z.number().int().min(0).max(1_000_000_000_000).default(0),
+  userReportedRate: z.string().trim().regex(/^\d+(\.\d{1,12})?$/).optional(),
+});
+
+export type GlobalDisplayCurrencyInput = z.infer<typeof globalDisplayCurrencySchema>;
+export type GlobalConvertInput = z.infer<typeof globalConvertSchema>;
+export type CurrencyAccountInput = z.infer<typeof currencyAccountSchema>;
+export type CurrencyWatchlistInput = z.infer<typeof currencyWatchlistSchema>;
+export type CurrencyWatchlistUpdateInput = z.infer<typeof currencyWatchlistUpdateSchema>;
+export type RateAlertInput = z.infer<typeof rateAlertSchema>;
+export type FxQuoteRequestInput = z.infer<typeof fxQuoteRequestSchema>;
+export type InternationalBeneficiaryInput = z.infer<typeof internationalBeneficiarySchema>;
+export type InternationalTransferInput = z.infer<typeof internationalTransferSchema>;
+export type ForeignExpenseInput = z.infer<typeof foreignExpenseSchema>;
+export type ForeignAssetInput = z.infer<typeof foreignAssetSchema>;
+export type TravelCashInput = z.infer<typeof travelCashSchema>;
+

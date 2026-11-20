@@ -1,0 +1,35 @@
+import type { NextRequest } from "next/server";
+import { assertMutationRequest } from "@/lib/api/csrf";
+import { enforceRateLimitOrThrow } from "@/lib/api/rate-limit";
+import { readJsonBody } from "@/lib/api/request";
+import { ApiError, getRequestId, handleRouteError, jsonOk } from "@/lib/api/response";
+import { getAuthenticatedUser } from "@/lib/auth/session";
+import { foreignAssetSchema } from "@nexus/validation";
+import { listAssetsLiabilities, createAssetLiability } from "@/lib/global/global-accounts-service";
+import { getDisplayCurrency } from "@/lib/global/global-dashboard-service";
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+
+export async function GET(request: NextRequest) {
+  const requestId = getRequestId(request);
+  try {
+    const auth = await getAuthenticatedUser();
+    if (!auth) throw new ApiError(401, "AUTHENTICATION_ERROR", "Please sign in to continue.");
+    enforceRateLimitOrThrow("global:" + auth.user.id, 25, 60000);
+    const display = request.nextUrl.searchParams.get("currency") ?? await getDisplayCurrency(auth.user.id);
+    return jsonOk({ items: await listAssetsLiabilities(auth.user.id, display) }, requestId);
+  } catch (error) { return handleRouteError(error, requestId); }
+}
+
+export async function POST(request: NextRequest) {
+  const requestId = getRequestId(request);
+  try {
+    assertMutationRequest(request);
+    const auth = await getAuthenticatedUser();
+    if (!auth) throw new ApiError(401, "AUTHENTICATION_ERROR", "Please sign in to continue.");
+    enforceRateLimitOrThrow("global:" + auth.user.id, 20, 60000);
+    const input = foreignAssetSchema.parse(await readJsonBody(request));
+    const id = await createAssetLiability(auth.user.id, { ...input, valuationDate: new Date(input.valuationDate) });
+    return jsonOk({ id }, requestId, 201);
+  } catch (error) { return handleRouteError(error, requestId); }
+}

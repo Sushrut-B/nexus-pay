@@ -507,6 +507,15 @@ enum NotificationType {
   TAX_DOCUMENT_PROCESSED
   TAX_DEADLINE_REMINDER
   TAX_RECONCILIATION_REQUIRED
+  // Release 18 — global finance
+  GLOBAL_RATE_ALERT_TRIGGERED
+  GLOBAL_RATE_SYNC_FAILED
+  GLOBAL_FX_QUOTE_READY
+  GLOBAL_FX_QUOTE_EXPIRED
+  GLOBAL_TRANSFER_STATUS_CHANGED
+  GLOBAL_TRANSFER_RECONCILIATION_REQUIRED
+  GLOBAL_COMPLIANCE_REVIEW
+  GLOBAL_VALUATION_READY
 }
 
 enum GroupActivityEventType {
@@ -4250,6 +4259,18 @@ enum SecurityEventType {
   TAX_DOCUMENT_PROCESSED
   TAX_DEADLINE_REMINDER
   TAX_RECONCILIATION_REQUIRED
+  // Release 18 — global finance
+  GLOBAL_DISPLAY_CURRENCY_CHANGED
+  GLOBAL_FX_CONVERSION_VIEWED
+  GLOBAL_BENEFICIARY_CREATED
+  GLOBAL_BENEFICIARY_ACCESSED
+  GLOBAL_TRANSFER_CREATED
+  GLOBAL_TRANSFER_STATUS_CHANGED
+  GLOBAL_PROVIDER_CONFIG_CHANGED
+  GLOBAL_RECONCILIATION_RESOLVED
+  GLOBAL_COMPLIANCE_STATE_CHANGED
+  GLOBAL_ALERT_CHANGED
+  GLOBAL_RATE_MANUAL_EDIT_BLOCKED
 }
 
 enum SecurityOutboxStatus {
@@ -7106,4 +7127,388 @@ model Statement {
 
   @@index([userId, createdAt])
   @@map("statements")
+}
+
+// ===========================================================================
+// Release 18 — Global Finance
+// Original (amountMinor, currency) is always preserved. Converted values are
+// clearly labelled estimates at a stated rate/source/as-of time. No wallet or
+// ledger tables are added or modified; INR remains the only settlement currency.
+// ===========================================================================
+
+model GlobalUserPreference {
+  id              String   @id @default(cuid())
+  userId          String   @unique @db.VarChar(80)
+  displayCurrency String   @db.VarChar(3) @default("INR")
+  alertsEnabled   Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@map("global_user_preferences")
+}
+
+model FxProvider {
+  id            String   @id @default(cuid())
+  code          String   @unique @db.VarChar(60)
+  displayName   String   @db.VarChar(160)
+  mode          String   @db.VarChar(20)
+  status        String   @db.VarChar(20)
+  capabilities  Json     @default("{}")
+  config        Json     @default("{}")
+  paused        Boolean  @default(false)
+  lastCheckedAt DateTime?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@map("fx_providers")
+}
+
+model FxRate {
+  id             String   @id @default(cuid())
+  baseCurrency   String   @db.VarChar(3)
+  quoteCurrency  String   @db.VarChar(3)
+  rateText       String   @db.VarChar(48)
+  classification String   @db.VarChar(24)
+  providerCode   String   @db.VarChar(60)
+  sourceRef      String?  @db.VarChar(160)
+  asOf           DateTime
+  fetchedAt      DateTime @default(now())
+  precision      Int      @default(6)
+  isHistorical   Boolean  @default(false)
+
+  @@index([baseCurrency, quoteCurrency, fetchedAt])
+  @@index([providerCode, classification, asOf])
+  @@map("fx_rates")
+}
+
+model FxSyncJob {
+  id             String    @id @default(cuid())
+  kind           String    @db.VarChar(60)
+  providerCode   String?   @db.VarChar(60)
+  payload        Json      @default("{}")
+  status         String    @db.VarChar(20) @default("PENDING")
+  attempts       Int       @default(0)
+  maxAttempts    Int       @default(3)
+  leaseUntil     DateTime?
+  nextAttemptAt  DateTime?
+  lastError      String?   @db.VarChar(1000)
+  idempotencyKey String?   @unique @db.VarChar(120)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  @@index([status, nextAttemptAt])
+  @@index([kind, createdAt])
+  @@map("fx_sync_jobs")
+}
+
+model CurrencyWatchlist {
+  id        String   @id @default(cuid())
+  userId    String   @db.VarChar(80)
+  name      String   @db.VarChar(120)
+  pairs     Json     @default("[]")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId, createdAt])
+  @@map("currency_watchlists")
+}
+
+model RateAlert {
+  id               String    @id @default(cuid())
+  userId           String    @db.VarChar(80)
+  baseCurrency     String    @db.VarChar(3)
+  quoteCurrency    String    @db.VarChar(3)
+  direction        String    @db.VarChar(20)
+  targetRateText   String?   @db.VarChar(48)
+  changePercentBps Int?
+  paused           Boolean   @default(false)
+  lastTriggeredAt  DateTime?
+  classification   String    @db.VarChar(24) @default("REFERENCE")
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  @@index([userId, createdAt])
+  @@index([paused, baseCurrency, quoteCurrency])
+  @@map("rate_alerts")
+}
+
+model GlobalAccount {
+  id                   String    @id @default(cuid())
+  userId               String    @db.VarChar(80)
+  name                 String    @db.VarChar(120)
+  providerCode         String    @db.VarChar(60)
+  accountType          String    @db.VarChar(60)
+  currency             String    @db.VarChar(3)
+  originalBalanceMinor BigInt
+  classification       String    @db.VarChar(30)
+  verificationStatus   String    @db.VarChar(30) @default("UNVERIFIED")
+  connectionStatus     String    @db.VarChar(30) @default("ACTIVE")
+  sourceRef            String?   @db.VarChar(160)
+  isWallet             Boolean   @default(false)
+  lastSyncedAt         DateTime?
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+
+  @@unique([userId, providerCode, sourceRef])
+  @@index([userId, currency])
+  @@map("global_accounts")
+}
+
+model GlobalBalanceSnapshot {
+  id        String   @id @default(cuid())
+  accountId String   @db.VarChar(80)
+  userId    String   @db.VarChar(80)
+  balance   BigInt
+  currency  String   @db.VarChar(3)
+  sourceRef String?  @db.VarChar(160)
+  capturedAt DateTime @default(now())
+
+  @@index([accountId, capturedAt])
+  @@map("global_balance_snapshots")
+}
+
+model ForeignAssetLiability {
+  id                String   @id @default(cuid())
+  userId            String   @db.VarChar(80)
+  kind              String   @db.VarChar(12)
+  label             String   @db.VarChar(160)
+  originalMinor     BigInt
+  originalCurrency  String   @db.VarChar(3)
+  valuationDate     DateTime
+  rateText          String?  @db.VarChar(48)
+  rateSource        String?  @db.VarChar(60)
+  verificationStatus String  @db.VarChar(30) @default("USER_REPORTED")
+  sourceRef         String?  @db.VarChar(160)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@index([userId, kind])
+  @@map("foreign_assets_liabilities")
+}
+
+model FxQuote {
+  id                   String    @id @default(cuid())
+  userId               String    @db.VarChar(80)
+  state                String    @db.VarChar(30) @default("QUOTE_REQUESTED")
+  sourceCurrency       String    @db.VarChar(3)
+  targetCurrency       String    @db.VarChar(3)
+  sourceMinor          BigInt
+  targetMinor          BigInt?
+  rateText             String?   @db.VarChar(48)
+  classification       String    @db.VarChar(24) @default("INDICATIVE")
+  providerCode         String    @db.VarChar(60)
+  providerFeeMinor     BigInt?
+  taxMinor             BigInt?
+  expiresAt            DateTime?
+  providerRef          String?   @db.VarChar(160)
+  payableMinor         BigInt?
+  receivableMinor      BigInt?
+  idempotencyKey       String?   @unique @db.VarChar(120)
+  confirmation         Json?
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+
+  @@index([userId, createdAt])
+  @@index([state, expiresAt])
+  @@map("fx_quotes")
+}
+
+model InternationalProvider {
+  id            String   @id @default(cuid())
+  code          String   @unique @db.VarChar(60)
+  displayName   String   @db.VarChar(160)
+  mode          String   @db.VarChar(20)
+  status        String   @db.VarChar(20)
+  capabilities  Json     @default("{}")
+  config        Json     @default("{}")
+  paused        Boolean  @default(false)
+  lastCheckedAt DateTime?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@map("international_providers")
+}
+
+model CorridorConfiguration {
+  id                String   @id @default(cuid())
+  providerCode      String   @db.VarChar(60)
+  sourceCountry     String   @db.VarChar(2)
+  destinationCountry String  @db.VarChar(2)
+  sourceCurrency    String   @db.VarChar(3)
+  targetCurrency    String   @db.VarChar(3)
+  enabled           Boolean  @default(false)
+  notice            String?  @db.VarChar(500)
+
+  @@unique([providerCode, sourceCountry, destinationCountry, sourceCurrency, targetCurrency])
+  @@map("corridor_configurations")
+}
+
+model InternationalBeneficiary {
+  id                String   @id @default(cuid())
+  userId            String   @db.VarChar(80)
+  label             String   @db.VarChar(120)
+  country           String   @db.VarChar(2)
+  currency          String   @db.VarChar(3)
+  bankName          String?  @db.VarChar(160)
+  encryptedDetails  String   @db.Text
+  accountMasked     String   @db.VarChar(40)
+  paymentMethod     String   @db.VarChar(60)
+  providerRef       String?  @db.VarChar(160)
+  verificationStatus String  @db.VarChar(30) @default("VERIFICATION_PENDING")
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@index([userId, createdAt])
+  @@map("international_beneficiaries")
+}
+
+model InternationalTransfer {
+  id                  String    @id @default(cuid())
+  userId              String    @db.VarChar(80)
+  state               String    @db.VarChar(30) @default("CREATED")
+  beneficiaryId       String    @db.VarChar(80)
+  sourceCurrency      String    @db.VarChar(3)
+  targetCurrency      String    @db.VarChar(3)
+  sourceMinor         BigInt
+  targetMinor         BigInt?
+  feeMinor            BigInt?
+  providerCode        String    @db.VarChar(60)
+  providerRef         String?   @db.VarChar(160)
+  complianceState     String    @db.VarChar(30) @default("VERIFICATION_PENDING")
+  walletSettlementRef String?   @db.VarChar(160)
+  purposeCode         String    @db.VarChar(40)
+  idempotencyKey      String    @unique @db.VarChar(80)
+  failureReason       String?   @db.VarChar(500)
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  @@index([userId, createdAt])
+  @@index([state, providerRef])
+  @@map("international_transfers")
+}
+
+model InternationalTransferEvent {
+  id          String   @id @default(cuid())
+  transferId  String   @db.VarChar(80)
+  state       String   @db.VarChar(30)
+  detail      String?  @db.VarChar(500)
+  providerRef String?  @db.VarChar(160)
+  createdAt   DateTime @default(now())
+
+  @@index([transferId, createdAt])
+  @@map("international_transfer_events")
+}
+
+model InternationalPaymentWebhook {
+  id                String   @id @default(cuid())
+  providerCode      String   @db.VarChar(60)
+  eventId           String   @db.VarChar(160)
+  payload           Json     @default("{}")
+  signatureVerified Boolean  @default(false)
+  processed         Boolean  @default(false)
+  lastError         String?  @db.VarChar(500)
+  receivedAt        DateTime @default(now())
+
+  @@unique([providerCode, eventId])
+  @@index([processed, receivedAt])
+  @@map("international_payment_webhooks")
+}
+
+model InternationalReconciliation {
+  id          String   @id @default(cuid())
+  transferId  String   @db.VarChar(80)
+  providerRef String   @db.VarChar(160)
+  outcome     String   @db.VarChar(30)
+  detail      String?  @db.VarChar(500)
+  resolvedBy  String?  @db.VarChar(80)
+  createdAt   DateTime @default(now())
+
+  @@index([transferId, createdAt])
+  @@map("international_reconciliations")
+}
+
+model InternationalComplianceCheck {
+  id          String   @id @default(cuid())
+  userId      String   @db.VarChar(80)
+  transferId  String?  @db.VarChar(80)
+  kind        String   @db.VarChar(60)
+  state       String   @db.VarChar(30)
+  providerRef String?  @db.VarChar(160)
+  detail      String?  @db.VarChar(500)
+  createdAt   DateTime @default(now())
+
+  @@index([userId, createdAt])
+  @@map("international_compliance_checks")
+}
+
+model ForeignExpense {
+  id                String   @id @default(cuid())
+  userId            String   @db.VarChar(80)
+  originalMinor     BigInt
+  originalCurrency  String   @db.VarChar(3)
+  convertedMinor    BigInt?
+  displayCurrency   String   @db.VarChar(3) @default("INR")
+  category          String   @db.VarChar(30)
+  merchant          String?  @db.VarChar(200)
+  country           String   @db.VarChar(2)
+  occurredAt        DateTime
+  paymentMethod     String?  @db.VarChar(80)
+  exchangeRateText  String?  @db.VarChar(48)
+  fxFeeMinor        BigInt?
+  sourceProvider    String   @db.VarChar(60) @default("USER")
+  verificationStatus String  @db.VarChar(30) @default("USER_REPORTED")
+  sourceRef         String?  @db.VarChar(160)
+  travelId          String?  @db.VarChar(80)
+
+  @@unique([userId, sourceProvider, sourceRef])
+  @@index([userId, occurredAt])
+  @@index([userId, country])
+  @@map("foreign_expenses")
+}
+
+model TravelCashRecord {
+  id              String   @id @default(cuid())
+  userId          String   @db.VarChar(80)
+  tripId          String   @db.VarChar(80)
+  currency        String   @db.VarChar(3)
+  startingMinor   BigInt
+  receivedMinor   BigInt   @default(0)
+  spentMinor      BigInt   @default(0)
+  userReportedRate String? @db.VarChar(48)
+  createdAt       DateTime @default(now())
+
+  @@index([userId, tripId])
+  @@map("travel_cash_records")
+}
+
+model GlobalInsight {
+  id              String   @id @default(cuid())
+  userId          String   @db.VarChar(80)
+  kind            String   @db.VarChar(60)
+  title           String   @db.VarChar(200)
+  detail          String   @db.Text
+  currency        String   @db.VarChar(3)
+  rateSource      String?  @db.VarChar(60)
+  rateAsOf        DateTime?
+  calculationDate DateTime @default(now())
+  methodology     String   @db.Text
+  dataUsed        Json     @default("[]")
+
+  @@index([userId, calculationDate])
+  @@map("global_insights")
+}
+
+model GlobalAuditEvent {
+  id         String   @id @default(cuid())
+  actorType  String   @db.VarChar(30)
+  actorId    String   @db.VarChar(80)
+  action     String   @db.VarChar(80)
+  targetType String   @db.VarChar(60)
+  targetId   String   @db.VarChar(120)
+  metadata   Json     @default("{}")
+  createdAt  DateTime @default(now())
+
+  @@index([actorId, createdAt])
+  @@index([action, createdAt])
+  @@map("global_audit_events")
 }

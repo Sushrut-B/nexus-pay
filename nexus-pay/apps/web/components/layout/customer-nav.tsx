@@ -28,6 +28,7 @@ const LINKS = [
   { href: "/credit", label: "Credit" },
   { href: "/accounts", label: "Accounts" },
   { href: "/finance", label: "Financial Intelligence" },
+  { href: "/global-finance", label: "Global Finance" },
   { href: "/rewards", label: "Rewards" },
   { href: "/subscriptions", label: "Subscriptions" },
   { href: "/merchant", label: "For Business" },

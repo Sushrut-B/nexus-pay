@@ -145,12 +145,14 @@ const PERMISSIONS: Record<AdminRole, string[]> = {
     "insurance:read", "insurance:write", "bill-payments:read", "bill-payments:write",
     "travel:read", "travel:write", "investments:read", "investments:write",
     "tax:read", "tax:write",
+    "global:read", "global:write",
   ],
   VIEWER: [
     "cluster:read", "nodes:read", "leader:read", "metrics:read",
     "payments:read", "reconciliation:read", "chaos:read", "alerts:read", "diagnostics:read",
     "rewards:read", "finance:read", "accounts:read", "credit:read", "insurance:read",
     "fraud:read", "bill-payments:read", "travel:read", "investments:read", "tax:read",
+    "global:read",
   ],
   FRAUD_ADMIN: [
     "fraud:read", "fraud:write", "fraud:risk-policies", "fraud:rules", "fraud:cases", "fraud:models",
