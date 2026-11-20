@@ -1496,3 +1496,78 @@ export type InvestmentGoalInput = z.infer<typeof investmentGoalSchema>;
 export type GoalContributionInput = z.infer<typeof goalContributionSchema>;
 export type FixedIncomeInput = z.infer<typeof fixedIncomeSchema>;
 
+// ---------------------------------------------------------------------------
+// Release 17 — Tax centre & tax intelligence
+// ---------------------------------------------------------------------------
+
+export const taxFinancialYearSchema = z.object({
+  financialYear: z.string().trim().regex(/^\d{4}-\d{2}$/, "Use YYYY-YY"),
+});
+
+export const taxIncomeSchema = z.object({
+  financialYear: z.string().trim().regex(/^\d{4}-\d{2}$/),
+  category: z.enum(["SALARY", "BUSINESS", "INTEREST", "DIVIDEND", "RENTAL", "CAPITAL_GAINS", "OTHER", "PENSION", "FOREIGN", "USER_DECLARED"]),
+  description: z.string().trim().min(3).max(300),
+  amountMinor: z.number().int().min(1).max(1_000_000_000),
+  occurredAt: z.string().datetime(),
+  classification: z.enum(["POTENTIALLY_TAXABLE", "TAX_EXEMPT", "TAXABLE", "NON_TAXABLE", "REQUIRES_REVIEW"]).default("POTENTIALLY_TAXABLE"),
+  assumptions: z.string().trim().max(500).optional(),
+});
+
+export const taxIncomeUpdateSchema = z.object({
+  classification: z.enum(["UNCLASSIFIED", "POTENTIALLY_TAXABLE", "TAX_EXEMPT", "TAXABLE", "NON_TAXABLE", "REQUIRES_REVIEW", "USER_CONFIRMED"]).optional(),
+  category: z.enum(["SALARY", "BUSINESS", "INTEREST", "DIVIDEND", "RENTAL", "CAPITAL_GAINS", "OTHER", "PENSION", "FOREIGN", "USER_DECLARED"]).optional(),
+  userConfirmed: z.boolean().optional(),
+  note: z.string().trim().max(500).optional(),
+});
+
+export const taxCalculateSchema = z.object({
+  financialYear: z.string().trim().regex(/^\d{4}-\d{2}$/),
+  regime: z.enum(["OLD", "NEW"]).optional(),
+  salaryMinor: z.number().int().min(0).max(1_000_000_000).default(0),
+  otherIncomeMinor: z.number().int().min(0).max(1_000_000_000).default(0),
+  housePropertyMinor: z.number().int().min(0).max(1_000_000_000).default(0),
+  deductionsMinor: z.number().int().min(0).max(1_000_000_000).default(0),
+  specialRateIncomeMinor: z.number().int().min(0).max(1_000_000_000).default(0),
+  creditsMinor: z.number().int().min(0).max(1_000_000_000).default(0),
+});
+
+export const taxDeductionSchema = z.object({
+  financialYear: z.string().trim().regex(/^\d{4}-\d{2}$/),
+  ruleCode: z.string().trim().min(2).max(80),
+  regime: z.enum(["OLD", "NEW"]),
+  amountMinor: z.number().int().min(1).max(1_000_000_000),
+  date: z.string().datetime().optional(),
+  note: z.string().trim().max(500).optional(),
+});
+
+export const taxCreditSchema = z.object({
+  financialYear: z.string().trim().regex(/^\d{4}-\d{2}$/),
+  kind: z.enum(["TDS", "TCS", "ADVANCE_TAX", "SELF_ASSESSMENT"]),
+  amountMinor: z.number().int().min(1).max(1_000_000_000),
+  sourceRef: z.string().trim().min(2).max(160),
+  verified: z.boolean().default(false),
+});
+
+export const taxScenarioSchema = z.object({
+  financialYear: z.string().trim().regex(/^\d{4}-\d{2}$/),
+  name: z.string().trim().min(2).max(160),
+  inputs: z.record(z.number().int().min(0).max(1_000_000_000)),
+});
+
+export const taxProfileSchema = z.object({
+  pan: z.string().trim().min(10).max(10).optional(),
+  resident: z.boolean().default(true),
+  ageCategory: z.enum(["BELOW_60", "SENIOR_60_79", "SUPER_SENIOR_80"]).default("BELOW_60"),
+  defaultRegime: z.enum(["OLD", "NEW"]).default("NEW"),
+});
+
+export type TaxFinancialYearInput = z.infer<typeof taxFinancialYearSchema>;
+export type TaxIncomeInput = z.infer<typeof taxIncomeSchema>;
+export type TaxIncomeUpdateInput = z.infer<typeof taxIncomeUpdateSchema>;
+export type TaxCalculateInput = z.infer<typeof taxCalculateSchema>;
+export type TaxDeductionInput = z.infer<typeof taxDeductionSchema>;
+export type TaxCreditInput = z.infer<typeof taxCreditSchema>;
+export type TaxScenarioInput = z.infer<typeof taxScenarioSchema>;
+export type TaxProfileInput = z.infer<typeof taxProfileSchema>;
+

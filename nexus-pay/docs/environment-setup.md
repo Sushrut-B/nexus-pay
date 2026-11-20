@@ -244,6 +244,15 @@ NEXUS_INVESTMENTS_STALE_HOURS="48"
 
 The sandbox flag enables labelled test holdings, funds, prices and SIP records only. There is no SEBI/AMFI/Account Aggregator authorization, no real provider and no trading. Keep it false in production.
 
+Release 17 tax centre:
+
+```dotenv
+NEXUS_TAX_ENABLED="true"
+NEXUS_TAX_DEFAULT_FINANCIAL_YEAR="2025-26"
+```
+
+Tax figures are estimates only. No government filing API, PAN collection requirement or external AI document processing is enabled by default.
+
 ### Raftline settings
 
 Preferred per-node configuration:

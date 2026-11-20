@@ -44,6 +44,10 @@ balances or transaction history. Raftline remains the financial source of truth.
 > payment or transaction tables. Itinerary items store an absolute UTC instant
 > plus an IANA timezone. See `docs/travel-architecture.md`.
 >
+> Release 17 adds 30 tax models via `20261120130715_release17_tax_centre`.
+> Tax records preserve source provenance and rule-set versions and never modify
+> historical financial transactions. See `docs/tax-architecture.md`.
+>
 > Release 16 adds 28 investment models via
 > `20261120104733_release16_investments_wealth`. Holdings are external provider
 > snapshots with unique provider references; they never duplicate payment or

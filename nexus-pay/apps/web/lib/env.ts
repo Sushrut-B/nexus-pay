@@ -105,6 +105,13 @@ const envSchema = z.object({
     .default("false")
     .transform((value) => value === "true"),
   NEXUS_INVESTMENTS_STALE_HOURS: z.coerce.number().int().min(1).max(720).default(48),
+
+  // Release 17 — tax centre (estimates only, no filing/government integration)
+  NEXUS_TAX_ENABLED: z
+    .enum(["true", "false"])
+    .default("true")
+    .transform((value) => value === "true"),
+  NEXUS_TAX_DEFAULT_FINANCIAL_YEAR: z.string().trim().min(7).max(10).default("2025-26"),
 });
 
 let cached: z.infer<typeof envSchema> | null = null;

@@ -503,6 +503,10 @@ enum NotificationType {
   INVESTMENT_PRICE_ALERT
   INVESTMENT_GOAL_MILESTONE
   INVESTMENT_DOCUMENT_AVAILABLE
+  TAX_CALCULATION_READY
+  TAX_DOCUMENT_PROCESSED
+  TAX_DEADLINE_REMINDER
+  TAX_RECONCILIATION_REQUIRED
 }
 
 enum GroupActivityEventType {
@@ -4242,6 +4246,10 @@ enum SecurityEventType {
   INVESTMENT_GOAL_CREATED
   INVESTMENT_WATCHLIST_CHANGED
   UNUSUAL_INVESTMENT_ACTIVITY
+  TAX_CALCULATION_READY
+  TAX_DOCUMENT_PROCESSED
+  TAX_DEADLINE_REMINDER
+  TAX_RECONCILIATION_REQUIRED
 }
 
 enum SecurityOutboxStatus {
@@ -6533,6 +6541,554 @@ model InvestmentAnalyticsJob {
 
   @@index([status, createdAt])
   @@map("investment_analytics_jobs")
+}
+
+// ---------------------------------------------------------------------------
+// Release 17 — Tax Centre & tax intelligence.
+// Estimates only. No government filing/assessment claim. Source provenance and
+// rule versions are preserved for every derived figure.
+// ---------------------------------------------------------------------------
+
+enum TaxRegime {
+  OLD
+  NEW
+}
+
+enum TaxFinancialYearStatus {
+  OPEN
+  ACTIVE
+  CLOSED
+}
+
+enum TaxIncomeCategory {
+  SALARY
+  BUSINESS
+  INTEREST
+  DIVIDEND
+  RENTAL
+  CAPITAL_GAINS
+  OTHER
+  PENSION
+  FOREIGN
+  USER_DECLARED
+}
+
+enum TaxClassificationStatus {
+  UNCLASSIFIED
+  POTENTIALLY_TAXABLE
+  TAX_EXEMPT
+  TAXABLE
+  NON_TAXABLE
+  REQUIRES_REVIEW
+  USER_CONFIRMED
+}
+
+enum TaxSourceType {
+  PROVIDER
+  USER_DECLARED
+  DOCUMENT
+  SYSTEM_DERIVED
+}
+
+enum TaxDocumentStatus {
+  PENDING
+  READY
+  EXTRACTED
+  FAILED
+  DELETED
+}
+
+enum TaxCalculationStatus {
+  DRAFT
+  COMPLETED
+  REQUIRES_REVIEW
+  FAILED
+}
+
+enum TaxMatchLevel {
+  HIGH
+  MEDIUM
+  LOW
+  UNMATCHED
+}
+
+enum TaxReconciliationStatus {
+  PENDING
+  CONFIRMED
+  RESOLVED
+}
+
+enum TaxJobStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+  DEAD_LETTER
+}
+
+enum TaxCapitalGainType {
+  SHORT_TERM
+  LONG_TERM
+  EXEMPT
+  MANUAL_REVIEW
+}
+
+enum TaxDeadlineStatus {
+  PENDING
+  COMPLETED
+  OVERDUE
+}
+
+model TaxRuleSet {
+  id            String   @id @default(cuid())
+  version       String   @unique @db.VarChar(60)
+  financialYear String   @db.VarChar(20)
+  assessmentYear String  @db.VarChar(20)
+  status        String   @db.VarChar(20) @default("DRAFT")
+  sourceRef     String   @db.VarChar(500)
+  lastVerifiedAt DateTime
+  publishedAt   DateTime?
+  createdAt     DateTime @default(now())
+
+  slabs      TaxSlab[]
+  deductions TaxDeductionRule[]
+  exemptions TaxExemptionRule[]
+
+  @@index([financialYear, status])
+  @@map("tax_rule_sets")
+}
+
+model TaxRuleSource {
+  id         String   @id @default(cuid())
+  ruleSetId  String
+  title      String   @db.VarChar(300)
+  url        String   @db.VarChar(1024)
+  verifiedAt DateTime
+  createdAt  DateTime @default(now())
+
+  @@index([ruleSetId])
+  @@map("tax_rule_sources")
+}
+
+model TaxSlab {
+  id          String   @id @default(cuid())
+  ruleSetId   String
+  regime      TaxRegime
+  fromMinor   Int
+  toMinor     Int?
+  rateBps     Int
+  baseTaxMinor Int    @default(0)
+
+  ruleSet TaxRuleSet @relation(fields: [ruleSetId], references: [id], onDelete: Cascade)
+
+  @@index([ruleSetId, regime])
+  @@map("tax_slabs")
+}
+
+model TaxDeductionRule {
+  id          String   @id @default(cuid())
+  ruleSetId   String
+  regime      TaxRegime
+  code        String   @db.VarChar(80)
+  label       String   @db.VarChar(200)
+  section     String   @db.VarChar(80)
+  maxMinor    Int
+  conditions  String?  @db.VarChar(500)
+  applicable  Boolean  @default(true)
+
+  ruleSet TaxRuleSet @relation(fields: [ruleSetId], references: [id], onDelete: Cascade)
+
+  @@unique([ruleSetId, regime, code])
+  @@map("tax_deduction_rules")
+}
+
+model TaxExemptionRule {
+  id         String   @id @default(cuid())
+  ruleSetId  String
+  regime     TaxRegime
+  code       String   @db.VarChar(80)
+  label      String   @db.VarChar(200)
+  maxMinor   Int
+  conditions String?  @db.VarChar(500)
+
+  ruleSet TaxRuleSet @relation(fields: [ruleSetId], references: [id], onDelete: Cascade)
+
+  @@unique([ruleSetId, regime, code])
+  @@map("tax_exemption_rules")
+}
+
+model TaxDeadline {
+  id            String            @id @default(cuid())
+  financialYear String            @db.VarChar(20)
+  code          String            @db.VarChar(80)
+  title         String            @db.VarChar(200)
+  dueDate       DateTime
+  sourceRef     String            @db.VarChar(500)
+  status        TaxDeadlineStatus @default(PENDING)
+  createdAt     DateTime          @default(now())
+
+  @@unique([financialYear, code])
+  @@index([dueDate])
+  @@map("tax_deadlines")
+}
+
+model TaxProfile {
+  id            String    @id @default(cuid())
+  userId        String    @unique @db.VarChar(80)
+  panMasked     String?   @db.VarChar(30)
+  panEncrypted  String?   @db.VarChar(1024)
+  resident      Boolean   @default(true)
+  ageCategory   String    @db.VarChar(20) @default("BELOW_60")
+  defaultRegime TaxRegime @default(NEW)
+  preferences   Json      @default("{}")
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@map("tax_profiles")
+}
+
+model TaxFinancialYear {
+  id             String                @id @default(cuid())
+  userId         String                @db.VarChar(80)
+  financialYear  String                @db.VarChar(20)
+  assessmentYear String                @db.VarChar(20)
+  status         TaxFinancialYearStatus @default(OPEN)
+  createdAt      DateTime              @default(now())
+
+  @@unique([userId, financialYear])
+  @@map("tax_financial_years")
+}
+
+model TaxIncomeRecord {
+  id               String                  @id @default(cuid())
+  userId           String                  @db.VarChar(80)
+  financialYear    String                  @db.VarChar(20)
+  category         TaxIncomeCategory
+  classification   TaxClassificationStatus @default(UNCLASSIFIED)
+  sourceType       TaxSourceType           @default(SYSTEM_DERIVED)
+  sourceModule     String                  @db.VarChar(60)
+  sourceRef        String?                 @db.VarChar(160)
+  providerRef      String?                 @db.VarChar(160)
+  description      String                  @db.VarChar(300)
+  amountMinor      Int
+  currency         String                  @db.VarChar(10) @default("INR")
+  occurredAt       DateTime
+  userConfirmed    Boolean                 @default(false)
+  assumptions      String?                 @db.VarChar(500)
+  createdAt        DateTime                @default(now())
+  updatedAt        DateTime                @updatedAt
+
+  @@unique([userId, sourceModule, sourceRef])
+  @@index([userId, financialYear])
+  @@map("tax_income_records")
+}
+
+model TaxDeductionRecord {
+  id              String        @id @default(cuid())
+  userId          String        @db.VarChar(80)
+  financialYear   String        @db.VarChar(20)
+  ruleCode        String        @db.VarChar(80)
+  section         String        @db.VarChar(80)
+  label           String        @db.VarChar(200)
+  amountMinor     Int
+  regime          TaxRegime
+  date            DateTime?
+  sourceType      TaxSourceType @default(USER_DECLARED)
+  verified        Boolean       @default(false)
+  includeInEstimate Boolean     @default(true)
+  documentId      String?       @db.VarChar(80)
+  note            String?       @db.VarChar(500)
+  createdAt       DateTime      @default(now())
+
+  @@index([userId, financialYear, regime])
+  @@map("tax_deduction_records")
+}
+
+model TaxPaymentRecord {
+  id            String        @id @default(cuid())
+  userId        String        @db.VarChar(80)
+  financialYear String        @db.VarChar(20)
+  kind          String        @db.VarChar(60)
+  amountMinor   Int
+  paidAt        DateTime
+  sourceType    TaxSourceType @default(USER_DECLARED)
+  sourceRef     String?       @db.VarChar(160)
+  verified      Boolean       @default(false)
+  createdAt     DateTime      @default(now())
+
+  @@unique([userId, financialYear, kind, sourceRef])
+  @@index([userId, financialYear])
+  @@map("tax_payment_records")
+}
+
+model TaxCreditRecord {
+  id            String                  @id @default(cuid())
+  userId        String                  @db.VarChar(80)
+  financialYear String                  @db.VarChar(20)
+  kind          String                  @db.VarChar(60)
+  amountMinor   Int
+  sourceType    TaxSourceType           @default(USER_DECLARED)
+  sourceRef     String?                 @db.VarChar(160)
+  verified      Boolean                 @default(false)
+  status        TaxReconciliationStatus @default(PENDING)
+  createdAt     DateTime                @default(now())
+
+  @@unique([userId, financialYear, kind, sourceRef])
+  @@index([userId, financialYear])
+  @@map("tax_credit_records")
+}
+
+model TaxCapitalGainRecord {
+  id            String            @id @default(cuid())
+  userId        String            @db.VarChar(80)
+  financialYear String            @db.VarChar(20)
+  assetType     String            @db.VarChar(60)
+  gainType      TaxCapitalGainType
+  purchaseDate  DateTime?
+  purchaseMinor Int?
+  saleDate      DateTime
+  saleMinor     Int
+  costMinor     Int?
+  gainMinor     Int
+  instrumentRef String?           @db.VarChar(160)
+  providerRef   String?           @db.VarChar(160)
+  completeness  String            @db.VarChar(30) @default("PARTIAL")
+  notes         String?           @db.VarChar(500)
+  createdAt     DateTime          @default(now())
+
+  @@index([userId, financialYear])
+  @@map("tax_capital_gain_records")
+}
+
+model TaxLossRecord {
+  id             String            @id @default(cuid())
+  userId         String            @db.VarChar(80)
+  financialYear  String            @db.VarChar(20)
+  gainType       TaxCapitalGainType
+  lossMinor      Int
+  remainingMinor Int
+  originRef      String?           @db.VarChar(160)
+  expiryDate     DateTime?
+  status         String            @db.VarChar(30) @default("AVAILABLE")
+  createdAt      DateTime          @default(now())
+
+  @@index([userId, financialYear])
+  @@map("tax_loss_records")
+}
+
+model TaxReconciliationRecord {
+  id            String                  @id @default(cuid())
+  userId        String                  @db.VarChar(80)
+  financialYear String                  @db.VarChar(20)
+  category      String                  @db.VarChar(60)
+  sourceRef     String                  @db.VarChar(200)
+  amountMinor   Int
+  occurredAt    DateTime?
+  matchLevel    TaxMatchLevel           @default(UNMATCHED)
+  matchedRef    String?                 @db.VarChar(160)
+  status        TaxReconciliationStatus @default(PENDING)
+  rawPayload    Json                    @default("{}")
+  note          String?                 @db.VarChar(500)
+  createdAt     DateTime                @default(now())
+
+  @@unique([userId, category, sourceRef])
+  @@index([userId, status])
+  @@map("tax_reconciliation_records")
+}
+
+model TaxDocument {
+  id            String            @id @default(cuid())
+  userId        String            @db.VarChar(80)
+  financialYear String            @db.VarChar(20)
+  kind          String            @db.VarChar(80)
+  fileName      String            @db.VarChar(200)
+  contentType   String            @db.VarChar(100)
+  sizeBytes     Int
+  storagePath   String?           @db.VarChar(1024)
+  status        TaxDocumentStatus @default(PENDING)
+  providerRef   String?           @db.VarChar(160)
+  duplicateOf   String?           @db.VarChar(80)
+  createdAt     DateTime          @default(now())
+
+  extractions TaxDocumentExtraction[]
+
+  @@index([userId, financialYear, kind])
+  @@map("tax_documents")
+}
+
+model TaxDocumentExtraction {
+  id            String   @id @default(cuid())
+  documentId    String
+  field         String   @db.VarChar(80)
+  value         String   @db.VarChar(300)
+  confidenceBps Int      @default(0)
+  userConfirmed Boolean  @default(false)
+  createdAt     DateTime @default(now())
+
+  document TaxDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@index([documentId])
+  @@map("tax_document_extractions")
+}
+
+model TaxDocumentVerification {
+  id         String   @id @default(cuid())
+  documentId String
+  actorId    String   @db.VarChar(80)
+  status     String   @db.VarChar(40)
+  note       String?  @db.VarChar(500)
+  createdAt  DateTime @default(now())
+
+  @@index([documentId])
+  @@map("tax_document_verifications")
+}
+
+model TaxDocumentAccessLog {
+  id         String   @id @default(cuid())
+  documentId String
+  userId     String   @db.VarChar(80)
+  action     String   @db.VarChar(60)
+  createdAt  DateTime @default(now())
+
+  @@index([documentId, createdAt])
+  @@map("tax_document_access_logs")
+}
+
+model TaxCalculation {
+  id                    String              @id @default(cuid())
+  userId                String              @db.VarChar(80)
+  financialYear         String              @db.VarChar(20)
+  regime                TaxRegime
+  ruleSetVersion        String              @db.VarChar(60)
+  status                TaxCalculationStatus @default(DRAFT)
+  grossMinor            Int                 @default(0)
+  taxableMinor          Int                 @default(0)
+  taxBeforeCreditsMinor Int                 @default(0)
+  rebateMinor           Int                 @default(0)
+  surchargeMinor        Int                 @default(0)
+  cessMinor             Int                 @default(0)
+  creditsMinor          Int                 @default(0)
+  netTaxMinor           Int                 @default(0)
+  assumptions           Json                @default("[]")
+  createdAt             DateTime            @default(now())
+
+  lineItems TaxCalculationLineItem[]
+
+  @@index([userId, createdAt])
+  @@map("tax_calculations")
+}
+
+model TaxCalculationLineItem {
+  id            String  @id @default(cuid())
+  calculationId String
+  code          String  @db.VarChar(80)
+  label         String  @db.VarChar(200)
+  amountMinor   Int
+  detail        String? @db.VarChar(500)
+
+  calculation TaxCalculation @relation(fields: [calculationId], references: [id], onDelete: Cascade)
+
+  @@index([calculationId])
+  @@map("tax_calculation_line_items")
+}
+
+model TaxRegimeComparison {
+  id               String   @id @default(cuid())
+  userId           String   @db.VarChar(80)
+  financialYear    String   @db.VarChar(20)
+  oldCalculationId String   @db.VarChar(80)
+  newCalculationId String   @db.VarChar(80)
+  differenceMinor  Int
+  createdAt        DateTime @default(now())
+
+  @@index([userId, createdAt])
+  @@map("tax_regime_comparisons")
+}
+
+model TaxPlanningScenario {
+  id            String   @id @default(cuid())
+  userId        String   @db.VarChar(80)
+  financialYear String   @db.VarChar(20)
+  name          String   @db.VarChar(160)
+  assumptions   Json     @default("{}")
+  result        Json     @default("{}")
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  inputs TaxPlanningScenarioInput[]
+
+  @@index([userId, createdAt])
+  @@map("tax_planning_scenarios")
+}
+
+model TaxPlanningScenarioInput {
+  id         String @id @default(cuid())
+  scenarioId String
+  key        String @db.VarChar(80)
+  valueMinor Int
+
+  scenario TaxPlanningScenario @relation(fields: [scenarioId], references: [id], onDelete: Cascade)
+
+  @@index([scenarioId])
+  @@map("tax_planning_scenario_inputs")
+}
+
+model TaxSyncJob {
+  id            String      @id @default(cuid())
+  userId        String      @db.VarChar(80)
+  kind          String      @db.VarChar(60)
+  status        TaxJobStatus @default(PENDING)
+  attempts      Int         @default(0)
+  nextAttemptAt DateTime?
+  leaseUntil    DateTime?
+  error         String?     @db.VarChar(500)
+  payload       Json        @default("{}")
+  createdAt     DateTime    @default(now())
+  completedAt   DateTime?
+
+  @@index([status, nextAttemptAt])
+  @@map("tax_sync_jobs")
+}
+
+model TaxSyncHistory {
+  id         String   @id @default(cuid())
+  userId     String   @db.VarChar(80)
+  kind       String   @db.VarChar(60)
+  status     String   @db.VarChar(30)
+  detail     String?  @db.VarChar(500)
+  startedAt  DateTime @default(now())
+  finishedAt DateTime?
+
+  @@index([userId, startedAt])
+  @@map("tax_sync_history")
+}
+
+model TaxReminder {
+  id         String            @id @default(cuid())
+  userId     String            @db.VarChar(80)
+  deadlineId String?           @db.VarChar(80)
+  dueAt      DateTime
+  status     TaxDeadlineStatus @default(PENDING)
+  sentAt     DateTime?
+  createdAt  DateTime          @default(now())
+
+  @@unique([userId, deadlineId, dueAt])
+  @@index([status, dueAt])
+  @@map("tax_reminders")
+}
+
+model TaxAuditEvent {
+  id         String   @id @default(cuid())
+  actorType  String   @db.VarChar(30)
+  actorId    String   @db.VarChar(80)
+  action     String   @db.VarChar(80)
+  targetType String   @db.VarChar(60)
+  targetId   String   @db.VarChar(120)
+  metadata   Json     @default("{}")
+  createdAt  DateTime @default(now())
+
+  @@index([actorId, createdAt])
+  @@map("tax_audit_events")
 }
 
 model Statement {

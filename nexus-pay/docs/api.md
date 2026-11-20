@@ -789,3 +789,19 @@ Details: `docs/travel-architecture.md`, `docs/travel-provider-guide.md`, `docs/r
 | POST | `/api/control/investments/jobs/:id/retry` `/providers/:code/pause` `/run` | Audited read-only operations. |
 
 Details: `docs/investment-architecture.md`, `docs/investment-provider-guide.md`, `docs/release-16-report.md`.
+
+## Release 17 — Tax Centre
+
+| Method | Route | Notes |
+| --- | --- | --- |
+| GET | `/api/tax/dashboard` `/financial-years` `/deadlines` `/filing-readiness` `/profile` | Estimates and configuration. |
+| POST | `/api/tax/financial-years` `/consolidate` `/calculate` `/compare-regimes` `/assistant` | Versioned calculations and read-only assistant. |
+| GET/POST | `/api/tax/income` `/deductions` `/credits` `/documents` `/scenarios` | User records with provenance. |
+| PATCH/DELETE | `/api/tax/income/:id` `/scenarios/:id` `/documents/:id` | Review and correction. |
+| GET | `/api/tax/capital-gains` `/calculations` `/reconciliation` `/payments` | Derived, unconfirmed records. |
+| GET | `/api/tax/documents/:id/download` | Signed short-lived document access. |
+| POST | `/api/tax/documents/:id/extractions/confirm` `/reconciliation/:id/confirm` | User confirmation workflow. |
+| GET | `/api/control/tax/overview` `/rules` `/jobs` `/reconciliation` `/audit` | Tax operations. |
+| POST | `/api/control/tax/jobs/:id/retry` `/jobs/:id/pause` `/rules/:version/publish` `/run` | Audited operational controls. |
+
+Details: `docs/tax-architecture.md`, `docs/tax-rule-sources.md`, `docs/release-17-report.md`.
