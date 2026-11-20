@@ -37,6 +37,12 @@ balances or transaction history. Raftline remains the financial source of truth.
 > `20261120052803_release14_recharge_relations`. Bill payments link a Raftline
 > settlement reference to a provider transaction reference without duplicating
 > the payment or transaction tables. See `docs/bill-payment-architecture.md`.
+>
+> Release 15 adds 24 travel models via `20261120065911_release15_travel_mobility`
+> and `20261120071415_release15_reconciliation_status`. Booking records link a
+> Raftline settlement reference to a provider reference without duplicating the
+> payment or transaction tables. Itinerary items store an absolute UTC instant
+> plus an IANA timezone. See `docs/travel-architecture.md`.
 
 ## 2. Ownership boundary
 

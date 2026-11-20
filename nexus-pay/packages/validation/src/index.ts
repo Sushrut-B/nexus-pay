@@ -1331,3 +1331,93 @@ export type HouseholdInput = z.infer<typeof householdSchema>;
 export type HouseholdBillInput = z.infer<typeof householdBillSchema>;
 export type BillWebhookInput = z.infer<typeof billWebhookSchema>;
 
+// ---------------------------------------------------------------------------
+// Release 15 — Travel, mobility & smart ticketing
+// ---------------------------------------------------------------------------
+
+export const travelSearchSchema = z.object({
+  category: z.enum(["FLIGHT", "TRAIN", "BUS", "HOTEL", "CAB", "AIRPORT_TRANSFER", "LOCAL_MOBILITY"]),
+  origin: z.string().trim().max(120).optional(),
+  destination: z.string().trim().min(2).max(120),
+  departureDate: z.string().datetime().optional(),
+  returnDate: z.string().datetime().optional(),
+  passengers: z.coerce.number().int().min(1).max(9).default(1),
+  cabinClass: z.string().max(40).optional(),
+  checkOut: z.string().datetime().optional(),
+});
+
+export const travelBookingCreateSchema = z.object({
+  searchId: z.string().trim().min(1).max(80),
+  resultId: z.string().trim().min(1).max(80),
+  passengers: z.array(z.object({
+    firstName: z.string().trim().min(2).max(120),
+    lastName: z.string().trim().min(1).max(120),
+    dateOfBirth: z.string().datetime().optional(),
+  })).min(1).max(9),
+  idempotencyKey: z.string().trim().min(8).max(160),
+  termsAccepted: z.literal(true, { errorMap: () => ({ message: "You must review the fare and terms" }) }),
+});
+
+export const travelPassengerUpdateSchema = z.object({
+  firstName: z.string().trim().min(2).max(120).optional(),
+  lastName: z.string().trim().min(1).max(120).optional(),
+  dateOfBirth: z.string().datetime().optional(),
+});
+
+export const travelCancellationSchema = z.object({
+  reason: z.string().trim().min(5).max(500),
+  idempotencyKey: z.string().trim().min(8).max(160),
+});
+
+export const travelTripSchema = z.object({
+  name: z.string().trim().min(2).max(160),
+  destination: z.string().trim().max(200).optional(),
+  startDate: z.string().datetime().optional(),
+  endDate: z.string().datetime().optional(),
+  notes: z.string().trim().max(1000).optional(),
+});
+
+export const travelExpenseSchema = z.object({
+  category: z.string().trim().min(2).max(60),
+  amountMinor: z.number().int().min(1).max(100_000_000),
+  status: z.enum(["ESTIMATED", "PENDING", "CONFIRMED", "REFUNDED", "CANCELLED"]).default("CONFIRMED"),
+  description: z.string().trim().max(300).optional(),
+  occurredAt: z.string().datetime().optional(),
+});
+
+export const travelBudgetSchema = z.object({
+  amountMinor: z.number().int().min(1).max(100_000_000),
+  currency: z.string().trim().length(3).default("INR"),
+  categories: z.array(z.string().max(60)).max(30).default([]),
+});
+
+export const travelItineraryItemSchema = z.object({
+  bookingId: z.string().trim().max(80).optional(),
+  category: z.enum(["FLIGHT", "TRAIN", "BUS", "HOTEL", "CAB", "AIRPORT_TRANSFER", "LOCAL_MOBILITY"]),
+  title: z.string().trim().min(2).max(200),
+  startAt: z.string().datetime(),
+  endAt: z.string().datetime().optional(),
+  startTimeZone: z.string().trim().min(3).max(60).default("Asia/Kolkata"),
+  endTimeZone: z.string().trim().max(60).optional(),
+  location: z.string().trim().max(200).optional(),
+});
+
+export const travelWebhookSchema = z.object({
+  eventType: z.string().trim().min(3).max(80),
+  eventId: z.string().trim().min(3).max(180),
+  providerRef: z.string().trim().max(180).optional(),
+  signature: z.string().trim().min(8).max(500),
+  timestamp: z.string().trim().min(3).max(40),
+  payload: z.record(z.unknown()),
+});
+
+export type TravelSearchInput = z.infer<typeof travelSearchSchema>;
+export type TravelBookingCreateInput = z.infer<typeof travelBookingCreateSchema>;
+export type TravelPassengerUpdateInput = z.infer<typeof travelPassengerUpdateSchema>;
+export type TravelCancellationInput = z.infer<typeof travelCancellationSchema>;
+export type TravelTripInput = z.infer<typeof travelTripSchema>;
+export type TravelExpenseInput = z.infer<typeof travelExpenseSchema>;
+export type TravelBudgetInput = z.infer<typeof travelBudgetSchema>;
+export type TravelItineraryItemInput = z.infer<typeof travelItineraryItemSchema>;
+export type TravelWebhookInput = z.infer<typeof travelWebhookSchema>;
+

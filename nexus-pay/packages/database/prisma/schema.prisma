@@ -486,6 +486,15 @@ enum NotificationType {
   BILL_RECURRING_DETECTED
   BILL_AUTO_PAYMENT_SCHEDULED
   BILL_AUTO_PAYMENT_CANCELLED
+  TRAVEL_BOOKING_CONFIRMED
+  TRAVEL_TICKET_ISSUED
+  TRAVEL_BOOKING_FAILED
+  TRAVEL_CANCELLATION_CONFIRMED
+  TRAVEL_REFUND_STATUS
+  TRAVEL_DEPARTURE_REMINDER
+  TRAVEL_CHECKIN_REMINDER
+  TRAVEL_TRIP_STARTING
+  TRAVEL_DOCUMENT_REMINDER
 }
 
 enum GroupActivityEventType {
@@ -4210,6 +4219,13 @@ enum SecurityEventType {
   BILLER_DETAILS_CHANGED
   AUTOMATIC_PAYMENT_AUTHORIZED
   AUTOMATIC_PAYMENT_CANCELLED
+  TRAVEL_SEARCH_CREATED
+  TRAVEL_BOOKING_INITIATED
+  TRAVEL_BOOKING_CONFIRMED
+  TRAVEL_CANCELLATION_REQUESTED
+  TRAVEL_REFUND_REQUESTED
+  TRAVEL_PASSENGER_DETAILS_CHANGED
+  UNUSUAL_BOOKING_ATTEMPT
 }
 
 enum SecurityOutboxStatus {
@@ -5358,6 +5374,524 @@ model BillPaymentActivity {
   createdAt DateTime @default(now())
   @@index([userId, createdAt])
   @@map("bill_payment_activities")
+}
+
+// ---------------------------------------------------------------------------
+// Release 15 — Travel, mobility & smart ticketing.
+// Booking provider status and wallet settlement are separate systems.
+// Raftline remains authoritative for wallet money. No fabricated inventory.
+// ---------------------------------------------------------------------------
+
+enum TravelProviderMode {
+  SANDBOX
+  PRODUCTION
+}
+
+enum TravelCategory {
+  FLIGHT
+  TRAIN
+  BUS
+  HOTEL
+  CAB
+  AIRPORT_TRANSFER
+  LOCAL_MOBILITY
+}
+
+enum TravelSearchStatus {
+  PENDING
+  COMPLETED
+  FAILED
+  EXPIRED
+}
+
+enum TravelBookingStatus {
+  DRAFT
+  VALIDATION_PENDING
+  READY_FOR_PAYMENT
+  PAYMENT_PENDING
+  PAYMENT_SETTLED
+  PROVIDER_SUBMISSION_PENDING
+  PROVIDER_PROCESSING
+  CONFIRMED
+  FAILED
+  UNKNOWN
+  RECONCILIATION_REQUIRED
+  CANCELLATION_PENDING
+  CANCELLED
+  REFUND_PENDING
+  PARTIALLY_REFUNDED
+  REFUNDED
+  COMPLETED
+}
+
+enum TravelCancellationStatus {
+  CANCELLATION_REQUESTED
+  CANCELLATION_PROCESSING
+  CANCELLATION_CONFIRMED
+  CANCELLATION_FAILED
+  REFUND_PENDING
+  REFUND_PARTIAL
+  REFUND_COMPLETED
+  REFUND_FAILED
+  UNKNOWN
+}
+
+enum TravelDocumentStatus {
+  UPLOADING
+  READY
+  FAILED
+  DELETED
+}
+
+enum TravelTripMemberRole {
+  OWNER
+  MEMBER
+  VIEWER
+}
+
+enum TravelWebhookStatus {
+  RECEIVED
+  PROCESSED
+  FAILED
+}
+
+enum TravelSyncStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+  DEAD_LETTER
+}
+
+enum TravelExpenseStatus {
+  ESTIMATED
+  PENDING
+  CONFIRMED
+  REFUNDED
+  CANCELLED
+}
+
+model TravelProvider {
+  id          String           @id @default(cuid())
+  code        String           @unique @db.VarChar(60)
+  displayName String           @db.VarChar(160)
+  mode        TravelProviderMode @default(SANDBOX)
+  status      String           @db.VarChar(30) @default("UNAVAILABLE")
+  capabilities Json
+  config      Json?
+  lastSyncAt  DateTime?
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+
+  capabilityRows TravelProviderCapability[]
+  products       TravelProduct[]
+  searches       TravelSearch[]
+  bookings       TravelBooking[]
+  webhooks       TravelProviderWebhook[]
+  syncJobs       TravelProviderSync[]
+
+  @@map("travel_providers")
+}
+
+model TravelProviderCapability {
+  id         String  @id @default(cuid())
+  providerId String
+  capability String  @db.VarChar(60)
+  enabled    Boolean @default(false)
+
+  provider TravelProvider @relation(fields: [providerId], references: [id], onDelete: Cascade)
+
+  @@unique([providerId, capability])
+  @@map("travel_provider_capabilities")
+}
+
+model TravelSearch {
+  id          String            @id @default(cuid())
+  userId      String            @db.VarChar(80)
+  providerId  String
+  category    TravelCategory
+  status      TravelSearchStatus @default(PENDING)
+  criteria    Json              @default("{}")
+  providerRef String?           @db.VarChar(160)
+  error       String?           @db.VarChar(500)
+  expiresAt   DateTime?
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+
+  provider TravelProvider @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  results  TravelSearchResultSnapshot[]
+
+  @@index([userId, createdAt])
+  @@map("travel_searches")
+}
+
+model TravelSearchResultSnapshot {
+  id        String   @id @default(cuid())
+  searchId  String
+  productId String?  @db.VarChar(120)
+  payload   Json
+  source    String   @db.VarChar(30) @default("SANDBOX_FIXTURE")
+  retrievedAt DateTime @default(now())
+  expiresAt DateTime?
+
+  search TravelSearch @relation(fields: [searchId], references: [id], onDelete: Cascade)
+
+  @@index([searchId, retrievedAt])
+  @@map("travel_search_result_snapshots")
+}
+
+model TravelProduct {
+  id          String         @id @default(cuid())
+  providerId  String
+  code        String         @unique @db.VarChar(120)
+  category    TravelCategory
+  name        String         @db.VarChar(200)
+  details     Json           @default("{}")
+  source      String         @db.VarChar(30) @default("SANDBOX_FIXTURE")
+  status      String         @db.VarChar(20) @default("ACTIVE")
+  retrievedAt DateTime       @default(now())
+
+  provider TravelProvider @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  prices   TravelPriceSnapshot[]
+
+  @@index([providerId, category, status])
+  @@map("travel_products")
+}
+
+model TravelPriceSnapshot {
+  id         String   @id @default(cuid())
+  productId  String
+  searchId   String?  @db.VarChar(80)
+  amountMinor Int
+  currency   String   @db.VarChar(10) @default("INR")
+  fareRules  Json     @default("{}")
+  refundable Boolean  @default(false)
+  validUntil DateTime?
+  source     String   @db.VarChar(30) @default("SANDBOX_FIXTURE")
+  capturedAt DateTime @default(now())
+
+  product TravelProduct @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@index([productId, capturedAt])
+  @@map("travel_price_snapshots")
+}
+
+model TravelBooking {
+  id                String            @id @default(cuid())
+  reference         String            @unique @db.VarChar(120)
+  userId            String            @db.VarChar(80)
+  providerId        String
+  category          TravelCategory
+  searchId          String?           @db.VarChar(80)
+  productId         String?           @db.VarChar(80)
+  idempotencyKey    String            @unique @db.VarChar(160)
+  providerRequestRef String           @unique @db.VarChar(160)
+  providerRef       String?           @db.VarChar(160)
+  amountMinor       Int
+  currency          String            @db.VarChar(10) @default("INR")
+  priceSnapshotId   String?           @db.VarChar(80)
+  status            TravelBookingStatus @default(DRAFT)
+  paymentIntentId   String?           @db.VarChar(120)
+  paymentRef        String?           @db.VarChar(160)
+  confirmedAt       DateTime?
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+
+  provider TravelProvider @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  passengers TravelPassenger[]
+  history    TravelBookingStatusHistory[]
+  tickets    TravelTicket[]
+  attempts   TravelBookingAttempt[]
+  cancellations TravelCancellation[]
+  refunds    TravelRefund[]
+
+  @@index([userId, createdAt])
+  @@index([status, createdAt])
+  @@map("travel_bookings")
+}
+
+model TravelBookingAttempt {
+  id          String   @id @default(cuid())
+  bookingId   String
+  attemptNo   Int
+  outcome     String   @db.VarChar(40)
+  detail      String?  @db.VarChar(500)
+  createdAt   DateTime @default(now())
+
+  booking TravelBooking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+
+  @@unique([bookingId, attemptNo])
+  @@map("travel_booking_attempts")
+}
+
+model TravelPassenger {
+  id           String   @id @default(cuid())
+  bookingId    String
+  firstName    String   @db.VarChar(120)
+  lastName     String   @db.VarChar(120)
+  dateOfBirth  DateTime?
+  documentType String?  @db.VarChar(40)
+  documentMasked String? @db.VarChar(80)
+  encryptedDetails String? @db.VarChar(2048)
+  createdAt    DateTime @default(now())
+
+  booking TravelBooking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+
+  @@index([bookingId])
+  @@map("travel_passengers")
+}
+
+model TravelBookingStatusHistory {
+  id         String            @id @default(cuid())
+  bookingId  String
+  fromStatus TravelBookingStatus?
+  toStatus   TravelBookingStatus
+  actor      String            @db.VarChar(80)
+  evidence   String?           @db.VarChar(200)
+  createdAt  DateTime          @default(now())
+
+  booking TravelBooking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+
+  @@index([bookingId, createdAt])
+  @@map("travel_booking_status_history")
+}
+
+model TravelTicket {
+  id           String              @id @default(cuid())
+  bookingId    String
+  userId       String              @db.VarChar(80)
+  providerRef  String              @db.VarChar(160)
+  ticketNumber String?             @db.VarChar(120)
+  status       String              @db.VarChar(40) @default("PENDING")
+  storagePath  String?             @db.VarChar(1024)
+  fileName     String?             @db.VarChar(200)
+  contentType  String?             @db.VarChar(100)
+  issuedAt     DateTime?
+  createdAt    DateTime            @default(now())
+
+  booking TravelBooking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+
+  @@unique([bookingId, providerRef])
+  @@index([userId, createdAt])
+  @@map("travel_tickets")
+}
+
+model TravelCancellation {
+  id          String                  @id @default(cuid())
+  bookingId   String
+  providerRef String?                 @db.VarChar(160)
+  status      TravelCancellationStatus @default(CANCELLATION_REQUESTED)
+  reason      String?                 @db.VarChar(500)
+  chargesMinor Int                    @default(0)
+  estimatedRefundMinor Int?
+  confirmedAt DateTime?
+  createdAt   DateTime                @default(now())
+  updatedAt   DateTime                @updatedAt
+
+  booking TravelBooking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+
+  @@index([bookingId, createdAt])
+  @@map("travel_cancellations")
+}
+
+model TravelRefund {
+  id            String   @id @default(cuid())
+  bookingId     String
+  cancellationId String? @db.VarChar(80)
+  providerRef   String   @db.VarChar(160)
+  amountMinor   Int
+  status        String   @db.VarChar(40) @default("PENDING")
+  confirmedAt   DateTime?
+  createdAt     DateTime @default(now())
+
+  booking TravelBooking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+
+  @@unique([bookingId, providerRef])
+  @@map("travel_refunds")
+}
+
+model TravelProviderWebhook {
+  id             String           @id @default(cuid())
+  providerId     String
+  eventType      String           @db.VarChar(80)
+  eventId        String           @db.VarChar(180)
+  payload        Json             @default("{}")
+  signatureValid Boolean          @default(false)
+  status         TravelWebhookStatus @default(RECEIVED)
+  error          String?          @db.VarChar(500)
+  processedAt    DateTime?
+  createdAt      DateTime         @default(now())
+
+  provider TravelProvider @relation(fields: [providerId], references: [id], onDelete: Cascade)
+
+  @@unique([providerId, eventId])
+  @@map("travel_provider_webhooks")
+}
+
+model TravelProviderSync {
+  id            String         @id @default(cuid())
+  providerId    String
+  kind          String         @db.VarChar(60)
+  status        TravelSyncStatus @default(PENDING)
+  attempts      Int            @default(0)
+  nextAttemptAt DateTime?
+  leaseUntil    DateTime?
+  error         String?        @db.VarChar(500)
+  createdAt     DateTime       @default(now())
+
+  provider TravelProvider @relation(fields: [providerId], references: [id], onDelete: Cascade)
+
+  @@index([status, nextAttemptAt])
+  @@map("travel_provider_syncs")
+}
+
+model TravelTrip {
+  id          String   @id @default(cuid())
+  userId      String   @db.VarChar(80)
+  name        String   @db.VarChar(160)
+  destination String?  @db.VarChar(200)
+  startDate   DateTime?
+  endDate     DateTime?
+  notes       String?  @db.VarChar(1000)
+  status      String   @db.VarChar(20) @default("ACTIVE")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  members    TravelTripMember[]
+  itinerary  TravelItineraryItem[]
+  documents  TravelDocument[]
+  budget     TravelBudget?
+  expenses   TravelExpense[]
+
+  @@index([userId, status])
+  @@map("travel_trips")
+}
+
+model TravelTripMember {
+  id        String             @id @default(cuid())
+  tripId    String
+  userId    String             @db.VarChar(80)
+  role      TravelTripMemberRole @default(MEMBER)
+  status    String             @db.VarChar(20) @default("ACTIVE")
+  createdAt DateTime           @default(now())
+
+  trip TravelTrip @relation(fields: [tripId], references: [id], onDelete: Cascade)
+
+  @@unique([tripId, userId])
+  @@map("travel_trip_members")
+}
+
+model TravelItineraryItem {
+  id              String   @id @default(cuid())
+  tripId          String
+  bookingId       String?  @db.VarChar(80)
+  category        TravelCategory
+  title           String   @db.VarChar(200)
+  startAt         DateTime
+  endAt           DateTime?
+  startTimeZone   String   @db.VarChar(60) @default("Asia/Kolkata")
+  endTimeZone     String?  @db.VarChar(60)
+  location        String?  @db.VarChar(200)
+  details         Json     @default("{}")
+  createdAt       DateTime @default(now())
+
+  trip TravelTrip @relation(fields: [tripId], references: [id], onDelete: Cascade)
+
+  @@index([tripId, startAt])
+  @@map("travel_itinerary_items")
+}
+
+model TravelDocument {
+  id          String              @id @default(cuid())
+  userId      String              @db.VarChar(80)
+  tripId      String?             @db.VarChar(80)
+  bookingId   String?             @db.VarChar(80)
+  kind        String              @db.VarChar(60)
+  fileName    String              @db.VarChar(200)
+  contentType String              @db.VarChar(100)
+  sizeBytes   Int
+  storagePath String?             @db.VarChar(1024)
+  status      TravelDocumentStatus @default(UPLOADING)
+  createdAt   DateTime            @default(now())
+
+  trip TravelTrip? @relation(fields: [tripId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@map("travel_documents")
+}
+
+model TravelBudget {
+  id            String   @id @default(cuid())
+  tripId        String   @unique
+  amountMinor   Int
+  currency      String   @db.VarChar(10) @default("INR")
+  categories    Json     @default("[]")
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  trip TravelTrip @relation(fields: [tripId], references: [id], onDelete: Cascade)
+
+  @@map("travel_budgets")
+}
+
+model TravelExpense {
+  id          String            @id @default(cuid())
+  tripId      String
+  userId      String            @db.VarChar(80)
+  category    String            @db.VarChar(60)
+  amountMinor Int
+  currency    String            @db.VarChar(10) @default("INR")
+  status      TravelExpenseStatus @default(CONFIRMED)
+  description String?           @db.VarChar(300)
+  bookingId   String?           @db.VarChar(80)
+  occurredAt  DateTime          @default(now())
+  createdAt   DateTime          @default(now())
+
+  trip TravelTrip @relation(fields: [tripId], references: [id], onDelete: Cascade)
+
+  @@index([tripId, occurredAt])
+  @@map("travel_expenses")
+}
+
+model TravelSavedDestination {
+  id        String   @id @default(cuid())
+  userId    String   @db.VarChar(80)
+  label     String   @db.VarChar(200)
+  code      String   @db.VarChar(120)
+  category  TravelCategory
+  createdAt DateTime @default(now())
+
+  @@unique([userId, code, category])
+  @@map("travel_saved_destinations")
+}
+
+model TravelNotificationPreference {
+  id              String   @id @default(cuid())
+  userId          String   @unique @db.VarChar(80)
+  bookingUpdates  Boolean  @default(true)
+  reminders       Boolean  @default(true)
+  refundUpdates   Boolean  @default(true)
+  documentReminders Boolean @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@map("travel_notification_preferences")
+}
+
+model TravelReconciliationCase {
+  id          String   @id @default(cuid())
+  reference   String   @unique @db.VarChar(120)
+  userId      String?  @db.VarChar(80)
+  bookingId   String?  @db.VarChar(80)
+  reason      String   @db.VarChar(120)
+  status      String   @db.VarChar(30) @default("OPEN")
+  assignedTo  String?  @db.VarChar(120)
+  resolution  String?  @db.VarChar(1000)
+  createdAt   DateTime @default(now())
+  resolvedAt  DateTime?
+
+  @@index([status, createdAt])
+  @@map("travel_reconciliation_cases")
 }
 
 model Statement {

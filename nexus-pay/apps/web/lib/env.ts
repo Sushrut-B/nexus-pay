@@ -91,6 +91,13 @@ const envSchema = z.object({
     .default("false")
     .transform((value) => value === "true"),
   NEXUS_BILLING_REMINDER_DAYS: z.coerce.number().int().min(1).max(30).default(7),
+
+  // Release 15 — travel & mobility
+  NEXUS_TRAVEL_SANDBOX_ENABLED: z
+    .enum(["true", "false"])
+    .default("false")
+    .transform((value) => value === "true"),
+  NEXUS_TRAVEL_SEARCH_TTL_MINUTES: z.coerce.number().int().min(1).max(1440).default(30),
 });
 
 let cached: z.infer<typeof envSchema> | null = null;

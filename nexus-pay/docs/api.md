@@ -747,3 +747,25 @@ Details: `docs/fraud-intelligence-architecture.md`, `docs/risk-engine-and-rules.
 | POST | `/api/control/bill-payments/reconciliation/:caseId/assign` `/resolve` `/run` | Audited investigation workflow. |
 
 Details: `docs/bill-payment-architecture.md`, `docs/biller-provider-guide.md`, `docs/release-14-report.md`.
+
+## Release 15 — Travel & mobility
+
+| Method | Route | Notes |
+| --- | --- | --- |
+| GET | `/api/travel/categories` `/providers` | Provider availability and honest unavailable states. |
+| POST | `/api/travel/search` | Provider-backed search with snapshots. |
+| GET | `/api/travel/search/:id` `/results` | Search state and labelled results. |
+| GET | `/api/travel/products/:id` | Provider product metadata. |
+| POST | `/api/travel/products/:id/revalidate` | Fresh fare with validity window. |
+| GET/POST | `/api/travel/bookings` | Booking list / drafts. |
+| GET | `/api/travel/bookings/:id` | Booking state with distinct stage labels. |
+| POST | `/api/travel/bookings/:id/confirm` | Existing engine, then provider. |
+| GET | `/api/travel/bookings/:id/ticket` `/confirmation` `/cancellation` `/refund` | Tickets, history and refund state. |
+| POST | `/api/travel/bookings/:id/cancel` | Provider-supported cancellation. |
+| GET/POST | `/api/travel/trips` `/trips/:id` `/trips/:id/itinerary` `/budget` `/expenses` `/documents` | Trip and itinerary management. |
+| GET/POST | `/api/travel/documents` `/documents/:id/download` | Signed private document access. |
+| POST | `/api/travel/webhooks/:providerCode` | Signature-verified, deduplicated callbacks. |
+| GET | `/api/control/travel/overview` `/providers` `/bookings` `/reconciliation(/:id)` | Travel operations. |
+| POST | `/api/control/travel/reconciliation/:id/assign` `/resolve` `/run` | Audited investigation workflow. |
+
+Details: `docs/travel-architecture.md`, `docs/travel-provider-guide.md`, `docs/release-15-report.md`.

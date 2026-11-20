@@ -56,7 +56,7 @@ export async function loadClassifiedTransactions(
   const records: ClassifiedRecord[] = [];
   const issues: QualityIssue[] = [];
 
-  const [transactions, merchantPayments, groupSettlements, cashback, categorizations, rewards, dataQuality, externalTransactions, confirmedTransfers, billPayments] =
+  const [transactions, merchantPayments, groupSettlements, cashback, categorizations, rewards, dataQuality, externalTransactions, confirmedTransfers, billPayments, travelBookings] =
     await Promise.all([
       prisma.transactionRecord.findMany({
         where: { userId, status: "SUCCESSFUL", occurredAt: { gte: from, lte: to } },
@@ -99,6 +99,11 @@ export async function loadClassifiedTransactions(
         where: { userId, status: "BILLER_CONFIRMED", confirmedAt: { gte: from, lte: to } },
         include: { biller: { include: { category: true } } },
       }),
+      // Only provider-confirmed travel bookings count as completed travel spending.
+      prisma.travelBooking.findMany({
+        where: { userId, status: "CONFIRMED", confirmedAt: { gte: from, lte: to } },
+        include: { provider: true },
+      }),
     ]);
 
   const categorized = new Set(categorizations.map((row) => row.paymentRef));
@@ -115,6 +120,10 @@ export async function loadClassifiedTransactions(
   const billRefs = new Set(
     billPayments.map((payment) => payment.paymentRef).filter((value): value is string => Boolean(value)),
   );
+  // A confirmed travel booking also has a P2P TransactionRecord from the engine.
+  const travelRefs = new Set(
+    travelBookings.map((booking) => booking.paymentRef).filter((value): value is string => Boolean(value)),
+  );
 
   for (const transaction of transactions) {
     if (transaction.kind !== "P2P") {
@@ -127,6 +136,7 @@ export async function loadClassifiedTransactions(
     if (transaction.paymentRef && groupRefs.has(transaction.paymentRef)) continue; // group settlement already represented
     if (transaction.paymentRef && merchantRefs.has(transaction.paymentRef)) continue; // merchant payment already represented
     if (transaction.paymentRef && billRefs.has(transaction.paymentRef)) continue; // bill payment already represented
+    if (transaction.paymentRef && travelRefs.has(transaction.paymentRef)) continue; // travel booking already represented
     if (transaction.status !== "SUCCESSFUL") continue;
     const amount = toSafeMinor(transaction.amountMinor) ?? 0;
     const received = transaction.direction === "RECEIVED";
@@ -155,6 +165,23 @@ export async function loadClassifiedTransactions(
         severity: "LOW", details: "Transaction has no explicit category; defaulted by rule",
       });
     }
+  }
+
+  for (const booking of travelBookings) {
+    records.push({
+      sourceType: "TRAVEL_BOOKING",
+      sourceId: booking.id,
+      category: "EXPENSE",
+      direction: "OUT",
+      amountMinor: booking.amountMinor,
+      currency: booking.currency,
+      occurredAt: booking.confirmedAt ?? booking.createdAt,
+      description: `${booking.provider.displayName} ${booking.category.toLowerCase()} booking`,
+      merchantName: booking.provider.displayName,
+      paymentRef: booking.paymentRef,
+      isAdjustment: false,
+      classificationSource: "PROVIDER_CONFIRMED",
+    });
   }
 
   for (const payment of billPayments) {

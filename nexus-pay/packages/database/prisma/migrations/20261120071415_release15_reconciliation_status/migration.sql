@@ -1,0 +1,2 @@
+-- AlterEnum
+ALTER TYPE "TravelBookingStatus" ADD VALUE 'RECONCILIATION_REQUIRED';

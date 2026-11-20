@@ -226,6 +226,15 @@ NEXUS_BILLING_REMINDER_DAYS="7"
 
 The sandbox flag enables clearly labelled test billers and plans only. There is no real biller or BBPS/Bharat Connect participation. Keep it false in production.
 
+Release 15 travel:
+
+```dotenv
+NEXUS_TRAVEL_SANDBOX_ENABLED="false"
+NEXUS_TRAVEL_SEARCH_TTL_MINUTES="30"
+```
+
+The sandbox flag enables labelled test search results, fares, bookings and tickets only. No IRCTC, airline, hotel, bus, metro or mobility partnership exists. Keep it false in production.
+
 ### Raftline settings
 
 Preferred per-node configuration:
