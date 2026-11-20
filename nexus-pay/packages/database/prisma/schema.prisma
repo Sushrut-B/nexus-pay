@@ -471,6 +471,21 @@ enum NotificationType {
   SECURITY_REPORT_STATUS_CHANGED
   SECURITY_CASE_UPDATE
   SECURITY_PAYMENT_WARNING
+  BILL_FETCHED
+  BILL_DUE_SOON
+  BILL_OVERDUE
+  BILL_PAYMENT_INITIATED
+  BILL_PAYMENT_WALLET_SETTLED
+  BILL_PAYMENT_CONFIRMED
+  BILL_PAYMENT_FAILED
+  BILL_PAYMENT_UNKNOWN
+  BILL_REFUND_INITIATED
+  BILL_REFUND_COMPLETED
+  BILL_RECHARGE_SUCCESSFUL
+  BILL_RECHARGE_FAILED
+  BILL_RECURRING_DETECTED
+  BILL_AUTO_PAYMENT_SCHEDULED
+  BILL_AUTO_PAYMENT_CANCELLED
 }
 
 enum GroupActivityEventType {
@@ -4183,6 +4198,18 @@ enum SecurityEventType {
   INSURANCE_APPLICATION_SUBMITTED
   DOCUMENT_UPLOADED
   PROVIDER_WEBHOOK_RECEIVED
+  BILLER_ACCOUNT_ADDED
+  BILL_FETCH_REQUESTED
+  BILL_PAYMENT_INITIATED
+  BILL_PAYMENT_CONFIRMED
+  BILL_PAYMENT_FAILED
+  RECHARGE_INITIATED
+  RECHARGE_CONFIRMED
+  RECHARGE_FAILED
+  REPEATED_PAYMENT_ATTEMPT
+  BILLER_DETAILS_CHANGED
+  AUTOMATIC_PAYMENT_AUTHORIZED
+  AUTOMATIC_PAYMENT_CANCELLED
 }
 
 enum SecurityOutboxStatus {
@@ -4768,6 +4795,569 @@ model SecurityRelationship {
   @@index([fromKey])
   @@index([toKey])
   @@map("security_relationships")
+}
+
+// ---------------------------------------------------------------------------
+// Release 14 — Bill payments & recharges.
+// Raftline remains authoritative for wallet settlement. The biller provider is
+// authoritative for bill and biller payment status. These are separate systems.
+// ---------------------------------------------------------------------------
+
+enum BillProviderMode {
+  SANDBOX
+  PRODUCTION
+}
+
+enum BillCategory {
+  ELECTRICITY
+  WATER
+  GAS
+  LPG
+  BROADBAND
+  LANDLINE
+  MOBILE_POSTPAID
+  MOBILE_PREPAID
+  DTH
+  FASTAG
+  MUNICIPAL_TAX
+  SOCIETY_MAINTENANCE
+  EDUCATION_FEES
+  OTHER
+}
+
+enum BillerType {
+  POSTPAID
+  PREPAID
+}
+
+enum BillFetchStatus {
+  FETCH_REQUESTED
+  FETCH_PROCESSING
+  FETCHED
+  NOT_FOUND
+  INVALID_CUSTOMER_DETAILS
+  FETCH_FAILED
+  EXPIRED
+  PAID
+  UNKNOWN
+}
+
+enum BillPaymentStatus {
+  CREATED
+  CUSTOMER_CONFIRMATION_REQUIRED
+  PAYMENT_AUTHORIZED
+  WALLET_SETTLEMENT_PENDING
+  WALLET_SETTLED
+  PROVIDER_SUBMISSION_PENDING
+  PROVIDER_PROCESSING
+  BILLER_CONFIRMED
+  FAILED
+  UNKNOWN
+  RECONCILIATION_REQUIRED
+  REFUND_PENDING
+  REFUNDED
+  PARTIALLY_REVERSED
+}
+
+enum RechargeStatus {
+  CREATED
+  VALIDATION_PENDING
+  VALIDATED
+  PAYMENT_PENDING
+  PROCESSING
+  SUCCESS
+  FAILED
+  UNKNOWN
+  RECONCILIATION_REQUIRED
+  REFUND_PENDING
+  REFUNDED
+}
+
+enum BillReminderStatus {
+  PENDING
+  SENT
+  SKIPPED
+  FAILED
+}
+
+enum BillAutoPaymentStatus {
+  ACTIVE
+  PAUSED
+  CANCELLED
+  REQUIRES_RAUTHORIZATION
+}
+
+enum HouseholdRole {
+  OWNER
+  ADMIN
+  MEMBER
+  VIEWER
+}
+
+enum BillReconciliationStatus {
+  OPEN
+  INVESTIGATING
+  RESOLVED
+  CLOSED
+}
+
+enum BillWebhookStatus {
+  RECEIVED
+  PROCESSED
+  FAILED
+}
+
+enum BillSyncStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+  DEAD_LETTER
+}
+
+model BillPaymentProvider {
+  id          String          @id @default(cuid())
+  code        String          @unique @db.VarChar(60)
+  displayName String          @db.VarChar(160)
+  mode        BillProviderMode @default(SANDBOX)
+  status      String          @db.VarChar(30) @default("UNAVAILABLE")
+  capabilities Json
+  config      Json?
+  lastSyncAt  DateTime?
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+  capabilityRows BillPaymentProviderCapability[]
+  billers        Biller[]
+  webhooks       BillProviderWebhook[]
+  syncJobs       BillProviderSync[]
+  @@map("bill_payment_providers")
+}
+
+model BillPaymentProviderCapability {
+  id         String  @id @default(cuid())
+  providerId String
+  capability String  @db.VarChar(60)
+  enabled    Boolean @default(false)
+  provider BillPaymentProvider @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  @@unique([providerId, capability])
+  @@map("bill_payment_provider_capabilities")
+}
+
+model BillerCategory {
+  id          String       @id @default(cuid())
+  code        BillCategory @unique
+  label       String       @db.VarChar(120)
+  description String?      @db.VarChar(500)
+  available   Boolean      @default(false)
+  billers Biller[]
+  @@map("biller_categories")
+}
+
+model Biller {
+  id            String      @id @default(cuid())
+  providerId    String
+  categoryId    String
+  code          String      @unique @db.VarChar(100)
+  name          String      @db.VarChar(180)
+  billerType    BillerType  @default(POSTPAID)
+  coverage      String?     @db.VarChar(300)
+  canFetchBill  Boolean     @default(false)
+  canPayBill    Boolean     @default(false)
+  supportsRecharge Boolean  @default(false)
+  supportedModes Json       @default("[]")
+  status        String      @db.VarChar(20) @default("ACTIVE")
+  source        String      @db.VarChar(30) @default("SANDBOX_FIXTURE")
+  lastSyncAt    DateTime    @default(now())
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+  provider     BillPaymentProvider @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  category     BillerCategory      @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  parameters   BillerParameter[]
+  versions     BillerCatalogueVersion[]
+  accounts     SavedBillerAccount[]
+  payments     BillPaymentIntent[]
+  recharges    RechargeIntent[]
+  @@index([providerId, categoryId, status])
+  @@map("billers")
+}
+
+model BillerParameter {
+  id          String  @id @default(cuid())
+  billerId    String
+  name        String  @db.VarChar(80)
+  label       String  @db.VarChar(120)
+  required    Boolean @default(true)
+  validation  Json    @default("{}")
+  sensitive   Boolean @default(false)
+  displayOrder Int    @default(0)
+  biller Biller @relation(fields: [billerId], references: [id], onDelete: Cascade)
+  @@unique([billerId, name])
+  @@map("biller_parameters")
+}
+
+model BillerCatalogueVersion {
+  id          String   @id @default(cuid())
+  billerId    String
+  version     String   @db.VarChar(80)
+  payload     Json
+  retrievedAt DateTime @default(now())
+  biller Biller @relation(fields: [billerId], references: [id], onDelete: Cascade)
+  @@unique([billerId, version])
+  @@map("biller_catalogue_versions")
+}
+
+model SavedBillerAccount {
+  id              String      @id @default(cuid())
+  userId          String      @db.VarChar(80)
+  billerId        String
+  nickname        String      @db.VarChar(120)
+  parameters      Json        @default("{}")
+  maskedIdentifier String     @db.VarChar(80)
+  lastFetchAt     DateTime?
+  lastPaymentAt   DateTime?
+  status          String      @db.VarChar(20) @default("ACTIVE")
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+  biller Biller @relation(fields: [billerId], references: [id], onDelete: Cascade)
+  payments BillPaymentIntent[]
+  @@index([userId, status])
+  @@map("saved_biller_accounts")
+}
+
+model BillFetchRequest {
+  id          String         @id @default(cuid())
+  userId      String         @db.VarChar(80)
+  billerId    String
+  accountId   String?        @db.VarChar(80)
+  status      BillFetchStatus @default(FETCH_REQUESTED)
+  providerRef String?        @db.VarChar(160)
+  parameters  Json           @default("{}")
+  error       String?        @db.VarChar(500)
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+  snapshots BillSnapshot[]
+  @@index([userId, createdAt])
+  @@map("bill_fetch_requests")
+}
+
+model BillSnapshot {
+  id             String      @id @default(cuid())
+  fetchRequestId String
+  providerRef    String?     @db.VarChar(160)
+  billNumber     String?     @db.VarChar(120)
+  billPeriod     String?     @db.VarChar(120)
+  billDate       DateTime?
+  dueDate        DateTime?
+  amountMinor    Int
+  minAmountMinor Int?
+  lateFeeMinor   Int?
+  extraChargesMinor Int?
+  status         String      @db.VarChar(40) @default("FETCHED")
+  rawPayload     Json        @default("{}")
+  fetchedAt      DateTime    @default(now())
+  expiresAt      DateTime?
+  fetchRequest BillFetchRequest @relation(fields: [fetchRequestId], references: [id], onDelete: Cascade)
+  @@index([fetchRequestId, fetchedAt])
+  @@map("bill_snapshots")
+}
+
+model BillPaymentIntent {
+  id               String            @id @default(cuid())
+  reference        String            @unique @db.VarChar(120)
+  userId           String            @db.VarChar(80)
+  billerId         String
+  accountId        String?           @db.VarChar(80)
+  snapshotId       String?           @db.VarChar(80)
+  idempotencyKey   String            @unique @db.VarChar(160)
+  providerRequestRef String          @unique @db.VarChar(160)
+  amountMinor      Int
+  feeMinor         Int               @default(0)
+  totalMinor       Int
+  status           BillPaymentStatus @default(CREATED)
+  paymentIntentId  String?           @db.VarChar(120)
+  paymentRef       String?           @db.VarChar(160)
+  providerRef      String?           @db.VarChar(160)
+  confirmedAt      DateTime?
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  biller    Biller @relation(fields: [billerId], references: [id], onDelete: Cascade)
+  account   SavedBillerAccount? @relation(fields: [accountId], references: [id], onDelete: SetNull)
+  attempts  BillPaymentAttempt[]
+  history   BillPaymentStatusHistory[]
+  providerTransactions BillProviderTransaction[]
+  receipts  BillPaymentReceipt[]
+  @@index([userId, createdAt])
+  @@index([status, createdAt])
+  @@map("bill_payment_intents")
+}
+
+model BillPaymentAttempt {
+  id             String    @id @default(cuid())
+  paymentId      String
+  attemptNo      Int
+  paymentIntentId String?  @db.VarChar(120)
+  outcome        String    @db.VarChar(40)
+  detail         String?   @db.VarChar(500)
+  createdAt      DateTime  @default(now())
+  payment BillPaymentIntent @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+  @@unique([paymentId, attemptNo])
+  @@map("bill_payment_attempts")
+}
+
+model BillProviderTransaction {
+  id          String   @id @default(cuid())
+  paymentId   String
+  providerRef String   @db.VarChar(160)
+  status      String   @db.VarChar(40)
+  payload     Json     @default("{}")
+  createdAt   DateTime @default(now())
+  payment BillPaymentIntent @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+  @@unique([paymentId, providerRef])
+  @@map("bill_provider_transactions")
+}
+
+model BillPaymentStatusHistory {
+  id        String            @id @default(cuid())
+  paymentId String
+  fromStatus BillPaymentStatus?
+  toStatus  BillPaymentStatus
+  actor     String            @db.VarChar(80)
+  evidence  String?           @db.VarChar(200)
+  createdAt DateTime          @default(now())
+  payment BillPaymentIntent @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+  @@index([paymentId, createdAt])
+  @@map("bill_payment_status_history")
+}
+
+model RechargePlan {
+  id          String   @id @default(cuid())
+  providerId  String
+  billerId    String
+  code        String   @db.VarChar(100)
+  name        String   @db.VarChar(160)
+  priceMinor  Int
+  validity    String?  @db.VarChar(80)
+  dataAllowance String? @db.VarChar(120)
+  benefits    Json     @default("[]")
+  terms       String?  @db.VarChar(500)
+  source      String   @db.VarChar(30) @default("SANDBOX_FIXTURE")
+  retrievedAt DateTime @default(now())
+  snapshots RechargePlanSnapshot[]
+  @@unique([billerId, code])
+  @@map("recharge_plans")
+}
+
+model RechargePlanSnapshot {
+  id        String   @id @default(cuid())
+  planId    String
+  payload   Json
+  capturedAt DateTime @default(now())
+  plan RechargePlan @relation(fields: [planId], references: [id], onDelete: Cascade)
+  @@map("recharge_plan_snapshots")
+}
+
+model RechargeIntent {
+  id               String        @id @default(cuid())
+  reference        String        @unique @db.VarChar(120)
+  userId           String        @db.VarChar(80)
+  billerId         String
+  accountId        String?       @db.VarChar(80)
+  planId           String?       @db.VarChar(80)
+  idempotencyKey   String        @unique @db.VarChar(160)
+  providerRequestRef String      @unique @db.VarChar(160)
+  amountMinor      Int
+  status           RechargeStatus @default(CREATED)
+  paymentIntentId  String?       @db.VarChar(120)
+  paymentRef       String?       @db.VarChar(160)
+  providerRef      String?       @db.VarChar(160)
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+  biller   Biller @relation(fields: [billerId], references: [id], onDelete: Cascade)
+  attempts RechargeAttempt[]
+  @@index([userId, createdAt])
+  @@map("recharge_intents")
+}
+
+model RechargeAttempt {
+  id          String   @id @default(cuid())
+  rechargeId  String
+  attemptNo   Int
+  outcome     String   @db.VarChar(40)
+  detail      String?  @db.VarChar(500)
+  createdAt   DateTime @default(now())
+  recharge RechargeIntent @relation(fields: [rechargeId], references: [id], onDelete: Cascade)
+  @@unique([rechargeId, attemptNo])
+  @@map("recharge_attempts")
+}
+
+model BillPaymentReceipt {
+  id            String   @id @default(cuid())
+  paymentId     String?  @db.VarChar(80)
+  rechargeId    String?  @db.VarChar(80)
+  userId        String   @db.VarChar(80)
+  reference     String   @unique @db.VarChar(120)
+  kind          String   @db.VarChar(40) @default("NEXUS_PAYMENT_RECORD")
+  amountMinor   Int
+  status        String   @db.VarChar(40)
+  storagePath   String?  @db.VarChar(1024)
+  fileName      String?  @db.VarChar(200)
+  contentType   String?  @db.VarChar(100)
+  officialProviderReceipt Boolean @default(false)
+  createdAt     DateTime @default(now())
+  payment BillPaymentIntent? @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+  @@index([userId, createdAt])
+  @@map("bill_payment_receipts")
+}
+
+model RecurringBill {
+  id              String   @id @default(cuid())
+  userId          String   @db.VarChar(80)
+  billerId        String
+  accountId       String?  @db.VarChar(80)
+  pattern         String   @db.VarChar(30) @default("MONTHLY")
+  expectedMinMinor Int?
+  expectedMaxMinor Int?
+  lastPaymentDate DateTime?
+  nextExpectedDate DateTime?
+  confirmedByUser Boolean  @default(false)
+  status          String   @db.VarChar(20) @default("ACTIVE")
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  @@index([userId, status])
+  @@map("recurring_bills")
+}
+
+model BillReminder {
+  id          String            @id @default(cuid())
+  userId      String            @db.VarChar(80)
+  accountId   String?           @db.VarChar(80)
+  billerId    String
+  kind        String            @db.VarChar(40)
+  dueAt       DateTime
+  status      BillReminderStatus @default(PENDING)
+  sentAt      DateTime?
+  createdAt   DateTime          @default(now())
+  @@unique([userId, accountId, kind, dueAt])
+  @@index([status, dueAt])
+  @@map("bill_reminders")
+}
+
+model BillAutoPaymentAuthorization {
+  id              String              @id @default(cuid())
+  userId          String              @db.VarChar(80)
+  accountId       String              @db.VarChar(80)
+  recurringBillId String?             @db.VarChar(80)
+  maxAmountMinor  Int
+  frequency       String              @db.VarChar(30)
+  status          BillAutoPaymentStatus @default(ACTIVE)
+  nextExecutionAt DateTime?
+  authorizedAt    DateTime            @default(now())
+  cancelledAt     DateTime?
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
+  @@index([userId, status])
+  @@map("bill_auto_payment_authorizations")
+}
+
+model BillReconciliationCase {
+  id                String                  @id @default(cuid())
+  reference         String                  @unique @db.VarChar(120)
+  paymentId         String?                 @db.VarChar(80)
+  rechargeId        String?                 @db.VarChar(80)
+  userId            String?                 @db.VarChar(80)
+  reason            String                  @db.VarChar(120)
+  status            BillReconciliationStatus @default(OPEN)
+  assignedTo        String?                 @db.VarChar(120)
+  resolution        String?                 @db.VarChar(1000)
+  createdAt         DateTime                @default(now())
+  resolvedAt        DateTime?
+  @@index([status, createdAt])
+  @@map("bill_reconciliation_cases")
+}
+
+model Household {
+  id        String            @id @default(cuid())
+  name      String            @db.VarChar(160)
+  ownerId   String            @db.VarChar(80)
+  status    String            @db.VarChar(20) @default("ACTIVE")
+  createdAt DateTime          @default(now())
+  updatedAt DateTime          @updatedAt
+  members HouseholdMember[]
+  bills   HouseholdBillAssignment[]
+  @@map("households")
+}
+
+model HouseholdMember {
+  id          String        @id @default(cuid())
+  householdId String
+  userId      String        @db.VarChar(80)
+  role        HouseholdRole @default(MEMBER)
+  status      String        @db.VarChar(20) @default("ACTIVE")
+  invitedAt   DateTime      @default(now())
+  joinedAt    DateTime?
+  household Household @relation(fields: [householdId], references: [id], onDelete: Cascade)
+  @@unique([householdId, userId])
+  @@index([userId, status])
+  @@map("household_members")
+}
+
+model HouseholdBillAssignment {
+  id          String   @id @default(cuid())
+  householdId String
+  paymentId   String?  @db.VarChar(80)
+  accountId   String?  @db.VarChar(80)
+  billerId    String
+  assignedTo  String?  @db.VarChar(80)
+  createdBy   String   @db.VarChar(80)
+  settled     Boolean  @default(false)
+  note        String?  @db.VarChar(500)
+  createdAt   DateTime @default(now())
+  household Household @relation(fields: [householdId], references: [id], onDelete: Cascade)
+  @@index([householdId, createdAt])
+  @@map("household_bill_assignments")
+}
+
+model BillProviderWebhook {
+  id             String           @id @default(cuid())
+  providerId     String
+  eventType      String           @db.VarChar(80)
+  eventId        String           @db.VarChar(180)
+  payload        Json             @default("{}")
+  signatureValid Boolean          @default(false)
+  status         BillWebhookStatus @default(RECEIVED)
+  error          String?          @db.VarChar(500)
+  processedAt    DateTime?
+  createdAt      DateTime         @default(now())
+  provider BillPaymentProvider @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  @@unique([providerId, eventId])
+  @@map("bill_provider_webhooks")
+}
+
+model BillProviderSync {
+  id            String       @id @default(cuid())
+  providerId    String
+  kind          String       @db.VarChar(60)
+  status        BillSyncStatus @default(PENDING)
+  attempts      Int          @default(0)
+  nextAttemptAt DateTime?
+  leaseUntil    DateTime?
+  error         String?      @db.VarChar(500)
+  createdAt     DateTime     @default(now())
+  provider BillPaymentProvider @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  @@index([status, nextAttemptAt])
+  @@map("bill_provider_syncs")
+}
+
+model BillPaymentActivity {
+  id        String   @id @default(cuid())
+  userId    String   @db.VarChar(80)
+  type      String   @db.VarChar(60)
+  title     String   @db.VarChar(200)
+  body      String?  @db.VarChar(500)
+  reference String?  @db.VarChar(160)
+  createdAt DateTime @default(now())
+  @@index([userId, createdAt])
+  @@map("bill_payment_activities")
 }
 
 model Statement {

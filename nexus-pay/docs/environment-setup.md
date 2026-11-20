@@ -217,6 +217,15 @@ NEXUS_FRAUD_RETENTION_DAYS="365"
 
 The gateway is read-only; it is inserted before payment creation and never changes a wallet, payment intent or Raftline transaction. The fallback action is applied explicitly and audited if the engine is unavailable.
 
+Release 14 bill payments:
+
+```dotenv
+NEXUS_BILLING_SANDBOX_ENABLED="false"
+NEXUS_BILLING_REMINDER_DAYS="7"
+```
+
+The sandbox flag enables clearly labelled test billers and plans only. There is no real biller or BBPS/Bharat Connect participation. Keep it false in production.
+
 ### Raftline settings
 
 Preferred per-node configuration:

@@ -84,6 +84,13 @@ const envSchema = z.object({
     .enum(["ALLOW", "ALLOW_WITH_MONITORING", "REQUIRE_STEP_UP_AUTHENTICATION", "REQUIRE_CUSTOMER_CONFIRMATION", "HOLD_FOR_MANUAL_REVIEW", "BLOCK_INITIATION"])
     .default("REQUIRE_CUSTOMER_CONFIRMATION"),
   NEXUS_FRAUD_RETENTION_DAYS: z.coerce.number().int().min(30).max(3650).default(365),
+
+  // Release 14 — bill payments & recharges
+  NEXUS_BILLING_SANDBOX_ENABLED: z
+    .enum(["true", "false"])
+    .default("false")
+    .transform((value) => value === "true"),
+  NEXUS_BILLING_REMINDER_DAYS: z.coerce.number().int().min(1).max(30).default(7),
 });
 
 let cached: z.infer<typeof envSchema> | null = null;

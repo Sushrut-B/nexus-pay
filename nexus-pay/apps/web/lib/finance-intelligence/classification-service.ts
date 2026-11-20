@@ -56,7 +56,7 @@ export async function loadClassifiedTransactions(
   const records: ClassifiedRecord[] = [];
   const issues: QualityIssue[] = [];
 
-  const [transactions, merchantPayments, groupSettlements, cashback, categorizations, rewards, dataQuality, externalTransactions, confirmedTransfers] =
+  const [transactions, merchantPayments, groupSettlements, cashback, categorizations, rewards, dataQuality, externalTransactions, confirmedTransfers, billPayments] =
     await Promise.all([
       prisma.transactionRecord.findMany({
         where: { userId, status: "SUCCESSFUL", occurredAt: { gte: from, lte: to } },
@@ -94,6 +94,11 @@ export async function loadClassifiedTransactions(
       options.includeExternal
         ? prisma.internalTransferMatch.findMany({ where: { userId, status: "CONFIRMED" } })
         : Promise.resolve([]),
+      // Only provider-confirmed bill payments count as completed bill spending.
+      prisma.billPaymentIntent.findMany({
+        where: { userId, status: "BILLER_CONFIRMED", confirmedAt: { gte: from, lte: to } },
+        include: { biller: { include: { category: true } } },
+      }),
     ]);
 
   const categorized = new Set(categorizations.map((row) => row.paymentRef));
@@ -104,6 +109,11 @@ export async function loadClassifiedTransactions(
   // P2P TransactionRecord. Count the merchant payment once and skip its duplicate.
   const merchantRefs = new Set(
     merchantPayments.map((payment) => payment.paymentRef).filter((value): value is string => Boolean(value)),
+  );
+  // A confirmed bill payment also has a P2P TransactionRecord from the engine.
+  // Count the bill payment once and skip its duplicate transaction record.
+  const billRefs = new Set(
+    billPayments.map((payment) => payment.paymentRef).filter((value): value is string => Boolean(value)),
   );
 
   for (const transaction of transactions) {
@@ -116,6 +126,7 @@ export async function loadClassifiedTransactions(
     }
     if (transaction.paymentRef && groupRefs.has(transaction.paymentRef)) continue; // group settlement already represented
     if (transaction.paymentRef && merchantRefs.has(transaction.paymentRef)) continue; // merchant payment already represented
+    if (transaction.paymentRef && billRefs.has(transaction.paymentRef)) continue; // bill payment already represented
     if (transaction.status !== "SUCCESSFUL") continue;
     const amount = toSafeMinor(transaction.amountMinor) ?? 0;
     const received = transaction.direction === "RECEIVED";
@@ -144,6 +155,23 @@ export async function loadClassifiedTransactions(
         severity: "LOW", details: "Transaction has no explicit category; defaulted by rule",
       });
     }
+  }
+
+  for (const payment of billPayments) {
+    records.push({
+      sourceType: "BILL_PAYMENT",
+      sourceId: payment.id,
+      category: "EXPENSE",
+      direction: "OUT",
+      amountMinor: payment.totalMinor,
+      currency: "INR",
+      occurredAt: payment.confirmedAt ?? payment.createdAt,
+      description: `${payment.biller.category.label} bill payment`,
+      merchantName: payment.biller.name,
+      paymentRef: payment.paymentRef,
+      isAdjustment: false,
+      classificationSource: "PROVIDER_CONFIRMED",
+    });
   }
 
   for (const payment of merchantPayments) {

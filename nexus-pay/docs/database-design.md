@@ -30,6 +30,13 @@ balances or transaction history. Raftline remains the financial source of truth.
 > immutable, outbox-backed and carry privacy-preserving IP hashes. No risk
 > table stores a wallet balance or duplicates the session, transaction or
 > audit tables. See `docs/fraud-intelligence-architecture.md`.
+>
+> Release 14 adds 28 bill-payment models via
+> `20261120051530_release14_bill_payments`,
+> `20261120052149_release14_bill_relations` and
+> `20261120052803_release14_recharge_relations`. Bill payments link a Raftline
+> settlement reference to a provider transaction reference without duplicating
+> the payment or transaction tables. See `docs/bill-payment-architecture.md`.
 
 ## 2. Ownership boundary
 

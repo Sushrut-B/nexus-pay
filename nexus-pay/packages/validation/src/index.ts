@@ -1239,3 +1239,95 @@ export type CaseAssignInput = z.infer<typeof caseAssignSchema>;
 export type CaseNoteInput = z.infer<typeof caseNoteSchema>;
 export type CaseResolveInput = z.infer<typeof caseResolveSchema>;
 
+// ---------------------------------------------------------------------------
+// Release 14 — Bill payments & recharges
+// ---------------------------------------------------------------------------
+
+export const billQuerySchema = z.object({
+  page: z.coerce.number().int().min(1).max(10_000).default(1),
+  pageSize: z.coerce.number().int().min(1).max(50).default(20),
+  category: z.string().max(60).optional(),
+  status: z.string().max(60).optional(),
+  from: isoDate.optional(),
+  to: isoDate.optional(),
+});
+
+export const savedBillAccountSchema = z.object({
+  billerId: z.string().trim().min(1).max(100),
+  nickname: z.string().trim().min(2).max(120),
+  parameters: z.record(z.string().max(300)),
+});
+
+export const billFetchSchema = z.object({
+  billerId: z.string().trim().min(1).max(100),
+  accountId: z.string().trim().max(80).optional(),
+  parameters: z.record(z.string().max(300)).default({}),
+});
+
+export const billPaymentCreateSchema = z.object({
+  snapshotId: z.string().trim().min(1).max(80),
+  accountId: z.string().trim().max(80).optional(),
+  amountMinor: z.number().int().min(MIN_PAYMENT_MINOR).max(MAX_PAYMENT_MINOR),
+  idempotencyKey: z.string().trim().min(8).max(160),
+  termsAccepted: z.literal(true, { errorMap: () => ({ message: "You must review the bill before paying" }) }),
+});
+
+export const rechargeCreateSchema = z.object({
+  billerId: z.string().trim().min(1).max(100),
+  accountId: z.string().trim().max(80).optional(),
+  planId: z.string().trim().max(80).optional(),
+  amountMinor: z.number().int().min(MIN_PAYMENT_MINOR).max(MAX_PAYMENT_MINOR),
+  parameters: z.record(z.string().max(300)).default({}),
+  idempotencyKey: z.string().trim().min(8).max(160),
+  termsAccepted: z.literal(true, { errorMap: () => ({ message: "You must confirm the recharge" }) }),
+});
+
+export const recurringBillSchema = z.object({
+  billerId: z.string().trim().min(1).max(100),
+  accountId: z.string().trim().max(80).optional(),
+  pattern: z.enum(["MONTHLY", "QUARTERLY", "YEARLY"]).default("MONTHLY"),
+  expectedMinMinor: z.number().int().min(0).optional(),
+  expectedMaxMinor: z.number().int().min(0).optional(),
+  confirmedByUser: z.boolean().default(false),
+});
+
+export const autoPaymentSchema = z.object({
+  accountId: z.string().trim().min(1).max(80),
+  recurringBillId: z.string().trim().max(80).optional(),
+  maxAmountMinor: z.number().int().min(MIN_PAYMENT_MINOR).max(MAX_PAYMENT_MINOR),
+  frequency: z.enum(["MONTHLY", "QUARTERLY", "YEARLY"]).default("MONTHLY"),
+  authorizationConfirmed: z.literal(true, { errorMap: () => ({ message: "Explicit authorization is required" }) }),
+});
+
+export const householdSchema = z.object({
+  name: z.string().trim().min(2).max(160),
+});
+
+export const householdBillSchema = z.object({
+  billerId: z.string().trim().min(1).max(100),
+  accountId: z.string().trim().max(80).optional(),
+  paymentId: z.string().trim().max(80).optional(),
+  assignedTo: z.string().trim().max(80).optional(),
+  note: z.string().trim().max(500).optional(),
+});
+
+export const billWebhookSchema = z.object({
+  eventType: z.string().trim().min(3).max(80),
+  eventId: z.string().trim().min(3).max(180),
+  providerRef: z.string().trim().max(180).optional(),
+  signature: z.string().trim().min(8).max(500),
+  timestamp: z.string().trim().min(3).max(40),
+  payload: z.record(z.unknown()),
+});
+
+export type BillQueryInput = z.infer<typeof billQuerySchema>;
+export type SavedBillAccountInput = z.infer<typeof savedBillAccountSchema>;
+export type BillFetchInput = z.infer<typeof billFetchSchema>;
+export type BillPaymentCreateInput = z.infer<typeof billPaymentCreateSchema>;
+export type RechargeCreateInput = z.infer<typeof rechargeCreateSchema>;
+export type RecurringBillInput = z.infer<typeof recurringBillSchema>;
+export type AutoPaymentInput = z.infer<typeof autoPaymentSchema>;
+export type HouseholdInput = z.infer<typeof householdSchema>;
+export type HouseholdBillInput = z.infer<typeof householdBillSchema>;
+export type BillWebhookInput = z.infer<typeof billWebhookSchema>;
+

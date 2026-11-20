@@ -147,3 +147,4 @@ export * from "./accounts";
 export * from "./credit";
 export * from "./insurance";
 export * from "./security";
+export * from "./billing";

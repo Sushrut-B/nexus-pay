@@ -708,3 +708,42 @@ Details: `docs/insurance-marketplace-architecture.md`, `docs/insurance-provider-
 | GET | `/api/control/fraud/models` `/audit` `/run` | Model governance, audit, event worker. |
 
 Details: `docs/fraud-intelligence-architecture.md`, `docs/risk-engine-and-rules.md`, `docs/payment-risk-gateway.md`, `docs/release-13-report.md`.
+
+## Release 14 — Bill payments & recharges
+
+### Biller discovery and accounts
+| Method | Route | Notes |
+| --- | --- | --- |
+| GET | `/api/bill-payments/categories` `/billers` `/billers/:id` `/billers/:id/parameters` | Provider-backed catalogue or unavailable state. |
+| GET/POST | `/api/bill-payments/accounts` | Saved bill accounts (masked identifiers). |
+| GET/PATCH/DELETE | `/api/bill-payments/accounts/:id` | Account management. |
+
+### Bill fetch and payments
+| Method | Route | Notes |
+| --- | --- | --- |
+| POST | `/api/bill-payments/fetch` | Provider bill fetch with validated parameters. |
+| GET/POST | `/api/bill-payments/fetch/:id` `/fetch/:id/refresh` | Fetch state and revalidation. |
+| GET/POST | `/api/bill-payments` | List / create bill payment intents. |
+| GET | `/api/bill-payments/:id` | Payment state with distinct stage labels. |
+| POST | `/api/bill-payments/:id/confirm` | Existing payment engine + provider submission. |
+| GET/POST | `/api/bill-payments/:id/receipt` | Nexus Pay payment record. |
+| GET | `/api/bill-payments/receipts` | Receipt list. |
+
+### Recharges, recurring, households
+| Method | Route | Notes |
+| --- | --- | --- |
+| GET | `/api/recharges/categories` `/operators` `/plans` | Provider-backed plan catalogue. |
+| POST | `/api/recharges/validate` `/recharges` `/recharges/:id/confirm` | Validation and recharge flow. |
+| GET | `/api/recharges` `/recharges/:id` | Recharge history. |
+| GET/POST | `/api/bill-payments/recurring` | Recurring bills. |
+| PATCH/DELETE | `/api/bill-payments/recurring/:id` | Recurring bill management. |
+| GET | `/api/bill-payments/reminders` | Reminder schedule. |
+| GET/POST | `/api/households` `/households/:id` `/households/:id/invitations` `/households/:id/bills` | Household responsibilities (no money movement). |
+
+### Nexus Control (`bill-payments:read` / `write`)
+| Method | Route | Notes |
+| --- | --- | --- |
+| GET | `/api/control/bill-payments/overview` `/providers` `/transactions` `/reconciliation` `/reconciliation/:caseId` | Operations monitoring. |
+| POST | `/api/control/bill-payments/reconciliation/:caseId/assign` `/resolve` `/run` | Audited investigation workflow. |
+
+Details: `docs/bill-payment-architecture.md`, `docs/biller-provider-guide.md`, `docs/release-14-report.md`.
