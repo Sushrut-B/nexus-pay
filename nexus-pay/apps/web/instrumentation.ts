@@ -8,6 +8,7 @@ export async function register() {
     const { startAccountsWorker } = await import("@/lib/accounts/accounts-worker-bootstrap");
     const { startCreditWorker } = await import("@/lib/credit/credit-worker-bootstrap");
     const { startInsuranceWorker } = await import("@/lib/insurance/insurance-worker-bootstrap");
+    const { startFraudWorker } = await import("@/lib/fraud/fraud-bootstrap");
     startScheduler();
     startWebhookWorker();
     startBillingWorker();
@@ -16,5 +17,6 @@ export async function register() {
     startAccountsWorker();
     startCreditWorker();
     startInsuranceWorker();
+    startFraudWorker();
   }
 }

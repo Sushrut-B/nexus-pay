@@ -676,3 +676,35 @@ All endpoints use the common `{ data, requestId }` envelope. Mutations require C
 | POST | `/api/control/insurance/run` | Audited provider sync. |
 
 Details: `docs/insurance-marketplace-architecture.md`, `docs/insurance-provider-onboarding.md`, `docs/release-12-report.md`.
+
+## Release 13 — Fraud Intelligence
+
+### Customer security
+| Method | Route | Notes |
+| --- | --- | --- |
+| GET | `/api/security/overview` | Security metrics; no fabricated fraud statistics. |
+| GET | `/api/security/activity` | Masked security event timeline. |
+| GET | `/api/security/sessions` / DELETE `/sessions/:sessionId` | Session visibility and revocation. |
+| POST | `/api/security/sessions/revoke-others` | Revoke all other sessions. |
+| GET | `/api/security/devices` / PATCH, DELETE `/devices/:deviceId` | Device management. |
+| POST | `/api/security/verify-sensitive-action` | Password-based step-up (MFA extension point). |
+| GET/POST | `/api/security/reports` | Customer fraud reports. |
+| GET | `/api/security/reports/:reportId` `/history` | Report status and audit history. |
+| POST | `/api/security/reports/:reportId/documents` | Encrypted supporting documents. |
+| GET | `/api/security/report-documents/:id/download` | Signed short-lived download. |
+| GET | `/api/security/safety-guides` `/warnings` | Scam education and contextual warnings. |
+| POST | `/api/security/warnings/:warningId/acknowledge` | Acknowledge a warning. |
+
+### Nexus Control (`fraud:read` / `fraud:write`)
+| Method | Route | Notes |
+| --- | --- | --- |
+| GET | `/api/control/fraud/overview` `/events` `/alerts` `/alerts/:id` | Measured monitoring. |
+| GET | `/api/control/fraud/cases` `/cases/:id` | Investigation queue and detail. |
+| POST | `/api/control/fraud/cases` `/cases/:id/assign` `/notes` `/escalate` `/resolve` | Audited investigation workflow. |
+| POST | `/api/control/fraud/alerts/:alertId/acknowledge` `/case` | Alert handling. |
+| GET/POST | `/api/control/fraud/rules` | Rule configuration. |
+| PATCH | `/api/control/fraud/rules/:ruleId` | Versioned, audited rule change. |
+| GET/PATCH | `/api/control/fraud/risk-policies` `/:policyId` | Threshold and action policy. |
+| GET | `/api/control/fraud/models` `/audit` `/run` | Model governance, audit, event worker. |
+
+Details: `docs/fraud-intelligence-architecture.md`, `docs/risk-engine-and-rules.md`, `docs/payment-risk-gateway.md`, `docs/release-13-report.md`.

@@ -10,6 +10,7 @@ import { getRequestId, handleRouteError, jsonOk, ApiError } from "@/lib/api/resp
 import { SESSION_COOKIE } from "@/lib/auth/session";
 import { hashPassword } from "@/lib/security/passwords";
 import { hashToken } from "@/lib/security/tokens";
+import { publishSecurityEvent } from "@/lib/fraud/event-service";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -85,6 +86,19 @@ export async function POST(request: NextRequest) {
       entityType: "user",
       entityId: resetToken.userId,
     });
+    for (const type of ["PASSWORD_RESET_COMPLETED", "PASSWORD_CHANGED", "SESSION_REVOKED"] as const) {
+      await publishSecurityEvent({
+        eventId: `${type.toLowerCase()}_${requestId}_${resetToken.userId}`,
+        type,
+        occurredAt: new Date(),
+        actorId: resetToken.userId,
+        sourceModule: "auth",
+        ipAddress: getClientIp(request),
+        userAgent: request.headers.get("user-agent"),
+        requestId,
+        metadata: { reason: "PASSWORD_RESET", sessionsRevoked: true },
+      });
+    }
 
     return jsonOk({ redirectTo: "/login?reset=success" }, requestId);
   } catch (error) {

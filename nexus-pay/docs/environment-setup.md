@@ -206,6 +206,17 @@ demonstration insurer; no real insurer, quote, policy or claim exists.
 For local end-to-end runs that create several users, set `E2E_TEST_MODE=true`
 to raise the in-memory rate-limit thresholds. Production defaults are unchanged.
 
+Release 13 fraud intelligence:
+
+```dotenv
+NEXUS_FRAUD_ENGINE_ENABLED="true"
+NEXUS_FRAUD_GATEWAY_ENABLED="true"
+NEXUS_FRAUD_FALLBACK_ACTION="REQUIRE_CUSTOMER_CONFIRMATION"
+NEXUS_FRAUD_RETENTION_DAYS="365"
+```
+
+The gateway is read-only; it is inserted before payment creation and never changes a wallet, payment intent or Raftline transaction. The fallback action is applied explicitly and audited if the engine is unavailable.
+
 ### Raftline settings
 
 Preferred per-node configuration:

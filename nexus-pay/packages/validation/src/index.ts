@@ -1138,3 +1138,104 @@ export type DocumentUploadInput = z.infer<typeof documentUploadSchema>;
 export type AffordabilityInput = z.infer<typeof affordabilitySchema>;
 export type CreditWebhookInput = z.infer<typeof creditWebhookSchema>;
 
+// ---------------------------------------------------------------------------
+// Release 13 — Fraud intelligence & transaction security
+// ---------------------------------------------------------------------------
+
+export const securityQuerySchema = z.object({
+  page: z.coerce.number().int().min(1).max(10_000).default(1),
+  pageSize: z.coerce.number().int().min(1).max(50).default(20),
+  type: z.string().max(80).optional(),
+  status: z.string().max(60).optional(),
+  category: z.string().max(60).optional(),
+  from: isoDate.optional(),
+  to: isoDate.optional(),
+});
+
+export const securityEventSchema = z.object({
+  eventId: z.string().trim().min(5).max(160),
+  type: z.string().trim().min(3).max(80),
+  occurredAt: z.string().datetime(),
+  actorId: z.string().trim().max(80).optional(),
+  subjectId: z.string().trim().max(120).optional(),
+  accountId: z.string().trim().max(120).optional(),
+  sessionId: z.string().trim().max(120).optional(),
+  sourceModule: z.string().trim().min(2).max(60),
+  correlationId: z.string().trim().max(160).optional(),
+  requestId: z.string().trim().max(80).optional(),
+  deviceId: z.string().trim().max(160).optional(),
+  transactionRef: z.string().trim().max(160).optional(),
+  metadata: z.record(z.unknown()).default({}),
+});
+
+export const sensitiveActionSchema = z.object({
+  action: z.enum(["CHANGE_EMAIL", "CHANGE_PHONE", "CHANGE_PASSWORD", "CHANGE_RECOVERY", "TRUST_DEVICE", "MERCHANT_SETTINGS"]),
+  password: z.string().min(8).max(200),
+  reason: z.string().trim().max(300).optional(),
+});
+
+export const deviceTrustSchema = z.object({
+  deviceId: z.string().trim().min(8).max(160),
+  trusted: z.boolean().default(true),
+});
+
+export const fraudReportSchema = z.object({
+  category: z.enum(["UNAUTHORIZED_TRANSACTION", "SUSPICIOUS_LOGIN", "ACCOUNT_COMPROMISE", "IMPERSONATION", "SUSPICIOUS_PAYMENT_REQUEST", "MERCHANT_DISPUTE", "SUSPECTED_SCAM"]),
+  transactionRef: z.string().trim().max(160).optional(),
+  description: z.string().trim().min(10).max(2000),
+});
+
+export const fraudRuleSchema = z.object({
+  code: z.string().trim().min(3).max(80),
+  name: z.string().trim().min(3).max(160),
+  description: z.string().trim().min(10).max(1000),
+  category: z.enum(["AUTHENTICATION", "PAYMENT", "MERCHANT", "REWARDS", "APPLICATION", "BEHAVIORAL", "OPERATIONAL"]),
+  severity: z.enum(["LOW", "MEDIUM", "HIGH", "CRITICAL"]),
+  thresholds: z.record(z.number()),
+  windowSeconds: z.coerce.number().int().min(30).max(2_592_000).default(300),
+  enabled: z.boolean().default(true),
+  riskContribution: z.coerce.number().int().min(0).max(100).default(10),
+  recommendedAction: z.enum(["ALLOW", "ALLOW_WITH_MONITORING", "REQUIRE_STEP_UP_AUTHENTICATION", "REQUIRE_CUSTOMER_CONFIRMATION", "HOLD_FOR_MANUAL_REVIEW", "BLOCK_INITIATION"]).default("ALLOW_WITH_MONITORING"),
+});
+
+export const fraudRuleUpdateSchema = fraudRuleSchema.partial().extend({
+  code: z.string().trim().min(3).max(80).optional(),
+});
+
+export const riskPolicySchema = z.object({
+  thresholds: z.object({
+    lowMax: z.coerce.number().int().min(0).max(100).default(24),
+    moderateMax: z.coerce.number().int().min(0).max(100).default(49),
+    highMax: z.coerce.number().int().min(0).max(100).default(74),
+  }),
+  actionMap: z.record(z.enum(["ALLOW", "ALLOW_WITH_MONITORING", "REQUIRE_STEP_UP_AUTHENTICATION", "REQUIRE_CUSTOMER_CONFIRMATION", "HOLD_FOR_MANUAL_REVIEW", "BLOCK_INITIATION"])).default({}),
+  fallbackAction: z.enum(["ALLOW", "ALLOW_WITH_MONITORING", "REQUIRE_STEP_UP_AUTHENTICATION", "REQUIRE_CUSTOMER_CONFIRMATION", "HOLD_FOR_MANUAL_REVIEW", "BLOCK_INITIATION"]).default("REQUIRE_CUSTOMER_CONFIRMATION"),
+});
+
+export const caseAssignSchema = z.object({
+  assigneeId: z.string().trim().min(2).max(160),
+  justification: z.string().trim().max(300).optional(),
+});
+
+export const caseNoteSchema = z.object({
+  body: z.string().trim().min(2).max(2000),
+  internal: z.boolean().default(true),
+});
+
+export const caseResolveSchema = z.object({
+  resolution: z.enum(["RESOLVED", "FALSE_POSITIVE", "CLOSED"]),
+  notes: z.string().trim().min(5).max(1000),
+});
+
+export type SecurityQueryInput = z.infer<typeof securityQuerySchema>;
+export type SecurityEventInput = z.infer<typeof securityEventSchema>;
+export type SensitiveActionInput = z.infer<typeof sensitiveActionSchema>;
+export type DeviceTrustInput = z.infer<typeof deviceTrustSchema>;
+export type FraudReportInput = z.infer<typeof fraudReportSchema>;
+export type FraudRuleInput = z.infer<typeof fraudRuleSchema>;
+export type FraudRuleUpdateInput = z.infer<typeof fraudRuleUpdateSchema>;
+export type RiskPolicyInput = z.infer<typeof riskPolicySchema>;
+export type CaseAssignInput = z.infer<typeof caseAssignSchema>;
+export type CaseNoteInput = z.infer<typeof caseNoteSchema>;
+export type CaseResolveInput = z.infer<typeof caseResolveSchema>;
+

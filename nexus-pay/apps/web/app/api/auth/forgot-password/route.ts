@@ -9,6 +9,7 @@ import { getRequestId, handleRouteError, jsonOk } from "@/lib/api/response";
 import { appBaseUrl, getServerEnv } from "@/lib/env";
 import { sendPasswordResetEmail } from "@/lib/email";
 import { generateOpaqueToken, hashToken } from "@/lib/security/tokens";
+import { publishSecurityEvent } from "@/lib/fraud/event-service";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -76,6 +77,27 @@ export async function POST(request: NextRequest) {
         action: AUDIT_ACTIONS.PASSWORD_RESET_REQUESTED,
         entityType: "user",
         entityId: user.id,
+      });
+      await publishSecurityEvent({
+        eventId: `reset_req_${requestId}_${user.id}`,
+        type: "PASSWORD_RESET_REQUESTED",
+        occurredAt: new Date(),
+        actorId: user.id,
+        sourceModule: "auth",
+        ipAddress: getClientIp(request),
+        userAgent: request.headers.get("user-agent"),
+        requestId,
+        metadata: { outcome: "REQUESTED" },
+      });
+      await publishSecurityEvent({
+        eventId: `account_recovery_${requestId}_${user.id}`,
+        type: "ACCOUNT_RECOVERY_REQUESTED",
+        occurredAt: new Date(),
+        actorId: user.id,
+        sourceModule: "auth",
+        ipAddress: getClientIp(request),
+        requestId,
+        metadata: { reason: "PASSWORD_RESET" },
       });
     }
 

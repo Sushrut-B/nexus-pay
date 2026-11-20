@@ -19,6 +19,7 @@ const LINKS = [
   { href: "/scheduled", label: "Scheduled Payments" },
   { href: "/calendar", label: "Calendar" },
   { href: "/statements", label: "Statements" },
+  { href: "/security", label: "Security" },
   { href: "/insurance", label: "Insurance" },
   { href: "/credit", label: "Credit" },
   { href: "/accounts", label: "Accounts" },

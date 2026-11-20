@@ -70,6 +70,20 @@ const envSchema = z.object({
     .enum(["true", "false"])
     .default("false")
     .transform((value) => value === "true"),
+
+  // Release 13 — fraud intelligence
+  NEXUS_FRAUD_ENGINE_ENABLED: z
+    .enum(["true", "false"])
+    .default("true")
+    .transform((value) => value === "true"),
+  NEXUS_FRAUD_GATEWAY_ENABLED: z
+    .enum(["true", "false"])
+    .default("true")
+    .transform((value) => value === "true"),
+  NEXUS_FRAUD_FALLBACK_ACTION: z
+    .enum(["ALLOW", "ALLOW_WITH_MONITORING", "REQUIRE_STEP_UP_AUTHENTICATION", "REQUIRE_CUSTOMER_CONFIRMATION", "HOLD_FOR_MANUAL_REVIEW", "BLOCK_INITIATION"])
+    .default("REQUIRE_CUSTOMER_CONFIRMATION"),
+  NEXUS_FRAUD_RETENTION_DAYS: z.coerce.number().int().min(30).max(3650).default(365),
 });
 
 let cached: z.infer<typeof envSchema> | null = null;

@@ -22,6 +22,14 @@ balances or transaction history. Raftline remains the financial source of truth.
 > `20261119055821_release12_insurance_relations`. All money is integer minor
 > units; insurance metadata never represents a wallet balance. See the Prisma
 > schema and `docs/release-12-report.md`.
+>
+> Release 13 adds 26 security/fraud models via
+> `20261120030630_release13_fraud_intelligence`,
+> `20261120031022_release13_outbox_processing` and
+> `20261120032907_release13_sensitive_action_events`. Security events are
+> immutable, outbox-backed and carry privacy-preserving IP hashes. No risk
+> table stores a wallet balance or duplicates the session, transaction or
+> audit tables. See `docs/fraud-intelligence-architecture.md`.
 
 ## 2. Ownership boundary
 

@@ -19,7 +19,7 @@
 
 ## Overview
 
-Nexus Pay is a full payments and finance platform backed by a live five-node **Raftline** cluster. It evolved across twelve releases without rebuilding earlier work.
+Nexus Pay is a full payments and finance platform backed by a live five-node **Raftline** cluster. It evolved across thirteen releases without rebuilding earlier work.
 
 | Release | Delivered |
 | --- | --- |
@@ -35,10 +35,11 @@ Nexus Pay is a full payments and finance platform backed by a live five-node **R
 | **R10** | **Unified financial hub** — provider abstraction, sandbox external accounts, consent management, durable sync, deduplication, internal transfers, privacy centre, Control provider operations |
 | **R11** | **Credit marketplace** — lender provider abstraction, offers and comparison, pre-assessment, application workflow, encrypted documents, loan servicing, affordability, Control credit operations |
 | **R12** | **Insurance marketplace** — provider-ready insurance catalogue, comparison, quotes, applications, provider-confirmed policies, premiums/renewals, claims, consent centre, signed document storage, Control insurance operations (sandbox only) |
+| **R13** | **Fraud intelligence** — security event platform with transactional outbox, explainable risk engine, configurable rules, behavioral baselines, read-only payment risk gateway, session/device security, scam warnings, fraud cases and reports, Control Fraud Intelligence Centre |
 
 > [!IMPORTANT]
 > <a name="sandbox-notice"></a>
-> **Sandbox only.** Funding is labelled **SIMULATED SANDBOX FUNDING**. There is no bank, UPI, card or real-money integration, and no regulatory claim. Merchant approval is application-level (not KYC), merchant QR is a Nexus Pay QR (not UPI), and **Raftline has no refund/reversal capability** — refunds stop at request/review with no money moved. Subscriptions use explicit sandbox authorization - no UPI AutoPay, bank mandate or card-on-file is established. Reward points are non-cash loyalty units; cashback is a sandbox wallet credit via the existing Raftline funding path. Insurance data is metadata only; the insurance marketplace uses a clearly labelled sandbox demonstration insurer and no real insurer, quote, policy or claim is fabricated. Nexus Pay is not an insurer, broker, corporate agent or web aggregator.
+> **Sandbox only.** Funding is labelled **SIMULATED SANDBOX FUNDING**. There is no bank, UPI, card or real-money integration, and no regulatory claim. Merchant approval is application-level (not KYC), merchant QR is a Nexus Pay QR (not UPI), and **Raftline has no refund/reversal capability** — refunds stop at request/review with no money moved. Subscriptions use explicit sandbox authorization - no UPI AutoPay, bank mandate or card-on-file is established. Reward points are non-cash loyalty units; cashback is a sandbox wallet credit via the existing Raftline funding path. Insurance data is metadata only; the insurance marketplace uses a clearly labelled sandbox demonstration insurer and no real insurer, quote, policy or claim is fabricated. Nexus Pay is not an insurer, broker, corporate agent or web aggregator. Fraud risk scores are explainable indicators, not proof of fraud; no wallet is frozen, no account permanently blocked from a model output, and no payment is reversed by the fraud module.
 
 <details>
 <summary><b>Core financial rules</b> (click to expand)</summary>
@@ -183,7 +184,8 @@ pnpm exec playwright test --config playwright.prod.config.ts
 - External accounts: [Architecture](nexus-pay/docs/external-financial-architecture.md) · [Provider guide](nexus-pay/docs/provider-adapter-guide.md) · [Setup & prerequisites](nexus-pay/docs/provider-setup.md) · [Encryption & retention](nexus-pay/docs/encryption-and-retention.md)
 - Credit: [Architecture](nexus-pay/docs/credit-marketplace-architecture.md) · [Provider onboarding](nexus-pay/docs/lending-provider-and-onboarding.md) · [Calculations & servicing](nexus-pay/docs/loan-calculations-and-servicing.md) · [Privacy](nexus-pay/docs/credit-privacy-and-reconciliation.md)
 - Insurance: [Architecture](nexus-pay/docs/insurance-marketplace-architecture.md) · [Provider onboarding](nexus-pay/docs/insurance-provider-onboarding.md) · [Release report](nexus-pay/docs/release-12-report.md)
-- Reports: [R2](nexus-pay/docs/release-2-report.md) · [R3](nexus-pay/docs/release-3-report.md) · [R4](nexus-pay/docs/release-4-report.md) · [R5](nexus-pay/docs/release-5-report.md) · [R6](nexus-pay/docs/release-6-report.md) · [R7](nexus-pay/docs/release-7-report.md) · [R8](nexus-pay/docs/release-8-report.md) · [R9](nexus-pay/docs/release-9-report.md) · [R10](nexus-pay/docs/release-10-report.md) · [R11](nexus-pay/docs/release-11-report.md) · [R12](nexus-pay/docs/release-12-report.md)
+- Fraud intelligence: [Architecture](nexus-pay/docs/fraud-intelligence-architecture.md) · [Event inventory](nexus-pay/docs/security-event-inventory.md) · [Risk engine & rules](nexus-pay/docs/risk-engine-and-rules.md) · [Payment gateway](nexus-pay/docs/payment-risk-gateway.md) · [Release report](nexus-pay/docs/release-13-report.md)
+- Reports: [R2](nexus-pay/docs/release-2-report.md) · [R3](nexus-pay/docs/release-3-report.md) · [R4](nexus-pay/docs/release-4-report.md) · [R5](nexus-pay/docs/release-5-report.md) · [R6](nexus-pay/docs/release-6-report.md) · [R7](nexus-pay/docs/release-7-report.md) · [R8](nexus-pay/docs/release-8-report.md) · [R9](nexus-pay/docs/release-9-report.md) · [R10](nexus-pay/docs/release-10-report.md) · [R11](nexus-pay/docs/release-11-report.md) · [R12](nexus-pay/docs/release-12-report.md) · [R13](nexus-pay/docs/release-13-report.md)
 
 
 

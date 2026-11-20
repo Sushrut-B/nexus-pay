@@ -462,6 +462,15 @@ enum NotificationType {
   INSURANCE_CLAIM_STATUS_CHANGED
   INSURANCE_CLAIM_ADDITIONAL_INFO
   INSURANCE_CLAIM_COMPLETED
+  SECURITY_NEW_DEVICE_LOGIN
+  SECURITY_SUSPICIOUS_LOGIN
+  SECURITY_RISK_ALERT
+  SECURITY_SENSITIVE_ACTION_REQUIRED
+  SECURITY_SESSION_REVOKED
+  SECURITY_DEVICE_TRUST_CHANGED
+  SECURITY_REPORT_STATUS_CHANGED
+  SECURITY_CASE_UPDATE
+  SECURITY_PAYMENT_WARNING
 }
 
 enum GroupActivityEventType {
@@ -985,6 +994,8 @@ enum AdminRole {
   SUPER_ADMIN
   OPERATOR
   VIEWER
+  FRAUD_ADMIN
+  FRAUD_ANALYST
 }
 
 enum ClusterHealth {
@@ -4121,6 +4132,642 @@ model InsuranceNotificationPreference {
   updatedAt           DateTime @updatedAt
 
   @@map("insurance_notification_preferences")
+}
+
+// ---------------------------------------------------------------------------
+// Release 13 — Fraud intelligence & transaction security.
+// Read-only observer of financial activity. Raftline remains authoritative.
+// ---------------------------------------------------------------------------
+
+enum SecurityEventType {
+  LOGIN_SUCCESS
+  LOGIN_FAILURE
+  LOGOUT
+  PASSWORD_CHANGED
+  PASSWORD_RESET_REQUESTED
+  PASSWORD_RESET_COMPLETED
+  NEW_DEVICE_LOGIN
+  SESSION_CREATED
+  SESSION_REVOKED
+  MFA_ENABLED
+  MFA_FAILED
+  SENSITIVE_ACTION_VERIFIED
+  SENSITIVE_ACTION_VERIFICATION_FAILED
+  PROFILE_CHANGED
+  EMAIL_CHANGED
+  PHONE_CHANGED
+  RECOVERY_DETAILS_CHANGED
+  WALLET_CREATED
+  ACCOUNT_RECOVERY_REQUESTED
+  PAYMENT_INITIATED
+  PAYMENT_REVIEWED
+  PAYMENT_PROCESSING
+  PAYMENT_SETTLED
+  PAYMENT_REJECTED
+  PAYMENT_UNKNOWN
+  PAYMENT_RECONCILIATION_REQUIRED
+  PAYMENT_CANCELLED
+  MERCHANT_REGISTERED
+  MERCHANT_SETTINGS_CHANGED
+  PAYMENT_LINK_CREATED
+  CHECKOUT_PAYMENT_INITIATED
+  REFUND_REQUESTED
+  WEBHOOK_CONFIGURATION_CHANGED
+  REWARD_EARNED
+  REWARD_REDEEMED
+  REFERRAL_CREATED
+  REFERRAL_REWARDED
+  CASHBACK_ISSUED
+  LOAN_APPLICATION_SUBMITTED
+  INSURANCE_QUOTE_REQUESTED
+  INSURANCE_APPLICATION_SUBMITTED
+  DOCUMENT_UPLOADED
+  PROVIDER_WEBHOOK_RECEIVED
+}
+
+enum SecurityOutboxStatus {
+  PENDING
+  PROCESSING
+  PUBLISHED
+  FAILED
+  DEAD_LETTER
+}
+
+enum RiskClassification {
+  LOW
+  MODERATE
+  HIGH
+  CRITICAL
+}
+
+enum RiskAction {
+  ALLOW
+  ALLOW_WITH_MONITORING
+  REQUIRE_STEP_UP_AUTHENTICATION
+  REQUIRE_CUSTOMER_CONFIRMATION
+  HOLD_FOR_MANUAL_REVIEW
+  BLOCK_INITIATION
+}
+
+enum RiskEvaluationMode {
+  SYNC_PRE_TRANSACTION
+  ASYNC_POST_TRANSACTION
+  PERIODIC
+  MANUAL
+}
+
+enum RiskSubjectType {
+  USER
+  PAYMENT
+  MERCHANT
+  APPLICATION
+  SESSION
+  DEVICE
+}
+
+enum FraudRuleCategory {
+  AUTHENTICATION
+  PAYMENT
+  MERCHANT
+  REWARDS
+  APPLICATION
+  BEHAVIORAL
+  OPERATIONAL
+}
+
+enum FraudRuleSeverity {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum RiskAlertStatus {
+  NEW
+  ACKNOWLEDGED
+  INVESTIGATING
+  RESOLVED
+  DISMISSED
+}
+
+enum FraudCaseStatus {
+  OPEN
+  TRIAGED
+  INVESTIGATING
+  CUSTOMER_CONTACT_REQUIRED
+  PROVIDER_CONTACT_REQUIRED
+  ESCALATED
+  RESOLVED
+  FALSE_POSITIVE
+  CLOSED
+}
+
+enum FraudCasePriority {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum FraudReportStatus {
+  SUBMITTED
+  ACKNOWLEDGED
+  UNDER_REVIEW
+  ADDITIONAL_INFORMATION_REQUIRED
+  ESCALATED
+  RESOLVED
+  CLOSED
+}
+
+enum RelationshipKind {
+  SHARED_DEVICE
+  SHARED_IP
+  REFERRAL
+  PAYMENT_RECIPIENT
+  MERCHANT_ASSOCIATION
+  SHARED_ACCOUNT
+}
+
+enum BehavioralMetric {
+  TRANSACTION_AMOUNT
+  TRANSACTION_FREQUENCY
+  LOGIN_FREQUENCY
+  RECIPIENT_NOVELTY
+  FAILED_AUTH_COUNT
+}
+
+enum FraudModelStatus {
+  DRAFT
+  ACTIVE
+  DEPRECATED
+  ROLLED_BACK
+}
+
+enum SecurityAuditOutcome {
+  SUCCESS
+  FAILURE
+  INFO
+}
+
+model SecurityEvent {
+  id                String            @id @default(cuid())
+  eventId           String            @unique @db.VarChar(160)
+  type              SecurityEventType
+  version           Int               @default(1)
+  occurredAt        DateTime
+  recordedAt        DateTime          @default(now())
+  actorId           String?           @db.VarChar(80)
+  subjectId         String?           @db.VarChar(120)
+  accountId         String?           @db.VarChar(120)
+  sessionId         String?           @db.VarChar(120)
+  sourceModule      String            @db.VarChar(60)
+  correlationId     String?           @db.VarChar(160)
+  requestId         String?           @db.VarChar(80)
+  deviceId          String?           @db.VarChar(160)
+  ipHash            String?           @db.VarChar(80)
+  transactionRef    String?           @db.VarChar(160)
+  metadata          Json              @default("{}")
+  retentionExpiresAt DateTime?
+
+  @@index([type, occurredAt])
+  @@index([actorId, occurredAt])
+  @@index([subjectId, type])
+  @@index([correlationId])
+  @@index([transactionRef])
+  @@map("security_events")
+}
+
+model SecurityEventOutbox {
+  id            String              @id @default(cuid())
+  eventId       String              @unique @db.VarChar(160)
+  type          SecurityEventType
+  aggregateType String              @db.VarChar(60)
+  aggregateId   String              @db.VarChar(120)
+  payload       Json
+  status        SecurityOutboxStatus @default(PENDING)
+  attempts      Int                 @default(0)
+  nextAttemptAt DateTime?
+  leaseUntil    DateTime?
+  error         String?             @db.VarChar(500)
+  publishedAt   DateTime?
+  createdAt     DateTime            @default(now())
+
+  @@index([status, nextAttemptAt])
+  @@map("security_event_outbox")
+}
+
+model DeviceRecord {
+  id           String    @id @default(cuid())
+  userId       String    @db.VarChar(80)
+  deviceId     String    @db.VarChar(160)
+  description  String    @db.VarChar(200)
+  userAgentHash String?  @db.VarChar(80)
+  ipHash       String?   @db.VarChar(80)
+  firstSeen    DateTime  @default(now())
+  lastSeen     DateTime  @default(now())
+  lastSessionId String?  @db.VarChar(120)
+
+  @@unique([userId, deviceId])
+  @@index([userId, lastSeen])
+  @@map("device_records")
+}
+
+model UserSessionRisk {
+  id             String            @id @default(cuid())
+  sessionId      String            @unique @db.VarChar(120)
+  userId         String            @db.VarChar(80)
+  deviceId       String?           @db.VarChar(160)
+  score          Int               @default(0)
+  classification RiskClassification @default(LOW)
+  flags          Json              @default("{}")
+  lastEvaluatedAt DateTime         @default(now())
+
+  @@index([userId, lastEvaluatedAt])
+  @@map("user_session_risks")
+}
+
+model TrustedDevice {
+  id         String    @id @default(cuid())
+  userId     String    @db.VarChar(80)
+  deviceId   String    @db.VarChar(160)
+  label      String    @db.VarChar(160)
+  trusted    Boolean   @default(true)
+  firstSeen  DateTime  @default(now())
+  lastActive DateTime  @default(now())
+  revokedAt  DateTime?
+
+  @@unique([userId, deviceId])
+  @@index([userId, revokedAt])
+  @@map("trusted_devices")
+}
+
+model RiskEvaluation {
+  id              String             @id @default(cuid())
+  reference       String             @unique @db.VarChar(160)
+  mode            RiskEvaluationMode
+  subjectType     RiskSubjectType
+  subjectId       String             @db.VarChar(120)
+  userId          String?            @db.VarChar(80)
+  score           Int
+  classification  RiskClassification
+  action          RiskAction
+  triggeredRules  Json               @default("[]")
+  signals         Json               @default("[]")
+  explanation     String?            @db.VarChar(1000)
+  evidenceQuality String             @db.VarChar(30) @default("LIMITED")
+  rulesetVersion  String             @db.VarChar(40)
+  policyVersion   String             @db.VarChar(40)
+  modelVersion    String?            @db.VarChar(40)
+  createdAt       DateTime           @default(now())
+
+  signalsRows FraudRiskSignal[]
+  features    RiskFeatureSnapshot[]
+
+  @@index([subjectType, subjectId])
+  @@index([userId, createdAt])
+  @@index([classification, createdAt])
+  @@map("risk_evaluations")
+}
+
+model FraudRiskSignal {
+  id           String   @id @default(cuid())
+  evaluationId String
+  name         String   @db.VarChar(80)
+  value        String?  @db.VarChar(160)
+  weight       Int      @default(0)
+  source       String   @db.VarChar(60)
+  evidence     String?  @db.VarChar(300)
+  createdAt    DateTime @default(now())
+
+  evaluation RiskEvaluation @relation(fields: [evaluationId], references: [id], onDelete: Cascade)
+
+  @@index([evaluationId])
+  @@map("fraud_risk_signals")
+}
+
+model FraudRule {
+  id               String             @id @default(cuid())
+  code             String             @unique @db.VarChar(80)
+  name             String             @db.VarChar(160)
+  description      String             @db.VarChar(1000)
+  category         FraudRuleCategory
+  severity         FraudRuleSeverity
+  conditions       Json               @default("{}")
+  thresholds       Json               @default("{}")
+  windowSeconds    Int                @default(300)
+  enabled          Boolean            @default(true)
+  version          Int                @default(1)
+  riskContribution Int                @default(0)
+  recommendedAction RiskAction        @default(ALLOW_WITH_MONITORING)
+  createdBy        String             @db.VarChar(80)
+  updatedBy        String             @db.VarChar(80)
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
+
+  versions  FraudRuleVersion[]
+  executions FraudRuleExecution[]
+
+  @@index([category, enabled])
+  @@map("fraud_rules")
+}
+
+model FraudRuleVersion {
+  id        String   @id @default(cuid())
+  ruleId    String
+  version   Int
+  snapshot  Json
+  createdBy String   @db.VarChar(80)
+  createdAt DateTime @default(now())
+
+  rule FraudRule @relation(fields: [ruleId], references: [id], onDelete: Cascade)
+
+  @@unique([ruleId, version])
+  @@map("fraud_rule_versions")
+}
+
+model FraudRuleExecution {
+  id           String   @id @default(cuid())
+  ruleId       String
+  evaluationId String?  @db.VarChar(80)
+  matched      Boolean
+  details      Json     @default("{}")
+  createdAt    DateTime @default(now())
+
+  rule FraudRule @relation(fields: [ruleId], references: [id], onDelete: Cascade)
+
+  @@index([ruleId, createdAt])
+  @@map("fraud_rule_executions")
+}
+
+model RiskPolicy {
+  id             String     @id @default(cuid())
+  code           String     @unique @db.VarChar(80)
+  name           String     @db.VarChar(160)
+  thresholds     Json       @default("{}")
+  actionMap      Json       @default("{}")
+  fallbackAction RiskAction @default(REQUIRE_CUSTOMER_CONFIRMATION)
+  enabled        Boolean    @default(true)
+  version        Int        @default(1)
+  updatedBy      String     @db.VarChar(80)
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+
+  @@map("risk_policies")
+}
+
+model BehavioralBaseline {
+  id          String           @id @default(cuid())
+  userId      String           @db.VarChar(80)
+  metric      BehavioralMetric
+  sampleCount Int              @default(0)
+  meanValue   Float?
+  mdevValue   Float?
+  ewmaValue   Float?
+  lastValue   Float?
+  coldStart   Boolean          @default(true)
+  windowDays  Int              @default(30)
+  updatedAt   DateTime         @updatedAt
+
+  @@unique([userId, metric])
+  @@map("behavioral_baselines")
+}
+
+model RiskAlert {
+  id             String         @id @default(cuid())
+  reference      String         @unique @db.VarChar(160)
+  userId         String?        @db.VarChar(80)
+  evaluationId   String?        @db.VarChar(80)
+  score          Int
+  severity       FraudRuleSeverity @default(MEDIUM)
+  status         RiskAlertStatus @default(NEW)
+  title          String         @db.VarChar(200)
+  summary        String         @db.VarChar(500)
+  triggeredRules Json           @default("[]")
+  assignedTo     String?        @db.VarChar(80)
+  acknowledgedAt DateTime?
+  resolvedAt     DateTime?
+  createdAt      DateTime       @default(now())
+
+  @@index([status, createdAt])
+  @@index([userId, createdAt])
+  @@map("risk_alerts")
+}
+
+model FraudCase {
+  id               String          @id @default(cuid())
+  caseNumber       String          @unique @db.VarChar(80)
+  userId           String?         @db.VarChar(80)
+  accountId        String?         @db.VarChar(120)
+  transactionRef   String?         @db.VarChar(160)
+  merchantId       String?         @db.VarChar(120)
+  alertId          String?         @db.VarChar(80)
+  riskScore        Int             @default(0)
+  status           FraudCaseStatus @default(OPEN)
+  priority         FraudCasePriority @default(MEDIUM)
+  assignedTo       String?         @db.VarChar(80)
+  resolution       String?         @db.VarChar(500)
+  openedAt         DateTime        @default(now())
+  resolvedAt       DateTime?
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+
+  evidence     FraudCaseEvidence[]
+  notes        FraudCaseNote[]
+  assignments  FraudCaseAssignment[]
+
+  @@index([status, priority])
+  @@index([userId, createdAt])
+  @@map("fraud_cases")
+}
+
+model FraudCaseEvidence {
+  id        String   @id @default(cuid())
+  caseId    String
+  kind      String   @db.VarChar(60)
+  reference String   @db.VarChar(200)
+  payload   Json     @default("{}")
+  createdAt DateTime @default(now())
+
+  case FraudCase @relation(fields: [caseId], references: [id], onDelete: Cascade)
+
+  @@index([caseId, createdAt])
+  @@map("fraud_case_evidence")
+}
+
+model FraudCaseNote {
+  id        String   @id @default(cuid())
+  caseId    String
+  authorId  String   @db.VarChar(80)
+  body      String   @db.VarChar(2000)
+  internal  Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  case FraudCase @relation(fields: [caseId], references: [id], onDelete: Cascade)
+
+  @@index([caseId, createdAt])
+  @@map("fraud_case_notes")
+}
+
+model FraudCaseAssignment {
+  id         String   @id @default(cuid())
+  caseId     String
+  fromUserId String?  @db.VarChar(80)
+  toUserId   String?  @db.VarChar(80)
+  assignedBy String   @db.VarChar(80)
+  createdAt  DateTime @default(now())
+
+  case FraudCase @relation(fields: [caseId], references: [id], onDelete: Cascade)
+
+  @@index([caseId, createdAt])
+  @@map("fraud_case_assignments")
+}
+
+model CustomerFraudReport {
+  id          String          @id @default(cuid())
+  reference   String          @unique @db.VarChar(160)
+  userId      String          @db.VarChar(80)
+  transactionRef String?      @db.VarChar(160)
+  category    String          @db.VarChar(80)
+  description String          @db.VarChar(2000)
+  status      FraudReportStatus @default(SUBMITTED)
+  resolution  String?         @db.VarChar(1000)
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+  resolvedAt  DateTime?
+
+  documents CustomerFraudReportDocument[]
+
+  @@index([userId, createdAt])
+  @@index([status, createdAt])
+  @@map("customer_fraud_reports")
+}
+
+model CustomerFraudReportDocument {
+  id          String   @id @default(cuid())
+  reportId    String
+  userId      String   @db.VarChar(80)
+  fileName    String   @db.VarChar(200)
+  contentType String   @db.VarChar(100)
+  sizeBytes   Int
+  storagePath String   @db.VarChar(1024)
+  status      String   @db.VarChar(30) @default("READY")
+  uploadedAt  DateTime @default(now())
+
+  report CustomerFraudReport @relation(fields: [reportId], references: [id], onDelete: Cascade)
+
+  @@index([reportId])
+  @@map("customer_fraud_report_documents")
+}
+
+model TransactionRiskAssessment {
+  id                  String    @id @default(cuid())
+  clientRequestId     String?   @db.VarChar(160)
+  paymentIntentId     String?   @db.VarChar(160)
+  userId              String    @db.VarChar(80)
+  amountMinor         Int?
+  evaluationId        String    @db.VarChar(80)
+  action              RiskAction
+  outcome             String    @db.VarChar(40) @default("PENDING")
+  originalIdempotencyKey String? @db.VarChar(160)
+  createdAt           DateTime  @default(now())
+
+  @@index([userId, createdAt])
+  @@index([paymentIntentId])
+  @@map("transaction_risk_assessments")
+}
+
+model SecurityNotification {
+  id        String   @id @default(cuid())
+  userId    String   @db.VarChar(80)
+  type      String   @db.VarChar(80)
+  title     String   @db.VarChar(200)
+  body      String?  @db.VarChar(500)
+  data      Json     @default("{}")
+  status    String   @db.VarChar(30) @default("PENDING")
+  sentAt    DateTime?
+  createdAt DateTime @default(now())
+
+  @@index([userId, status])
+  @@map("security_notifications")
+}
+
+model RiskFeatureSnapshot {
+  id            String   @id @default(cuid())
+  evaluationId  String   @db.VarChar(80)
+  featureVersion String  @db.VarChar(40)
+  features      Json     @default("{}")
+  provenance    Json     @default("{}")
+  createdAt     DateTime @default(now())
+
+  evaluation RiskEvaluation @relation(fields: [evaluationId], references: [id], onDelete: Cascade)
+
+  @@index([evaluationId])
+  @@map("risk_feature_snapshots")
+}
+
+model FraudModelVersion {
+  id               String          @id @default(cuid())
+  version          String          @unique @db.VarChar(60)
+  owner            String          @db.VarChar(120)
+  datasetRef       String          @db.VarChar(200)
+  featureVersion   String          @db.VarChar(40)
+  evaluationSummary Json           @default("{}")
+  status           FraudModelStatus @default(DRAFT)
+  advisoryOnly     Boolean         @default(true)
+  deployedAt       DateTime?
+  rollbackOf       String?         @db.VarChar(60)
+  createdAt        DateTime        @default(now())
+
+  evaluations FraudModelEvaluation[]
+
+  @@index([status, deployedAt])
+  @@map("fraud_model_versions")
+}
+
+model FraudModelEvaluation {
+  id        String   @id @default(cuid())
+  modelId   String
+  metrics   Json     @default("{}")
+  notes     String?  @db.VarChar(500)
+  evaluatedAt DateTime @default(now())
+
+  model FraudModelVersion @relation(fields: [modelId], references: [id], onDelete: Cascade)
+
+  @@index([modelId, evaluatedAt])
+  @@map("fraud_model_evaluations")
+}
+
+model SecurityAuditEvent {
+  id          String             @id @default(cuid())
+  actorType   String             @db.VarChar(30)
+  actorId     String             @db.VarChar(80)
+  action      String             @db.VarChar(80)
+  targetType  String             @db.VarChar(60)
+  targetId    String             @db.VarChar(120)
+  justification String?          @db.VarChar(500)
+  metadata    Json               @default("{}")
+  outcome     SecurityAuditOutcome @default(SUCCESS)
+  createdAt   DateTime           @default(now())
+
+  @@index([actorId, createdAt])
+  @@index([action, createdAt])
+  @@map("security_audit_events")
+}
+
+model SecurityRelationship {
+  id        String           @id @default(cuid())
+  kind      RelationshipKind
+  fromKey   String           @db.VarChar(160)
+  toKey     String           @db.VarChar(160)
+  strength  Int              @default(1)
+  evidence  Json             @default("{}")
+  firstSeen DateTime         @default(now())
+  lastSeen  DateTime         @default(now())
+
+  @@unique([kind, fromKey, toKey])
+  @@index([fromKey])
+  @@index([toKey])
+  @@map("security_relationships")
 }
 
 model Statement {
