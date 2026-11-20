@@ -769,3 +769,23 @@ Details: `docs/bill-payment-architecture.md`, `docs/biller-provider-guide.md`, `
 | POST | `/api/control/travel/reconciliation/:id/assign` `/resolve` `/run` | Audited investigation workflow. |
 
 Details: `docs/travel-architecture.md`, `docs/travel-provider-guide.md`, `docs/release-15-report.md`.
+
+## Release 16 — Investments & wealth
+
+| Method | Route | Notes |
+| --- | --- | --- |
+| GET | `/api/investments/portfolio` `/performance` `/allocation` `/holdings` `/transactions` | Provider snapshots with source timestamps. |
+| GET/POST | `/api/investments/providers` `/connections` | Provider list and consent-based connections. |
+| GET/POST | `/api/investments/connections/:id/authorize` `/sync` `/sync-status` `/revoke-consent` DELETE `/connections/:id` | Connection lifecycle. |
+| GET | `/api/investments/funds` `/funds/:id` `/instruments` `/instruments/:id` | Informational discovery; no trading. |
+| GET/POST | `/api/investments/watchlists` `/alerts` | Watchlists and price alerts. |
+| POST | `/api/investments/sip/calculator` | Hypothetical projection; not an SIP mandate. |
+| GET | `/api/investments/sips` `/plans` `/goals` `/fixed-income` `/insights` `/documents` | Tracking and records. |
+| POST | `/api/investments/goals` `/goals/:id/contributions` `/fixed-income` `/insights/refresh` `/documents` | Planning and document upload. |
+| GET | `/api/investments/documents/:id/download` | Signed short-lived document access. |
+| GET | `/api/wealth/net-worth` `/history` `/assets` `/liabilities` | Net worth reuses existing account analytics. |
+| POST | `/api/wealth/net-worth/snapshot` | Persist a net-worth snapshot. |
+| GET | `/api/control/investments/overview` `/providers` `/jobs` `/history` `/documents` | Investment operations. |
+| POST | `/api/control/investments/jobs/:id/retry` `/providers/:code/pause` `/run` | Audited read-only operations. |
+
+Details: `docs/investment-architecture.md`, `docs/investment-provider-guide.md`, `docs/release-16-report.md`.

@@ -495,6 +495,14 @@ enum NotificationType {
   TRAVEL_CHECKIN_REMINDER
   TRAVEL_TRIP_STARTING
   TRAVEL_DOCUMENT_REMINDER
+  INVESTMENT_SYNC_COMPLETED
+  INVESTMENT_PROVIDER_FAILURE
+  INVESTMENT_CONSENT_EXPIRING
+  INVESTMENT_SIP_REMINDER
+  INVESTMENT_MATURITY_REMINDER
+  INVESTMENT_PRICE_ALERT
+  INVESTMENT_GOAL_MILESTONE
+  INVESTMENT_DOCUMENT_AVAILABLE
 }
 
 enum GroupActivityEventType {
@@ -4226,6 +4234,14 @@ enum SecurityEventType {
   TRAVEL_REFUND_REQUESTED
   TRAVEL_PASSENGER_DETAILS_CHANGED
   UNUSUAL_BOOKING_ATTEMPT
+  INVESTMENT_CONNECTION_INITIATED
+  INVESTMENT_CONNECTED
+  INVESTMENT_DISCONNECTED
+  INVESTMENT_SYNC_COMPLETED
+  INVESTMENT_HOLDINGS_CHANGED
+  INVESTMENT_GOAL_CREATED
+  INVESTMENT_WATCHLIST_CHANGED
+  UNUSUAL_INVESTMENT_ACTIVITY
 }
 
 enum SecurityOutboxStatus {
@@ -5892,6 +5908,631 @@ model TravelReconciliationCase {
 
   @@index([status, createdAt])
   @@map("travel_reconciliation_cases")
+}
+
+// ---------------------------------------------------------------------------
+// Release 16 — Investments, portfolio & wealth.
+// Holdings are external provider snapshots, never wallet transactions.
+// Raftline remains authoritative for wallet money. No investment advice,
+// order execution or fabricated provider data.
+// ---------------------------------------------------------------------------
+
+enum InvestmentProviderMode {
+  SANDBOX
+  PRODUCTION
+}
+
+enum InvestmentConnectionStatus {
+  NOT_CONNECTED
+  CONNECTION_INITIATED
+  AUTHORIZATION_PENDING
+  ACTIVE
+  SYNCING
+  SYNC_FAILED
+  CONSENT_EXPIRED
+  REVOKED
+  DISCONNECTED
+}
+
+enum InvestmentConsentStatus {
+  PENDING
+  ACTIVE
+  EXPIRED
+  REVOKED
+  REJECTED
+}
+
+enum InvestmentSyncStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+  DEAD_LETTER
+}
+
+enum InvestmentAccountType {
+  MUTUAL_FUND
+  EQUITY
+  ETF
+  BOND
+  RETIREMENT
+  FIXED_INCOME
+  OTHER
+}
+
+enum InvestmentAssetClass {
+  EQUITY
+  DEBT
+  HYBRID
+  INDEX
+  ELSS
+  LIQUID
+  INTERNATIONAL
+  SECTORAL
+  GOLD
+  CASH
+  OTHER
+}
+
+enum InvestmentTransactionType {
+  PURCHASE
+  REDEMPTION
+  SIP
+  DIVIDEND
+  INTEREST
+  CORPORATE_ACTION
+  MATURITY
+  FEE
+  OTHER
+}
+
+enum InvestmentPlanStatus {
+  ACTIVE
+  PAUSED
+  CANCELLED
+  COMPLETED
+  FAILED
+  PENDING
+  UNKNOWN
+}
+
+enum PriceFeedType {
+  LIVE
+  DELAYED
+  EOD
+  SANDBOX
+}
+
+enum InvestmentGoalStatus {
+  ACTIVE
+  ACHIEVED
+  PAUSED
+  CANCELLED
+}
+
+enum InvestmentSourceType {
+  PROVIDER
+  USER_REPORTED
+  MANUAL
+}
+
+enum InvestmentDocumentStatus {
+  PENDING
+  READY
+  FAILED
+  DELETED
+}
+
+model InvestmentProvider {
+  id          String               @id @default(cuid())
+  code        String               @unique @db.VarChar(60)
+  displayName String               @db.VarChar(160)
+  mode        InvestmentProviderMode @default(SANDBOX)
+  status      String               @db.VarChar(30) @default("UNAVAILABLE")
+  capabilities Json
+  config      Json?
+  lastSyncAt  DateTime?
+  createdAt   DateTime             @default(now())
+  updatedAt   DateTime             @updatedAt
+
+  capabilityRows InvestmentProviderCapability[]
+  connections    InvestmentConnection[]
+  syncJobs       InvestmentSyncJob[]
+
+  @@map("investment_providers")
+}
+
+model InvestmentProviderCapability {
+  id         String  @id @default(cuid())
+  providerId String
+  capability String  @db.VarChar(60)
+  enabled    Boolean @default(false)
+
+  provider InvestmentProvider @relation(fields: [providerId], references: [id], onDelete: Cascade)
+
+  @@unique([providerId, capability])
+  @@map("investment_provider_capabilities")
+}
+
+model InvestmentConnection {
+  id           String                     @id @default(cuid())
+  userId       String                     @db.VarChar(80)
+  providerId   String
+  status       InvestmentConnectionStatus @default(NOT_CONNECTED)
+  providerRef  String?                    @db.VarChar(160)
+  maskedLabel  String?                    @db.VarChar(120)
+  encryptedCredentials String?            @db.VarChar(2048)
+  lastSyncAt   DateTime?
+  lastError    String?                    @db.VarChar(500)
+  createdAt    DateTime                   @default(now())
+  updatedAt    DateTime                   @updatedAt
+
+  provider InvestmentProvider @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  consents InvestmentConsent[]
+  accounts InvestmentAccount[]
+  syncJobs InvestmentSyncJob[]
+
+  @@index([userId, status])
+  @@map("investment_connections")
+}
+
+model InvestmentConsent {
+  id             String                 @id @default(cuid())
+  userId         String                 @db.VarChar(80)
+  connectionId   String
+  providerConsentRef String?            @db.VarChar(160)
+  status         InvestmentConsentStatus @default(PENDING)
+  purpose        String                 @db.VarChar(300)
+  dataCategories String[]
+  termsVersion   String                 @db.VarChar(40)
+  consentedAt    DateTime?
+  expiresAt      DateTime?
+  revokedAt      DateTime?
+  createdAt      DateTime               @default(now())
+
+  connection InvestmentConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+  events     InvestmentConsentEvent[]
+
+  @@index([userId, status])
+  @@map("investment_consents")
+}
+
+model InvestmentConsentEvent {
+  id        String   @id @default(cuid())
+  consentId String
+  event     String   @db.VarChar(60)
+  actor     String   @db.VarChar(80)
+  metadata  Json     @default("{}")
+  createdAt DateTime @default(now())
+
+  consent InvestmentConsent @relation(fields: [consentId], references: [id], onDelete: Cascade)
+
+  @@index([consentId, createdAt])
+  @@map("investment_consent_events")
+}
+
+model InvestmentSyncJob {
+  id            String             @id @default(cuid())
+  connectionId  String
+  providerId    String
+  kind          String             @db.VarChar(60)
+  status        InvestmentSyncStatus @default(PENDING)
+  attempts      Int                @default(0)
+  nextAttemptAt DateTime?
+  leaseUntil    DateTime?
+  error         String?            @db.VarChar(500)
+  metadata      Json               @default("{}")
+  createdAt     DateTime           @default(now())
+  completedAt   DateTime?
+
+  connection InvestmentConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+  provider   InvestmentProvider   @relation(fields: [providerId], references: [id], onDelete: Cascade)
+
+  @@index([status, nextAttemptAt])
+  @@map("investment_sync_jobs")
+}
+
+model InvestmentSyncHistory {
+  id           String   @id @default(cuid())
+  connectionId String
+  status       String   @db.VarChar(40)
+  accountsSeen Int      @default(0)
+  holdingsSeen Int      @default(0)
+  transactionsSeen Int  @default(0)
+  detail       String?  @db.VarChar(500)
+  startedAt    DateTime @default(now())
+  finishedAt   DateTime?
+
+  @@index([connectionId, startedAt])
+  @@map("investment_sync_history")
+}
+
+model InvestmentAccount {
+  id           String               @id @default(cuid())
+  userId       String               @db.VarChar(80)
+  connectionId String
+  providerRef  String               @db.VarChar(160)
+  name         String               @db.VarChar(160)
+  accountType  InvestmentAccountType @default(OTHER)
+  maskedNumber String?              @db.VarChar(80)
+  currency     String               @db.VarChar(10) @default("INR")
+  status       String               @db.VarChar(30) @default("ACTIVE")
+  source       InvestmentSourceType @default(PROVIDER)
+  lastSyncedAt DateTime?
+  createdAt    DateTime             @default(now())
+  updatedAt    DateTime             @updatedAt
+
+  connection InvestmentConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+  holdings   InvestmentHolding[]
+  transactions InvestmentTransaction[]
+  valuations InvestmentValuation[]
+
+  @@unique([connectionId, providerRef])
+  @@index([userId, status])
+  @@map("investment_accounts")
+}
+
+model InvestmentHolding {
+  id          String              @id @default(cuid())
+  userId      String              @db.VarChar(80)
+  accountId   String
+  providerRef String              @db.VarChar(160)
+  instrumentId String?            @db.VarChar(80)
+  name        String              @db.VarChar(200)
+  assetClass  InvestmentAssetClass @default(OTHER)
+  quantityMinor Int?
+  navMinor    Int?
+  costMinor   Int?
+  valueMinor  Int
+  currency    String              @db.VarChar(10) @default("INR")
+  source      InvestmentSourceType @default(PROVIDER)
+  providerReportedAt DateTime
+  expiresAt   DateTime?
+  createdAt   DateTime            @default(now())
+  updatedAt   DateTime            @updatedAt
+
+  account InvestmentAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@unique([accountId, providerRef])
+  @@index([userId, assetClass])
+  @@map("investment_holdings")
+}
+
+model InvestmentTransaction {
+  id          String                  @id @default(cuid())
+  userId      String                  @db.VarChar(80)
+  accountId   String
+  providerRef String                  @db.VarChar(160)
+  type        InvestmentTransactionType @default(OTHER)
+  quantityMinor Int?
+  priceMinor  Int?
+  amountMinor Int
+  chargesMinor Int                    @default(0)
+  currency    String                  @db.VarChar(10) @default("INR")
+  occurredAt  DateTime
+  settledAt   DateTime?
+  providerStatus String?              @db.VarChar(60)
+  source      InvestmentSourceType    @default(PROVIDER)
+  syncedAt    DateTime                @default(now())
+  createdAt   DateTime                @default(now())
+
+  account InvestmentAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@unique([accountId, providerRef])
+  @@index([userId, occurredAt])
+  @@map("investment_transactions")
+}
+
+model InvestmentValuation {
+  id          String   @id @default(cuid())
+  userId      String   @db.VarChar(80)
+  accountId   String
+  valueMinor  Int
+  costMinor   Int
+  currency    String   @db.VarChar(10) @default("INR")
+  valuedAt    DateTime
+  source      InvestmentSourceType @default(PROVIDER)
+  createdAt   DateTime @default(now())
+
+  account InvestmentAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@unique([accountId, valuedAt])
+  @@index([userId, valuedAt])
+  @@map("investment_valuations")
+}
+
+model InvestmentDocument {
+  id          String                 @id @default(cuid())
+  userId      String                 @db.VarChar(80)
+  connectionId String?               @db.VarChar(80)
+  accountId   String?                @db.VarChar(80)
+  kind        String                 @db.VarChar(60)
+  fileName    String                 @db.VarChar(200)
+  contentType String                 @db.VarChar(100)
+  sizeBytes   Int
+  storagePath String?                @db.VarChar(1024)
+  status      InvestmentDocumentStatus @default(PENDING)
+  providerRef String?                @db.VarChar(160)
+  createdAt   DateTime               @default(now())
+
+  @@unique([connectionId, providerRef])
+  @@index([userId, createdAt])
+  @@map("investment_documents")
+}
+
+model InvestmentInstrument {
+  id          String   @id @default(cuid())
+  providerId  String?
+  symbol      String   @unique @db.VarChar(80)
+  name        String   @db.VarChar(200)
+  exchange    String?  @db.VarChar(40)
+  category    InvestmentAssetClass @default(EQUITY)
+  sector      String?  @db.VarChar(80)
+  details     Json     @default("{}")
+  source      String   @db.VarChar(30) @default("SANDBOX_FIXTURE")
+  retrievedAt DateTime @default(now())
+
+  prices InstrumentPriceHistory[]
+  watchlistItems InvestmentWatchlistItem[]
+
+  @@index([category, name])
+  @@map("investment_instruments")
+}
+
+model InstrumentPriceHistory {
+  id          String       @id @default(cuid())
+  instrumentId String
+  priceMinor  Int
+  changeMinor Int          @default(0)
+  changePct   Int          @default(0)
+  feedType    PriceFeedType @default(SANDBOX)
+  recordedAt  DateTime     @default(now())
+
+  instrument InvestmentInstrument @relation(fields: [instrumentId], references: [id], onDelete: Cascade)
+
+  @@index([instrumentId, recordedAt])
+  @@map("instrument_price_history")
+}
+
+model MutualFundScheme {
+  id            String               @id @default(cuid())
+  providerId    String?
+  code          String               @unique @db.VarChar(100)
+  name          String               @db.VarChar(200)
+  amc           String               @db.VarChar(160)
+  category      InvestmentAssetClass @default(EQUITY)
+  planType      String               @db.VarChar(20) @default("DIRECT")
+  optionType    String               @db.VarChar(20) @default("GROWTH")
+  navMinor      Int?
+  navDate       DateTime?
+  expenseRatioBps Int?
+  inceptionDate DateTime?
+  minInvestmentMinor Int?
+  minSipMinor   Int?
+  exitLoad      String?              @db.VarChar(300)
+  riskometer    String?              @db.VarChar(40)
+  benchmark     String?              @db.VarChar(160)
+  performance   Json                 @default("{}")
+  documents     Json                 @default("[]")
+  source        String               @db.VarChar(30) @default("SANDBOX_FIXTURE")
+  retrievedAt   DateTime             @default(now())
+
+  @@index([category, amc])
+  @@map("mutual_fund_schemes")
+}
+
+model InvestmentWatchlist {
+  id        String   @id @default(cuid())
+  userId    String   @db.VarChar(80)
+  name      String   @db.VarChar(120)
+  isDefault Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  items InvestmentWatchlistItem[]
+
+  @@index([userId, createdAt])
+  @@map("investment_watchlists")
+}
+
+model InvestmentWatchlistItem {
+  id          String   @id @default(cuid())
+  watchlistId String
+  instrumentId String
+  addedAt     DateTime @default(now())
+
+  watchlist  InvestmentWatchlist @relation(fields: [watchlistId], references: [id], onDelete: Cascade)
+  instrument InvestmentInstrument @relation(fields: [instrumentId], references: [id], onDelete: Cascade)
+
+  @@unique([watchlistId, instrumentId])
+  @@map("investment_watchlist_items")
+}
+
+model InvestmentPriceAlert {
+  id          String   @id @default(cuid())
+  userId      String   @db.VarChar(80)
+  instrumentId String
+  direction   String   @db.VarChar(10)
+  thresholdMinor Int
+  lastTriggeredAt DateTime?
+  status      String   @db.VarChar(20) @default("ACTIVE")
+  createdAt   DateTime @default(now())
+
+  @@unique([userId, instrumentId, direction, thresholdMinor])
+  @@index([userId, status])
+  @@map("investment_price_alerts")
+}
+
+model InvestmentPlan {
+  id            String   @id @default(cuid())
+  userId        String   @db.VarChar(80)
+  name          String   @db.VarChar(160)
+  kind          String   @db.VarChar(40) @default("SIP_PLANNER")
+  input         Json     @default("{}")
+  projection    Json     @default("{}")
+  isExecution   Boolean  @default(false)
+  createdAt     DateTime @default(now())
+
+  @@index([userId, createdAt])
+  @@map("investment_plans")
+}
+
+model SIPTrackingRecord {
+  id                String             @id @default(cuid())
+  userId            String             @db.VarChar(80)
+  connectionId      String?            @db.VarChar(80)
+  schemeCode        String             @db.VarChar(100)
+  schemeName        String             @db.VarChar(200)
+  amountMinor       Int
+  frequency         String             @db.VarChar(20) @default("MONTHLY")
+  startDate         DateTime?
+  nextInstalmentDate DateTime?
+  instalmentsCompleted Int              @default(0)
+  investedMinor     Int                @default(0)
+  currentValueMinor Int?
+  status            InvestmentPlanStatus @default(UNKNOWN)
+  providerRef       String?            @db.VarChar(160)
+  source            InvestmentSourceType @default(PROVIDER)
+  providerReportedAt DateTime           @default(now())
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+
+  @@unique([userId, schemeCode, providerRef])
+  @@index([userId, status])
+  @@map("sip_tracking_records")
+}
+
+model InvestmentGoal {
+  id                  String             @id @default(cuid())
+  userId              String             @db.VarChar(80)
+  name                String             @db.VarChar(160)
+  goalType            String             @db.VarChar(60)
+  targetAmountMinor   Int
+  targetDate          DateTime?
+  currentAmountMinor  Int                @default(0)
+  monthlyTargetMinor  Int?
+  status              InvestmentGoalStatus @default(ACTIVE)
+  notes               String?            @db.VarChar(1000)
+  createdAt           DateTime           @default(now())
+  updatedAt           DateTime           @updatedAt
+
+  contributions InvestmentGoalContribution[]
+
+  @@index([userId, status])
+  @@map("investment_goals")
+}
+
+model InvestmentGoalContribution {
+  id        String   @id @default(cuid())
+  goalId    String
+  userId    String   @db.VarChar(80)
+  amountMinor Int
+  kind      String   @db.VarChar(30) @default("MANUAL")
+  note      String?  @db.VarChar(300)
+  createdAt DateTime @default(now())
+
+  goal InvestmentGoal @relation(fields: [goalId], references: [id], onDelete: Cascade)
+
+  @@index([goalId, createdAt])
+  @@map("investment_goal_contributions")
+}
+
+model FixedIncomeAsset {
+  id              String               @id @default(cuid())
+  userId          String               @db.VarChar(80)
+  connectionId    String?              @db.VarChar(80)
+  name            String               @db.VarChar(200)
+  category        String               @db.VarChar(60)
+  principalMinor  Int
+  interestRateBps Int?
+  maturityDate    DateTime?
+  interestFrequency String?            @db.VarChar(40)
+  currentValueMinor Int?
+  accruedInterestMinor Int?
+  creditRating    String?              @db.VarChar(40)
+  issuer          String?              @db.VarChar(160)
+  source          InvestmentSourceType @default(USER_REPORTED)
+  providerRef     String?              @db.VarChar(160)
+  riskDisclosure  String?              @db.VarChar(500)
+  createdAt       DateTime             @default(now())
+  updatedAt       DateTime             @updatedAt
+
+  @@index([userId, category])
+  @@map("fixed_income_assets")
+}
+
+model NetWorthSnapshot {
+  id              String   @id @default(cuid())
+  userId          String   @db.VarChar(80)
+  totalAssetsMinor Int
+  totalLiabilitiesMinor Int
+  netWorthMinor   Int
+  walletMinor     Int      @default(0)
+  bankMinor       Int      @default(0)
+  investmentsMinor Int     @default(0)
+  fixedIncomeMinor Int     @default(0)
+  liabilitiesMinor Int     @default(0)
+  breakdown       Json     @default("{}")
+  completeness    String   @db.VarChar(30) @default("PARTIAL")
+  capturedAt      DateTime @default(now())
+
+  @@index([userId, capturedAt])
+  @@map("net_worth_snapshots")
+}
+
+model PortfolioSnapshot {
+  id              String   @id @default(cuid())
+  userId          String   @db.VarChar(80)
+  investedMinor   Int
+  currentValueMinor Int
+  absoluteReturnMinor Int
+  returnPctBps    Int
+  holdingsCount   Int      @default(0)
+  allocation      Json     @default("{}")
+  capturedAt      DateTime @default(now())
+
+  @@index([userId, capturedAt])
+  @@map("portfolio_snapshots")
+}
+
+model PortfolioAllocationSnapshot {
+  id          String   @id @default(cuid())
+  snapshotId  String
+  dimension   String   @db.VarChar(40)
+  key         String   @db.VarChar(120)
+  valueMinor  Int
+  pctBps      Int
+
+  @@index([snapshotId, dimension])
+  @@map("portfolio_allocation_snapshots")
+}
+
+model PortfolioInsight {
+  id          String   @id @default(cuid())
+  userId      String   @db.VarChar(80)
+  kind        String   @db.VarChar(60)
+  title       String   @db.VarChar(200)
+  explanation String   @db.VarChar(1000)
+  evidence    Json     @default("{}")
+  dataAsOf    DateTime
+  createdAt   DateTime @default(now())
+
+  @@index([userId, createdAt])
+  @@map("portfolio_insights")
+}
+
+model InvestmentAnalyticsJob {
+  id          String   @id @default(cuid())
+  userId      String   @db.VarChar(80)
+  kind        String   @db.VarChar(60)
+  status      String   @db.VarChar(30) @default("PENDING")
+  attempts    Int      @default(0)
+  error       String?  @db.VarChar(500)
+  createdAt   DateTime @default(now())
+  completedAt DateTime?
+
+  @@index([status, createdAt])
+  @@map("investment_analytics_jobs")
 }
 
 model Statement {

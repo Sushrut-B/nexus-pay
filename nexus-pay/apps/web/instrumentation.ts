@@ -11,6 +11,7 @@ export async function register() {
     const { startFraudWorker } = await import("@/lib/fraud/fraud-bootstrap");
     const { startBillPaymentWorker } = await import("@/lib/billing/billing-worker-bootstrap");
     const { startTravelWorker } = await import("@/lib/travel/travel-worker-bootstrap");
+    const { startInvestmentWorker } = await import("@/lib/investments/investment-worker-bootstrap");
     startScheduler();
     startWebhookWorker();
     startBillingWorker();
@@ -22,5 +23,6 @@ export async function register() {
     startFraudWorker();
     startBillPaymentWorker();
     startTravelWorker();
+    startInvestmentWorker();
   }
 }

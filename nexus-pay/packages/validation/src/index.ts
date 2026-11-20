@@ -1421,3 +1421,78 @@ export type TravelBudgetInput = z.infer<typeof travelBudgetSchema>;
 export type TravelItineraryItemInput = z.infer<typeof travelItineraryItemSchema>;
 export type TravelWebhookInput = z.infer<typeof travelWebhookSchema>;
 
+// ---------------------------------------------------------------------------
+// Release 16 — Investments, portfolio & wealth
+// ---------------------------------------------------------------------------
+
+export const investmentConnectionSchema = z.object({
+  providerCode: z.string().trim().min(2).max(60),
+  displayName: z.string().trim().min(2).max(160).optional(),
+});
+
+export const investmentHoldingSchema = z.object({
+  accountName: z.string().trim().min(2).max(160),
+  accountType: z.enum(["MUTUAL_FUND", "EQUITY", "ETF", "BOND", "RETIREMENT", "FIXED_INCOME", "OTHER"]).default("OTHER"),
+  name: z.string().trim().min(2).max(200),
+  assetClass: z.enum(["EQUITY", "DEBT", "HYBRID", "INDEX", "ELSS", "LIQUID", "INTERNATIONAL", "SECTORAL", "GOLD", "CASH", "OTHER"]).default("OTHER"),
+  quantityMinor: z.number().int().min(0).optional(),
+  navMinor: z.number().int().min(0).optional(),
+  costMinor: z.number().int().min(0).optional(),
+  valueMinor: z.number().int().min(0),
+  providerRef: z.string().trim().min(3).max(160),
+});
+
+export const watchlistSchema = z.object({
+  name: z.string().trim().min(2).max(120),
+  isDefault: z.boolean().default(false),
+});
+
+export const priceAlertSchema = z.object({
+  instrumentId: z.string().trim().min(2).max(80),
+  direction: z.enum(["ABOVE", "BELOW"]),
+  thresholdMinor: z.number().int().min(1).max(100_000_000),
+});
+
+export const sipCalculatorSchema = z.object({
+  monthlyMinor: z.number().int().min(100).max(100_000_000),
+  months: z.number().int().min(1).max(600),
+  assumedReturnBps: z.number().int().min(0).max(5000),
+  frequency: z.enum(["MONTHLY", "ANNUAL"]).default("MONTHLY"),
+});
+
+export const investmentGoalSchema = z.object({
+  name: z.string().trim().min(2).max(160),
+  goalType: z.string().trim().min(2).max(60),
+  targetAmountMinor: z.number().int().min(100).max(1_000_000_000),
+  targetDate: z.string().datetime().optional(),
+  monthlyTargetMinor: z.number().int().min(0).optional(),
+  notes: z.string().trim().max(1000).optional(),
+});
+
+export const goalContributionSchema = z.object({
+  amountMinor: z.number().int().min(1).max(1_000_000_000),
+  kind: z.enum(["MANUAL", "ESTIMATED"]).default("MANUAL"),
+  note: z.string().trim().max(300).optional(),
+});
+
+export const fixedIncomeSchema = z.object({
+  name: z.string().trim().min(2).max(200),
+  category: z.string().trim().min(2).max(60),
+  principalMinor: z.number().int().min(1).max(1_000_000_000),
+  interestRateBps: z.number().int().min(0).max(10_000).optional(),
+  maturityDate: z.string().datetime().optional(),
+  currentValueMinor: z.number().int().min(0).optional(),
+  issuer: z.string().trim().max(160).optional(),
+  creditRating: z.string().trim().max(40).optional(),
+  source: z.enum(["USER_REPORTED", "PROVIDER"]).default("USER_REPORTED"),
+});
+
+export type InvestmentConnectionInput = z.infer<typeof investmentConnectionSchema>;
+export type InvestmentHoldingInput = z.infer<typeof investmentHoldingSchema>;
+export type WatchlistInput = z.infer<typeof watchlistSchema>;
+export type PriceAlertInput = z.infer<typeof priceAlertSchema>;
+export type SipCalculatorInput = z.infer<typeof sipCalculatorSchema>;
+export type InvestmentGoalInput = z.infer<typeof investmentGoalSchema>;
+export type GoalContributionInput = z.infer<typeof goalContributionSchema>;
+export type FixedIncomeInput = z.infer<typeof fixedIncomeSchema>;
+

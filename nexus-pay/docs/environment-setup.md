@@ -235,6 +235,15 @@ NEXUS_TRAVEL_SEARCH_TTL_MINUTES="30"
 
 The sandbox flag enables labelled test search results, fares, bookings and tickets only. No IRCTC, airline, hotel, bus, metro or mobility partnership exists. Keep it false in production.
 
+Release 16 investments:
+
+```dotenv
+NEXUS_INVESTMENTS_SANDBOX_ENABLED="false"
+NEXUS_INVESTMENTS_STALE_HOURS="48"
+```
+
+The sandbox flag enables labelled test holdings, funds, prices and SIP records only. There is no SEBI/AMFI/Account Aggregator authorization, no real provider and no trading. Keep it false in production.
+
 ### Raftline settings
 
 Preferred per-node configuration:

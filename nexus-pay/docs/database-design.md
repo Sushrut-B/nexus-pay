@@ -43,6 +43,12 @@ balances or transaction history. Raftline remains the financial source of truth.
 > Raftline settlement reference to a provider reference without duplicating the
 > payment or transaction tables. Itinerary items store an absolute UTC instant
 > plus an IANA timezone. See `docs/travel-architecture.md`.
+>
+> Release 16 adds 28 investment models via
+> `20261120104733_release16_investments_wealth`. Holdings are external provider
+> snapshots with unique provider references; they never duplicate payment or
+> transaction tables and never enter cash-flow analytics. See
+> `docs/investment-architecture.md`.
 
 ## 2. Ownership boundary
 

@@ -7,7 +7,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@nexus/ui";
 import {
   Activity, AlertTriangle, BellRing, BrainCircuit, ChevronRight, CreditCard, FileClock, Gauge, GitBranch,
-  Landmark, LockKeyhole, Plane, Receipt, Repeat, Search, Shield, ShieldAlert, ShieldCheck, SlidersHorizontal, Store, Terminal, Users, Zap,
+  Landmark, LineChart, LockKeyhole, Plane, Receipt, Repeat, Search, Shield, ShieldAlert, ShieldCheck, SlidersHorizontal, Store, Terminal, Users, Zap,
 } from "lucide-react";
 import { apiFetch, ApiClientError } from "@/lib/api/client";
 
@@ -37,6 +37,7 @@ const NAV = [
   { href: "/control/fraud", label: "Fraud Intelligence", icon: ShieldAlert },
   { href: "/control/bill-payments", label: "Bill Payments", icon: Receipt },
   { href: "/control/travel", label: "Travel Operations", icon: Plane },
+  { href: "/control/investments", label: "Investment Operations", icon: LineChart },
   { href: "/control/admin", label: "Administration", icon: Users, adminOnly: true },
 ];
 
