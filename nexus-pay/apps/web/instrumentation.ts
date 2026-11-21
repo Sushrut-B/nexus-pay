@@ -15,6 +15,7 @@ export async function register() {
     const { startTaxWorker } = await import("@/lib/tax/tax-worker-bootstrap");
     const { startGlobalWorker } = await import("@/lib/global/global-worker-bootstrap");
     const { startSupportWorker } = await import("@/lib/support/support-worker-bootstrap");
+    const { startSecurityWorker } = await import("@/lib/identity/security-worker-bootstrap");
     startScheduler();
     startWebhookWorker();
     startBillingWorker();
@@ -30,5 +31,6 @@ export async function register() {
     startTaxWorker();
     startGlobalWorker();
     startSupportWorker();
+    startSecurityWorker();
   }
 }

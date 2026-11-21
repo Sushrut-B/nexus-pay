@@ -59,6 +59,15 @@ export async function POST(request: NextRequest) {
       throw error;
     }
 
+    if (result.mfa) {
+      return jsonOk({
+        mfaRequired: true,
+        challengeToken: result.mfa.challengeToken,
+        expiresAt: result.mfa.expiresAt,
+        notice: result.mfa.notice,
+      }, requestId);
+    }
+
     const auth = await getAuthenticatedUser();
     const deviceId = request.headers.get("x-device-id") ?? hashDevice(userAgent) ?? "unknown-device";
     const device = await recordDeviceActivity({

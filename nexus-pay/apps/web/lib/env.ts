@@ -137,6 +137,20 @@ const envSchema = z.object({
   NEXUS_SUPPORT_ATTACHMENT_MAX_BYTES: z.coerce.number().int().min(1024).max(25 * 1024 * 1024).default(5 * 1024 * 1024),
   NEXUS_SUPPORT_INACTIVITY_REMINDER_HOURS: z.coerce.number().int().min(1).max(720).default(48),
   NEXUS_SUPPORT_HELP_REVIEW_DAYS: z.coerce.number().int().min(1).max(365).default(90),
+
+  // Release 20 — account security, privacy and identity protection.
+  NEXUS_SECURITY_ENABLED: z
+    .enum(["true", "false"])
+    .default("true")
+    .transform((value) => value === "true"),
+  NEXUS_SECURITY_MFA_ENABLED: z
+    .enum(["true", "false"])
+    .default("false")
+    .transform((value) => value === "true"),
+  NEXUS_SECURITY_MFA_CHALLENGE_TTL_MINUTES: z.coerce.number().int().min(1).max(30).default(5),
+  NEXUS_SECURITY_STEP_UP_TTL_MINUTES: z.coerce.number().int().min(1).max(30).default(10),
+  NEXUS_SECURITY_RECOVERY_TTL_MINUTES: z.coerce.number().int().min(1).max(1440).default(30),
+  NEXUS_SECURITY_EXPORT_TTL_HOURS: z.coerce.number().int().min(1).max(168).default(24),
 });
 
 let cached: z.infer<typeof envSchema> | null = null;

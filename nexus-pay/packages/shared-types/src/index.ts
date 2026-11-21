@@ -153,3 +153,4 @@ export * from "./investments";
 export * from "./tax";
 export * from "./global";
 export * from "./support";
+export * from "./identity";

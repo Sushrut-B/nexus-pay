@@ -1793,3 +1793,104 @@ export type SupportAttachmentInput = z.infer<typeof supportAttachmentSchema>;
 export type HelpFeedbackInput = z.infer<typeof helpFeedbackSchema>;
 export type HelpArticleInput = z.infer<typeof helpArticleSchema>;
 
+// ---------------------------------------------------------------------------
+// Release 20 — account security, privacy & identity protection.
+// No passwords, OTPs, recovery codes or tokens are accepted in ordinary input.
+// ---------------------------------------------------------------------------
+
+export const stepUpRequestSchema = z.object({
+  action: z.enum([
+    "CHANGE_EMAIL", "CHANGE_PHONE", "CHANGE_PASSWORD", "CHANGE_RECOVERY",
+    "MFA_ENROLL", "MFA_DISABLE", "TRUST_DEVICE", "MERCHANT_SETTINGS",
+  ]),
+  password: z.string().min(8).max(200),
+  reason: z.string().trim().max(300).optional(),
+});
+
+export const stepUpConsumeSchema = z.object({
+  grantToken: z.string().trim().min(8).max(256),
+  action: z.string().trim().min(3).max(60),
+});
+
+export const changePasswordSchema = z.object({
+  currentPassword: z.string().min(8).max(200).optional(),
+  grantToken: z.string().trim().min(8).max(256).optional(),
+  newPassword: passwordSchema,
+  confirmPassword: passwordSchema,
+  revokeOtherSessions: z.boolean().default(true),
+}).refine((value) => value.newPassword === value.confirmPassword, {
+  message: "Passwords do not match",
+  path: ["confirmPassword"],
+}).refine((value) => Boolean(value.currentPassword || value.grantToken), {
+  message: "Current password or a valid step-up grant is required",
+  path: ["currentPassword"],
+});
+
+export const mfaVerifySchema = z.object({
+  code: z.string().trim().regex(/^\d{6}$/, "Enter the 6-digit code"),
+  challengeToken: z.string().trim().min(8).max(256).optional(),
+});
+
+export const mfaConfirmSchema = z.object({
+  code: z.string().trim().regex(/^\d{6}$/, "Enter the 6-digit code"),
+  enrollmentId: z.string().trim().min(2).max(80),
+});
+
+export const recoveryCodeSchema = z.object({
+  code: z.string().trim().min(8).max(64),
+});
+
+export const accountRecoveryRequestSchema = z.object({
+  email: z.string().trim().email().max(254),
+  reason: z.string().trim().min(3).max(300).optional(),
+});
+
+export const accountRecoveryCompleteSchema = z.object({
+  token: z.string().trim().min(20).max(256),
+  newPassword: passwordSchema,
+  confirmPassword: passwordSchema,
+}).refine((value) => value.newPassword === value.confirmPassword, {
+  message: "Passwords do not match",
+  path: ["confirmPassword"],
+});
+
+export const privacyConsentSchema = z.object({
+  purpose: z.string().trim().min(2).max(80),
+  version: z.string().trim().min(1).max(40),
+  granted: z.boolean(),
+  source: z.string().trim().min(2).max(60).default("SECURITY_CENTRE"),
+});
+
+export const dataExportRequestSchema = z.object({
+  format: z.enum(["JSON"]).default("JSON"),
+  idempotencyKey: z.string().trim().min(8).max(80).regex(/^[A-Za-z0-9][A-Za-z0-9_.:-]{7,79}$/),
+});
+
+export const dataDeletionRequestSchemaV2 = z.object({
+  reason: z.string().trim().min(5).max(500),
+  confirmation: z.literal("DELETE_MY_ACCOUNT_DATA"),
+  idempotencyKey: z.string().trim().min(8).max(80).regex(/^[A-Za-z0-9][A-Za-z0-9_.:-]{7,79}$/),
+});
+
+export const adminSecurityReasonSchema = z.object({
+  reason: z.string().trim().min(5).max(500),
+});
+
+export const adminDeletionReviewSchema = adminSecurityReasonSchema.extend({
+  decision: z.enum(["APPROVED", "REJECTED"]),
+});
+
+export type StepUpRequestInput = z.infer<typeof stepUpRequestSchema>;
+export type StepUpConsumeInput = z.infer<typeof stepUpConsumeSchema>;
+export type ChangePasswordInput = z.infer<typeof changePasswordSchema>;
+export type MfaVerifyInput = z.infer<typeof mfaVerifySchema>;
+export type MfaConfirmInput = z.infer<typeof mfaConfirmSchema>;
+export type RecoveryCodeInput = z.infer<typeof recoveryCodeSchema>;
+export type AccountRecoveryRequestInput = z.infer<typeof accountRecoveryRequestSchema>;
+export type AccountRecoveryCompleteInput = z.infer<typeof accountRecoveryCompleteSchema>;
+export type PrivacyConsentInput = z.infer<typeof privacyConsentSchema>;
+export type DataExportRequestInput = z.infer<typeof dataExportRequestSchema>;
+export type DataDeletionRequestInputV2 = z.infer<typeof dataDeletionRequestSchemaV2>;
+export type AdminSecurityReasonInput = z.infer<typeof adminSecurityReasonSchema>;
+export type AdminDeletionReviewInput = z.infer<typeof adminDeletionReviewSchema>;
+

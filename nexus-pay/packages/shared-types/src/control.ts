@@ -5,7 +5,7 @@
  * They are never a financial ledger and never represent authoritative balances.
  */
 
-export const ADMIN_ROLES = ["SUPER_ADMIN", "OPERATOR", "VIEWER", "FRAUD_ADMIN", "FRAUD_ANALYST", "SUPPORT_AGENT", "SUPPORT_SUPERVISOR"] as const;
+export const ADMIN_ROLES = ["SUPER_ADMIN", "OPERATOR", "VIEWER", "FRAUD_ADMIN", "FRAUD_ANALYST", "SUPPORT_AGENT", "SUPPORT_SUPERVISOR", "SECURITY_ADMIN", "SECURITY_ANALYST"] as const;
 export type AdminRole = (typeof ADMIN_ROLES)[number];
 
 export const ADMIN_ROLE_LABELS: Record<AdminRole, string> = {
@@ -16,6 +16,8 @@ export const ADMIN_ROLE_LABELS: Record<AdminRole, string> = {
   FRAUD_ANALYST: "Fraud analyst",
   SUPPORT_AGENT: "Support agent",
   SUPPORT_SUPERVISOR: "Support supervisor",
+  SECURITY_ADMIN: "Security admin",
+  SECURITY_ANALYST: "Security analyst",
 };
 
 export const CLUSTER_HEALTH_STATES = [

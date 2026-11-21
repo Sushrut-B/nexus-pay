@@ -2,7 +2,7 @@
 
 # Nexus Pay
 
-**Consumer payments · Social finance · Personal intelligence · Merchant ecosystem · Subscriptions · Rewards · Financial Intelligence · Unified Accounts · Credit Marketplace · Global Finance · Customer Support · Cluster operations**
+**Consumer payments · Social finance · Personal intelligence · Merchant ecosystem · Subscriptions · Rewards · Financial Intelligence · Unified Accounts · Credit Marketplace · Global Finance · Customer Support · Account Security & Privacy · Cluster operations**
 
 [![Stack](https://img.shields.io/badge/stack-Next.js%2015%20%7C%20React%2019%20%7C%20TypeScript-blue)](https://nextjs.org/)
 [![Ledger](https://img.shields.io/badge/ledger-Raftline%205--node-green)](#architecture)
@@ -19,7 +19,7 @@
 
 ## Overview
 
-Nexus Pay is a full payments and finance platform backed by a live five-node **Raftline** cluster. It evolved across nineteen releases without rebuilding earlier work.
+Nexus Pay is a full payments and finance platform backed by a live five-node **Raftline** cluster. It evolved across twenty releases without rebuilding earlier work.
 
 | Release | Delivered |
 | --- | --- |
@@ -42,10 +42,11 @@ Nexus Pay is a full payments and finance platform backed by a live five-node **R
 | **R17** | **Tax Centre** — versioned Indian tax rules, income consolidation from existing analytics, old/new regime estimates, capital gains review, deductions and TDS tracking, secure documents with confirmed extraction, planning scenarios, filing readiness, Tax Assistant and Control Tax Operations |
 | **R18** | **Global Finance** — multi-currency tracking and valuation, exact-decimal FX engine with classified source-attributed rates, converter, currency accounts, watchlists/alerts, foreign expenses, travel currency, assets/liabilities and net-worth integration, indicative FX quotes, provider-ready international payments (UNAVAILABLE), Nexus Control Global Finance Operations (sandbox/reference only) |
 | **R19** | **Customer Support & Resolution Centre** — unified support inbox, guided issue reporting with server-verified record links, durable case lifecycle and timeline, secure messaging with private internal notes, encrypted evidence with signed links, compliance-ready states, escalation/resolution workflows, versioned Help Centre, idempotent notifications, Nexus Control Support Operations and analytics |
+| **R20** | **Account Security, Privacy & Identity Protection** — Security Centre, TOTP MFA with hashed recovery codes, login MFA challenge, step-up grants, session/device controls, durable security events, account recovery, versioned privacy consent, data export/deletion workflows, Nexus Control Security Operations |
 
 > [!IMPORTANT]
 > <a name="sandbox-notice"></a>
-> **Sandbox only.** Funding is labelled **SIMULATED SANDBOX FUNDING**. There is no bank, UPI, card or real-money integration, and no regulatory claim. Merchant approval is application-level (not KYC), merchant QR is a Nexus Pay QR (not UPI), and **Raftline has no refund/reversal capability** — refunds stop at request/review with no money moved. Subscriptions use explicit sandbox authorization - no UPI AutoPay, bank mandate or card-on-file is established. Reward points are non-cash loyalty units; cashback is a sandbox wallet credit via the existing Raftline funding path. Insurance data is metadata only; the insurance marketplace uses a clearly labelled sandbox demonstration insurer and no real insurer, quote, policy or claim is fabricated. Nexus Pay is not an insurer, broker, corporate agent or web aggregator. Fraud risk scores are explainable indicators, not proof of fraud; no wallet is frozen, no account permanently blocked from a model output, and no payment is reversed by the fraud module. Bill payments use a clearly labelled sandbox provider; no real biller, bill, recharge or confirmation is fabricated, and Nexus Pay claims no BBPS/Bharat Connect participation. Travel uses a labelled sandbox provider; no real availability, fare, ticket, IRCTC/airline/hotel/bus/metro partnership or refund is fabricated. Investments are read-only and informational; no SEBI/AMFI/Account Aggregator authorization, real holding, trading or investment advice is claimed. Tax figures are estimates from user records, not assessed tax; Nexus Pay is not a tax practitioner or filing intermediary and no return is submitted. Global Finance tracks and values foreign currencies for information and planning only: INR remains the only transactable Nexus Pay wallet currency, sandbox FX rates are deterministic reference fixtures (never executable quotes), and Nexus Pay is not a bank, authorised dealer, FX dealer or remittance provider — international transfers stay UNAVAILABLE until a verified, authorised provider is integrated. Support cases are case-management records only: a case never changes payment, refund, cancellation or provider status, never claims money moved without authoritative confirmation, and internal notes are never exposed to customers.
+> **Sandbox only.** Funding is labelled **SIMULATED SANDBOX FUNDING**. There is no bank, UPI, card or real-money integration, and no regulatory claim. Merchant approval is application-level (not KYC), merchant QR is a Nexus Pay QR (not UPI), and **Raftline has no refund/reversal capability** — refunds stop at request/review with no money moved. Subscriptions use explicit sandbox authorization - no UPI AutoPay, bank mandate or card-on-file is established. Reward points are non-cash loyalty units; cashback is a sandbox wallet credit via the existing Raftline funding path. Insurance data is metadata only; the insurance marketplace uses a clearly labelled sandbox demonstration insurer and no real insurer, quote, policy or claim is fabricated. Nexus Pay is not an insurer, broker, corporate agent or web aggregator. Fraud risk scores are explainable indicators, not proof of fraud; no wallet is frozen, no account permanently blocked from a model output, and no payment is reversed by the fraud module. Bill payments use a clearly labelled sandbox provider; no real biller, bill, recharge or confirmation is fabricated, and Nexus Pay claims no BBPS/Bharat Connect participation. Travel uses a labelled sandbox provider; no real availability, fare, ticket, IRCTC/airline/hotel/bus/metro partnership or refund is fabricated. Investments are read-only and informational; no SEBI/AMFI/Account Aggregator authorization, real holding, trading or investment advice is claimed. Tax figures are estimates from user records, not assessed tax; Nexus Pay is not a tax practitioner or filing intermediary and no return is submitted. Global Finance tracks and values foreign currencies for information and planning only: INR remains the only transactable Nexus Pay wallet currency, sandbox FX rates are deterministic reference fixtures (never executable quotes), and Nexus Pay is not a bank, authorised dealer, FX dealer or remittance provider — international transfers stay UNAVAILABLE until a verified, authorised provider is integrated. Support cases are case-management records only: a case never changes payment, refund, cancellation or provider status, never claims money moved without authoritative confirmation, and internal notes are never exposed to customers. Account security uses standards-based TOTP with encrypted secrets and hashed recovery codes, but no identity verification (KYC) is performed; passkeys/WebAuthn are unavailable and must not be assumed. Privacy exports and deletion requests are reviewable workflows — no financial or Raftline record is erased, no immediate backup/third-party deletion is claimed, and consent to analytics is never consent to transactions.
 
 <details>
 <summary><b>Core financial rules</b> (click to expand)</summary>
@@ -60,6 +61,7 @@ Nexus Pay is a full payments and finance platform backed by a live five-node **R
 - Webhook delivery is asynchronous via a durable outbox; it never runs inside a settlement transaction.
 - INR is the only transactable wallet currency; other currencies are original-amount tracking and valuation data only. FX rates are classified (INDICATIVE/REFERENCE/PROVIDER_QUOTE/EXECUTABLE_QUOTE/HISTORICAL) and indicative rates are never executable quotes. No silent conversion and no currency-specific wallet balances.
 - Support cases link read-only to authoritative payment/provider records; case status never overrides financial status, uncertain outcomes stay UNKNOWN until reconciled via the original provider reference, and no refund/reversal is executed from a support case.
+- MFA enrollment/recovery never stores plaintext secrets or codes; first-factor success without a valid second factor never creates a session. Security events and notifications never contain passwords, OTPs, recovery codes or tokens.
 
 </details>
 
@@ -89,6 +91,7 @@ pnpm dev
 | `http://localhost:3000/merchant/plans` | Subscription plans |
 | `http://localhost:3000/global-finance` | Global Finance (multi-currency tracking & valuation) |
 | `http://localhost:3000/support` | Customer Support & Resolution Centre |
+| `http://localhost:3000/security` | Security & Privacy Centre |
 | `http://localhost:3000/control` | Nexus Control admin console |
 
 Copy `nexus-pay/apps/web/.env.example` → `nexus-pay/apps/web/.env.local`. Register the tenant with `cd nexus-pay; .\scripts\ensure-raftline-tenant.ps1`.
@@ -107,6 +110,7 @@ Copy `nexus-pay/apps/web/.env.example` → `nexus-pay/apps/web/.env.local`. Regi
 | Finance | `/insights`, `/insights/spending`, `/transactions/categories`, `/budgets`, `/savings`, `/scheduled`, `/calendar`, `/statements` |
 | Global Finance | `/global-finance`, `/global-finance/accounts`, `/global-finance/converter`, `/global-finance/rates`, `/global-finance/rates/history`, `/global-finance/watchlists`, `/global-finance/payments`, `/global-finance/beneficiaries`, `/global-finance/transfers`, `/global-finance/expenses`, `/global-finance/travel`, `/global-finance/assets`, `/global-finance/insights`, `/global-finance/settings` |
 | Support | `/support`, `/support/cases`, `/support/new`, `/support/help` — unified case inbox with guided reporting, evidence and encrypted attachments |
+| Security & privacy | `/security`, `/security/activity`, `/security/sessions`, `/security/devices`, `/security/mfa`, `/security/recovery`, `/security/privacy`, `/security/data` — TOTP MFA, recovery, consent, exports |
 
 </details>
 
@@ -137,9 +141,10 @@ Payments settle through the existing Raftline engine; merchant tables are metada
 | Merchants / Merchant Refunds | Sandbox approval, suspension, refund request review (all audited) |
 | Global Finance | FX provider health, rate freshness, read-only sync jobs, reconciliation, webhook and compliance visibility — no balance or rate edits |
 | Support & Resolutions | Case inbox, assignment, status changes, escalation, internal notes, resolution workflows, analytics and Help Centre administration |
+| Security Operations | Security-event search, incident review, audited session revocation, recovery/deletion review — no customer secrets |
 | Audit / Diagnostics / Admin | Append-only audit, structured logs, role management |
 
-**RBAC:** `SUPER_ADMIN` → all · `OPERATOR` → operate, no admin management · `VIEWER` → read-only. Specialised roles: `FRAUD_ADMIN`/`FRAUD_ANALYST` (fraud) and `SUPPORT_AGENT`/`SUPPORT_SUPERVISOR` (least-privilege support; agents cannot resolve or escalate restricted cases). Chaos is disabled by default (`NEXUS_CONTROL_CHAOS_ENABLED=false`).
+**RBAC:** `SUPER_ADMIN` → all · `OPERATOR` → operate, no admin management · `VIEWER` → read-only. Specialised roles: `FRAUD_ADMIN`/`FRAUD_ANALYST` (fraud), `SUPPORT_AGENT`/`SUPPORT_SUPERVISOR` (support) and `SECURITY_ANALYST`/`SECURITY_ADMIN` (least-privilege security; no "log in as customer"). Chaos is disabled by default (`NEXUS_CONTROL_CHAOS_ENABLED=false`).
 
 </details>
 
@@ -172,9 +177,9 @@ flowchart LR
 | Gate | Result |
 | --- | --- |
 | `pnpm typecheck` / `pnpm lint` / `pnpm build` | Passed |
-| `pnpm test:unit` | **169 passed** |
-| `pnpm test:integration` | **205 passed** (live Raftline + PostgreSQL) |
-| Playwright E2E | **41 passed** (production mode) |
+| `pnpm test:unit` | **173 passed** |
+| `pnpm test:integration` | **214 passed** (live Raftline + PostgreSQL) |
+| Playwright E2E | **44 passed** (production mode) |
 | Live failover drill | Leader failure → new term → heal → payment settled → reconciled → audited |
 
 ```powershell
@@ -205,7 +210,8 @@ pnpm exec playwright test --config playwright.prod.config.ts
 - Tax: [Architecture](nexus-pay/docs/tax-architecture.md) · [Rule sources](nexus-pay/docs/tax-rule-sources.md) · [Release report](nexus-pay/docs/release-17-report.md)
 - Global Finance: [Assessment](nexus-pay/docs/release-18-assessment.md) / [Release report](nexus-pay/docs/release-18-report.md) — tracking and valuation only; INR remains the sole transactable wallet currency.
 - Customer Support: [Assessment](nexus-pay/docs/release-19-assessment.md) / [Release report](nexus-pay/docs/release-19-report.md) — case management only; never changes payment or provider status.
-- Reports: [R2](nexus-pay/docs/release-2-report.md) · [R3](nexus-pay/docs/release-3-report.md) · [R4](nexus-pay/docs/release-4-report.md) · [R5](nexus-pay/docs/release-5-report.md) · [R6](nexus-pay/docs/release-6-report.md) · [R7](nexus-pay/docs/release-7-report.md) · [R8](nexus-pay/docs/release-8-report.md) · [R9](nexus-pay/docs/release-9-report.md) · [R10](nexus-pay/docs/release-10-report.md) · [R11](nexus-pay/docs/release-11-report.md) · [R12](nexus-pay/docs/release-12-report.md) · [R13](nexus-pay/docs/release-13-report.md) · [R14](nexus-pay/docs/release-14-report.md) · [R15](nexus-pay/docs/release-15-report.md) · [R16](nexus-pay/docs/release-16-report.md) · [R17](nexus-pay/docs/release-17-report.md) · [R18](nexus-pay/docs/release-18-report.md) · [R19](nexus-pay/docs/release-19-report.md)
+- Account Security: [Assessment](nexus-pay/docs/release-20-assessment.md) / [Release report](nexus-pay/docs/release-20-report.md) / [Threat model](nexus-pay/docs/release-20-threat-model.md) — TOTP, recovery and privacy controls.
+- Reports: [R2](nexus-pay/docs/release-2-report.md) · [R3](nexus-pay/docs/release-3-report.md) · [R4](nexus-pay/docs/release-4-report.md) · [R5](nexus-pay/docs/release-5-report.md) · [R6](nexus-pay/docs/release-6-report.md) · [R7](nexus-pay/docs/release-7-report.md) · [R8](nexus-pay/docs/release-8-report.md) · [R9](nexus-pay/docs/release-9-report.md) · [R10](nexus-pay/docs/release-10-report.md) · [R11](nexus-pay/docs/release-11-report.md) · [R12](nexus-pay/docs/release-12-report.md) · [R13](nexus-pay/docs/release-13-report.md) · [R14](nexus-pay/docs/release-14-report.md) · [R15](nexus-pay/docs/release-15-report.md) · [R16](nexus-pay/docs/release-16-report.md) · [R17](nexus-pay/docs/release-17-report.md) · [R18](nexus-pay/docs/release-18-report.md) · [R19](nexus-pay/docs/release-19-report.md) · [R20](nexus-pay/docs/release-20-report.md)
 
 
 

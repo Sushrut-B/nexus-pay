@@ -526,6 +526,13 @@ enum NotificationType {
   SUPPORT_CASE_RESOLVED
   SUPPORT_CASE_REOPENED
   SUPPORT_CASE_STATUS_CHANGED
+  // Release 20 — account security & privacy
+  SECURITY_MFA_ENABLED
+  SECURITY_MFA_DISABLED
+  SECURITY_RECOVERY_CODE_USED
+  SECURITY_ACCOUNT_RECOVERY
+  SECURITY_PRIVACY_UPDATED
+  SECURITY_DATA_EXPORT_READY
 }
 
 enum GroupActivityEventType {
@@ -1053,6 +1060,8 @@ enum AdminRole {
   FRAUD_ANALYST
   SUPPORT_AGENT
   SUPPORT_SUPERVISOR
+  SECURITY_ADMIN
+  SECURITY_ANALYST
 }
 
 enum ClusterHealth {
@@ -4288,6 +4297,21 @@ enum SecurityEventType {
   SUPPORT_CASE_RESOLVED
   SUPPORT_EVIDENCE_ACCESSED
   SUPPORT_SENSITIVE_CONTENT_FLAGGED
+  // Release 20 — account security, privacy and identity protection
+  MFA_ENROLLMENT_STARTED
+  MFA_DISABLED
+  RECOVERY_CODE_USED
+  RECOVERY_CODES_REGENERATED
+  ACCOUNT_RECOVERY_COMPLETED
+  PRIVACY_CONSENT_UPDATED
+  DATA_EXPORT_REQUESTED
+  DATA_EXPORT_READY
+  DATA_DELETION_REQUESTED
+  DATA_DELETION_REVIEWED
+  ADMIN_SESSION_REVOKED
+  ADMIN_RECOVERY_REVIEWED
+  STEP_UP_VERIFIED
+  STEP_UP_FAILED
 }
 
 enum SecurityOutboxStatus {
@@ -7815,4 +7839,214 @@ model SupportAuditEvent {
   @@index([actorId, createdAt])
   @@index([action, createdAt])
   @@map("support_audit_events")
+}
+
+// ===========================================================================
+// Release 20 — Account Security, Privacy & Identity Protection
+// Secrets are never stored in plaintext: TOTP secrets are AES-GCM encrypted,
+// recovery codes / tokens / grants are HMAC hashes. No identity verification,
+// WebAuthn or provider delivery is implied by these models.
+// ===========================================================================
+
+model AuthMethod {
+  id              String    @id @default(cuid())
+  userId          String    @db.VarChar(80)
+  type            String    @db.VarChar(24)
+  status          String    @db.VarChar(30) @default("PENDING_VERIFICATION")
+  label           String?   @db.VarChar(120)
+  encryptedSecret String?   @db.Text
+  providerRef     String?   @db.VarChar(160)
+  createdAt       DateTime  @default(now())
+  verifiedAt      DateTime?
+  lastUsedAt      DateTime?
+  revokedAt       DateTime?
+
+  @@index([userId, type, status])
+  @@map("auth_methods")
+}
+
+model RecoveryCode {
+  id           String    @id @default(cuid())
+  userId       String    @db.VarChar(80)
+  authMethodId String?   @db.VarChar(80)
+  codeHash     String    @unique @db.VarChar(64)
+  hint         String?   @db.VarChar(20)
+  usedAt       DateTime?
+  createdAt    DateTime  @default(now())
+
+  @@index([userId, usedAt])
+  @@map("recovery_codes")
+}
+
+model MfaChallenge {
+  id          String    @id @default(cuid())
+  userId      String    @db.VarChar(80)
+  tokenHash   String    @unique @db.VarChar(64)
+  expiresAt   DateTime
+  consumedAt  DateTime?
+  createdAt   DateTime  @default(now())
+
+  @@index([userId, expiresAt])
+  @@map("mfa_challenges")
+}
+
+model StepUpGrant {
+  id          String    @id @default(cuid())
+  userId      String    @db.VarChar(80)
+  sessionId   String    @db.VarChar(80)
+  action      String    @db.VarChar(60)
+  tokenHash   String    @unique @db.VarChar(64)
+  expiresAt   DateTime
+  consumedAt  DateTime?
+  createdAt   DateTime  @default(now())
+
+  @@index([userId, sessionId, action])
+  @@map("step_up_grants")
+}
+
+model AccountRecoveryRequest {
+  id           String    @id @default(cuid())
+  userId       String    @db.VarChar(80)
+  tokenHash    String    @unique @db.VarChar(64)
+  status       String    @db.VarChar(30) @default("REQUESTED")
+  expiresAt    DateTime
+  usedAt       DateTime?
+  completedAt  DateTime?
+  reason       String?   @db.VarChar(300)
+  createdAt    DateTime  @default(now())
+
+  @@index([userId, createdAt])
+  @@index([status, expiresAt])
+  @@map("account_recovery_requests")
+}
+
+model PrivacyConsent {
+  id             String    @id @default(cuid())
+  userId         String    @db.VarChar(80)
+  purpose        String    @db.VarChar(80)
+  version        String    @db.VarChar(40)
+  status         String    @db.VarChar(20) @default("GRANTED")
+  source         String    @db.VarChar(60)
+  dataCategories Json      @default("[]")
+  grantedAt      DateTime  @default(now())
+  withdrawnAt    DateTime?
+  createdAt      DateTime  @default(now())
+
+  @@index([userId, purpose, version])
+  @@index([userId, status])
+  @@map("privacy_consents")
+}
+
+model PrivacyConsentEvent {
+  id         String   @id @default(cuid())
+  consentId  String   @db.VarChar(80)
+  userId     String   @db.VarChar(80)
+  action     String   @db.VarChar(40)
+  actor      String   @db.VarChar(80)
+  source     String   @db.VarChar(60)
+  metadata   Json     @default("{}")
+  createdAt  DateTime @default(now())
+
+  @@index([consentId, createdAt])
+  @@map("privacy_consent_events")
+}
+
+model DataExportRequest {
+  id             String    @id @default(cuid())
+  userId         String    @db.VarChar(80)
+  status         String    @db.VarChar(20) @default("REQUESTED")
+  format         String    @db.VarChar(10) @default("JSON")
+  fileName       String?   @db.VarChar(200)
+  storagePath    String?   @db.VarChar(400)
+  sha256         String?   @db.VarChar(64)
+  expiresAt      DateTime?
+  failureReason  String?   @db.VarChar(500)
+  idempotencyKey String    @unique @db.VarChar(80)
+  createdAt      DateTime  @default(now())
+  completedAt    DateTime?
+
+  @@index([userId, createdAt])
+  @@index([status, expiresAt])
+  @@map("data_export_requests")
+}
+
+model DataDeletionRequest {
+  id             String    @id @default(cuid())
+  userId         String    @db.VarChar(80)
+  status         String    @db.VarChar(30) @default("REQUESTED")
+  reason         String    @db.VarChar(500)
+  idempotencyKey String    @unique @db.VarChar(80)
+  reviewedBy     String?   @db.VarChar(80)
+  reviewNote     String?   @db.VarChar(500)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  completedAt    DateTime?
+
+  @@index([userId, createdAt])
+  @@index([status, createdAt])
+  @@map("data_deletion_requests")
+}
+
+model SecurityNotificationEvent {
+  id        String   @id @default(cuid())
+  eventKey  String   @unique @db.VarChar(180)
+  userId    String   @db.VarChar(80)
+  type      String   @db.VarChar(60)
+  createdAt DateTime @default(now())
+
+  @@index([userId, createdAt])
+  @@map("security_notification_events")
+}
+
+model SecurityJob {
+  id             String    @id @default(cuid())
+  kind           String    @db.VarChar(60)
+  payload        Json      @default("{}")
+  status         String    @db.VarChar(20) @default("PENDING")
+  attempts       Int       @default(0)
+  maxAttempts    Int       @default(3)
+  leaseUntil     DateTime?
+  nextAttemptAt  DateTime?
+  lastError      String?   @db.VarChar(1000)
+  idempotencyKey String?   @unique @db.VarChar(120)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  @@index([status, nextAttemptAt])
+  @@index([kind, createdAt])
+  @@map("security_jobs")
+}
+
+model AdminSecurityAction {
+  id         String   @id @default(cuid())
+  actorId    String   @db.VarChar(80)
+  action     String   @db.VarChar(80)
+  targetType String   @db.VarChar(60)
+  targetId   String   @db.VarChar(120)
+  reason     String   @db.VarChar(500)
+  outcome    String   @db.VarChar(20) @default("SUCCESS")
+  metadata   Json     @default("{}")
+  createdAt  DateTime @default(now())
+
+  @@index([actorId, createdAt])
+  @@index([action, createdAt])
+  @@map("admin_security_actions")
+}
+
+model SecurityIncident {
+  id             String    @id @default(cuid())
+  subjectUserId  String    @db.VarChar(80)
+  type           String    @db.VarChar(60)
+  status         String    @db.VarChar(30) @default("OPEN")
+  severity       String    @db.VarChar(20) @default("NORMAL")
+  summary        String    @db.VarChar(1000)
+  resolutionNote String?   @db.VarChar(1000)
+  openedBy       String    @db.VarChar(80)
+  openedAt       DateTime  @default(now())
+  resolvedBy     String?   @db.VarChar(80)
+  resolvedAt     DateTime?
+
+  @@index([status, openedAt])
+  @@index([subjectUserId, openedAt])
+  @@map("security_incidents")
 }

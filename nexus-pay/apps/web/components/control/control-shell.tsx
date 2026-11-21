@@ -41,6 +41,7 @@ const NAV = [
   { href: "/control/tax", label: "Tax Operations", icon: FileText },
   { href: "/control/global", label: "Global Finance", icon: Landmark },
   { href: "/control/support", label: "Support & Resolutions", icon: LifeBuoy },
+  { href: "/control/security", label: "Security Operations", icon: ShieldCheck },
   { href: "/control/admin", label: "Administration", icon: Users, adminOnly: true },
 ];
 

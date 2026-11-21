@@ -5,6 +5,8 @@ import { AUDIT_ACTIONS, recordAudit } from "@/lib/audit";
 import { ApiError } from "@/lib/api/response";
 import { createSession, type SessionMetadata } from "@/lib/auth/session";
 import { hashPassword, verifyPassword, DUMMY_PASSWORD_HASH } from "@/lib/security/passwords";
+import { hasActiveTotp, issueMfaChallenge } from "@/lib/identity/mfa-service";
+import type { MfaChallengeResult } from "@nexus/shared-types";
 
 export async function registerCustomer(
   input: RegisterInput,
@@ -79,7 +81,7 @@ export async function authenticateCustomer(
   password: string,
   rememberMe: boolean,
   metadata: SessionMetadata,
-): Promise<{ user: User; profile: UserProfile; onboardingComplete: boolean }> {
+): Promise<{ user: User; profile: UserProfile; onboardingComplete: boolean; mfa?: MfaChallengeResult }> {
   const normalised = identifier.trim().toLowerCase();
   const lookup = normalised.includes("@") ? { email: normalised } : { username: normalised };
 
@@ -104,6 +106,17 @@ export async function authenticateCustomer(
     where: { id: user.id },
     data: { lastLoginAt: new Date() },
   });
+
+  // When MFA is active, first-factor success issues a short-lived challenge
+  // instead of a session. No authenticated session exists until factor two.
+  if (await hasActiveTotp(user.id)) {
+    return {
+      user,
+      profile: user.profile,
+      onboardingComplete: Boolean(user.onboardingCompletedAt),
+      mfa: await issueMfaChallenge(user.id),
+    };
+  }
 
   await createSession(user.id, rememberMe, metadata);
   await recordAudit({
