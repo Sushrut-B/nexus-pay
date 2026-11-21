@@ -516,6 +516,16 @@ enum NotificationType {
   GLOBAL_TRANSFER_RECONCILIATION_REQUIRED
   GLOBAL_COMPLIANCE_REVIEW
   GLOBAL_VALUATION_READY
+  // Release 19 — customer support & resolution
+  SUPPORT_CASE_CREATED
+  SUPPORT_CASE_ASSIGNED
+  SUPPORT_MESSAGE_RECEIVED
+  SUPPORT_INFO_REQUESTED
+  SUPPORT_PROVIDER_UPDATE
+  SUPPORT_RESOLUTION_PROPOSED
+  SUPPORT_CASE_RESOLVED
+  SUPPORT_CASE_REOPENED
+  SUPPORT_CASE_STATUS_CHANGED
 }
 
 enum GroupActivityEventType {
@@ -1041,6 +1051,8 @@ enum AdminRole {
   VIEWER
   FRAUD_ADMIN
   FRAUD_ANALYST
+  SUPPORT_AGENT
+  SUPPORT_SUPERVISOR
 }
 
 enum ClusterHealth {
@@ -4271,6 +4283,11 @@ enum SecurityEventType {
   GLOBAL_COMPLIANCE_STATE_CHANGED
   GLOBAL_ALERT_CHANGED
   GLOBAL_RATE_MANUAL_EDIT_BLOCKED
+  SUPPORT_CASE_CREATED
+  SUPPORT_CASE_ESCALATED
+  SUPPORT_CASE_RESOLVED
+  SUPPORT_EVIDENCE_ACCESSED
+  SUPPORT_SENSITIVE_CONTENT_FLAGGED
 }
 
 enum SecurityOutboxStatus {
@@ -7511,4 +7528,291 @@ model GlobalAuditEvent {
   @@index([actorId, createdAt])
   @@index([action, createdAt])
   @@map("global_audit_events")
+}
+
+// ===========================================================================
+// Release 19 — Customer Support & Resolution Centre
+// A case-management layer only. Linked financial operations are read-only
+// references; support status never overrides authoritative payment/provider state.
+// ===========================================================================
+
+model SupportCase {
+  id                   String   @id @default(cuid())
+  reference            String   @unique @db.VarChar(40)
+  userId               String   @db.VarChar(80)
+  category             String   @db.VarChar(60)
+  status               String   @db.VarChar(30) @default("OPEN")
+  priority             String   @db.VarChar(12) @default("NORMAL")
+  description          String   @db.Text
+  guidedAnswers        Json     @default("{}")
+  linkType             String   @db.VarChar(40) @default("GENERAL")
+  linkedReference      String?  @db.VarChar(160)
+  linkedSummary        String?  @db.VarChar(500)
+  authoritativeStatus  String?  @db.VarChar(80)
+  assignedTo           String?  @db.VarChar(80)
+  unreadCount          Int      @default(0)
+  nextAction           String?  @db.VarChar(200)
+  idempotencyKey       String   @unique @db.VarChar(80)
+  resolutionSummary    String?  @db.Text
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+  lastActivityAt       DateTime @default(now())
+  resolvedAt           DateTime?
+  closedAt             DateTime?
+
+  @@index([userId, createdAt])
+  @@index([status, priority, lastActivityAt])
+  @@index([assignedTo, status])
+  @@map("support_cases")
+}
+
+model SupportCaseEvent {
+  id             String   @id @default(cuid())
+  caseId         String   @db.VarChar(80)
+  kind           String   @db.VarChar(60)
+  detail         String   @db.VarChar(1000)
+  actorType      String   @db.VarChar(30)
+  actorId        String   @db.VarChar(80)
+  actorLabel     String   @db.VarChar(120)
+  customerVisible Boolean  @default(true)
+  createdAt      DateTime @default(now())
+
+  @@index([caseId, createdAt])
+  @@map("support_case_events")
+}
+
+model SupportMessage {
+  id             String   @id @default(cuid())
+  caseId         String   @db.VarChar(80)
+  senderType     String   @db.VarChar(30)
+  senderId       String   @db.VarChar(80)
+  senderLabel    String   @db.VarChar(120)
+  senderRole     String   @db.VarChar(40) @default("CUSTOMER")
+  body           String   @db.Text
+  visibility     String   @db.VarChar(24) @default("CUSTOMER_VISIBLE")
+  idempotencyKey String?  @unique @db.VarChar(80)
+  createdAt      DateTime @default(now())
+
+  attachments SupportMessageAttachment[]
+
+  @@index([caseId, createdAt])
+  @@map("support_messages")
+}
+
+model SupportMessageAttachment {
+  id               String   @id @default(cuid())
+  caseId           String   @db.VarChar(80)
+  messageId        String?  @db.VarChar(80)
+  userId           String   @db.VarChar(80)
+  fileName         String   @db.VarChar(200)
+  contentType      String   @db.VarChar(120)
+  sizeBytes        Int
+  storagePath      String   @db.VarChar(400)
+  sha256           String   @db.VarChar(64)
+  visibility       String   @db.VarChar(24) @default("CUSTOMER_VISIBLE")
+  redacted         Boolean  @default(false)
+  uploadedAt       DateTime @default(now())
+  removedAt        DateTime?
+
+  message SupportMessage? @relation(fields: [messageId], references: [id], onDelete: SetNull)
+
+  @@index([caseId, uploadedAt])
+  @@map("support_message_attachments")
+}
+
+model SupportMessageReadState {
+  id         String   @id @default(cuid())
+  caseId     String   @db.VarChar(80)
+  userId     String   @db.VarChar(80)
+  lastReadAt DateTime @default(now())
+
+  @@unique([caseId, userId])
+  @@map("support_message_read_states")
+}
+
+model SupportCaseAssignment {
+  id           String    @id @default(cuid())
+  caseId       String    @db.VarChar(80)
+  assigneeId   String    @db.VarChar(80)
+  assignedBy   String    @db.VarChar(80)
+  assignedAt   DateTime  @default(now())
+  unassignedAt DateTime?
+
+  @@index([caseId, assignedAt])
+  @@map("support_case_assignments")
+}
+
+model SupportPriorityHistory {
+  id         String   @id @default(cuid())
+  caseId     String   @db.VarChar(80)
+  priority   String   @db.VarChar(12)
+  reason     String   @db.VarChar(500)
+  changedBy  String   @db.VarChar(80)
+  changedAt  DateTime @default(now())
+
+  @@index([caseId, changedAt])
+  @@map("support_priority_history")
+}
+
+model SupportEscalation {
+  id          String    @id @default(cuid())
+  caseId      String    @db.VarChar(80)
+  reason      String    @db.VarChar(500)
+  signal      String    @db.VarChar(80)
+  escalatedBy String    @db.VarChar(80)
+  createdAt   DateTime  @default(now())
+  resolvedAt  DateTime?
+
+  @@index([caseId, createdAt])
+  @@map("support_escalations")
+}
+
+model SupportResolution {
+  id               String    @id @default(cuid())
+  caseId           String    @db.VarChar(80)
+  summary          String    @db.Text
+  outcome          String    @db.VarChar(40)
+  providerReference String?  @db.VarChar(160)
+  proposedBy       String    @db.VarChar(80)
+  proposedAt       DateTime  @default(now())
+  resolvedBy       String?   @db.VarChar(80)
+  resolvedAt       DateTime?
+
+  @@index([caseId, proposedAt])
+  @@map("support_resolutions")
+}
+
+model SupportLinkedOperation {
+  id                 String   @id @default(cuid())
+  caseId             String   @db.VarChar(80)
+  module             String   @db.VarChar(40)
+  operationRef       String   @db.VarChar(160)
+  ownerVerified      Boolean  @default(false)
+  authoritativeStatus String? @db.VarChar(80)
+  providerReference  String?  @db.VarChar(160)
+  lastSyncedAt       DateTime?
+  createdAt          DateTime @default(now())
+
+  @@unique([caseId, module, operationRef])
+  @@index([caseId, createdAt])
+  @@map("support_linked_operations")
+}
+
+model SupportProviderInquiry {
+  id           String    @id @default(cuid())
+  caseId       String    @db.VarChar(80)
+  module       String    @db.VarChar(40)
+  operationRef String    @db.VarChar(160)
+  status       String    @db.VarChar(30) @default("PENDING")
+  requestedBy  String    @db.VarChar(80)
+  createdAt    DateTime  @default(now())
+  lastSyncedAt DateTime?
+
+  @@unique([caseId, module, operationRef])
+  @@map("support_provider_inquiries")
+}
+
+model HelpArticleCategory {
+  id         String @id @default(cuid())
+  code       String @unique @db.VarChar(60)
+  label      String @db.VarChar(160)
+  sortOrder  Int    @default(0)
+}
+
+model HelpArticle {
+  id             String   @id @default(cuid())
+  slug           String   @unique @db.VarChar(160)
+  categoryCode   String   @db.VarChar(60)
+  title          String   @db.VarChar(200)
+  status         String   @db.VarChar(20) @default("DRAFT")
+  currentVersion Int      @default(1)
+  relatedSlugs   Json     @default("[]")
+  lastReviewedAt DateTime @default(now())
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([categoryCode, status])
+  @@map("help_articles")
+}
+
+model HelpArticleVersion {
+  id         String   @id @default(cuid())
+  articleId  String   @db.VarChar(80)
+  version    Int
+  title      String   @db.VarChar(200)
+  body       String   @db.Text
+  createdBy  String   @db.VarChar(80)
+  createdAt  DateTime @default(now())
+
+  @@unique([articleId, version])
+  @@map("help_article_versions")
+}
+
+model HelpArticleFeedback {
+  id         String   @id @default(cuid())
+  articleId  String   @db.VarChar(80)
+  userId     String   @db.VarChar(80)
+  helpful    Boolean
+  createdAt  DateTime @default(now())
+
+  @@unique([articleId, userId])
+  @@map("help_article_feedback")
+}
+
+model SupportNotificationPreference {
+  id              String   @id @default(cuid())
+  userId          String   @unique @db.VarChar(80)
+  caseUpdates     Boolean  @default(true)
+  messages        Boolean  @default(true)
+  resolutionNotices Boolean @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@map("support_notification_preferences")
+}
+
+model SupportNotificationEvent {
+  id        String   @id @default(cuid())
+  eventKey  String   @unique @db.VarChar(160)
+  userId    String   @db.VarChar(80)
+  caseId    String?  @db.VarChar(80)
+  type      String   @db.VarChar(60)
+  createdAt DateTime @default(now())
+
+  @@index([userId, createdAt])
+  @@map("support_notification_events")
+}
+
+model SupportJob {
+  id             String    @id @default(cuid())
+  kind           String    @db.VarChar(60)
+  payload        Json      @default("{}")
+  status         String    @db.VarChar(20) @default("PENDING")
+  attempts       Int       @default(0)
+  maxAttempts    Int       @default(3)
+  leaseUntil     DateTime?
+  nextAttemptAt  DateTime?
+  lastError      String?   @db.VarChar(1000)
+  idempotencyKey String?   @unique @db.VarChar(120)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  @@index([status, nextAttemptAt])
+  @@index([kind, createdAt])
+  @@map("support_jobs")
+}
+
+model SupportAuditEvent {
+  id         String   @id @default(cuid())
+  actorType  String   @db.VarChar(30)
+  actorId    String   @db.VarChar(80)
+  action     String   @db.VarChar(80)
+  targetType String   @db.VarChar(60)
+  targetId   String   @db.VarChar(120)
+  metadata   Json     @default("{}")
+  createdAt  DateTime @default(now())
+
+  @@index([actorId, createdAt])
+  @@index([action, createdAt])
+  @@map("support_audit_events")
 }

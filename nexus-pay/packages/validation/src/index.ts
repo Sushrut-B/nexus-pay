@@ -1700,3 +1700,96 @@ export type ForeignExpenseInput = z.infer<typeof foreignExpenseSchema>;
 export type ForeignAssetInput = z.infer<typeof foreignAssetSchema>;
 export type TravelCashInput = z.infer<typeof travelCashSchema>;
 
+// ---------------------------------------------------------------------------
+// Release 19 — customer support, disputes and resolution centre.
+// Support cases never overwrite authoritative payment or provider status.
+// ---------------------------------------------------------------------------
+
+export const supportCaseCreateSchema = z.object({
+  category: z.enum([
+    "PAYMENT_WRONG_RECIPIENT", "PAYMENT_STATUS_UNCLEAR", "PAYMENT_FAILED_BALANCE_AFFECTED",
+    "DUPLICATE_PAYMENT", "REFUND_REVERSAL_DELAY", "MERCHANT_ORDER_ISSUE",
+    "SUBSCRIPTION_BILLING_ISSUE", "BILL_PAYMENT_ISSUE", "TRAVEL_BOOKING_ISSUE",
+    "INVESTMENT_CONNECTION_ISSUE", "TAX_DOCUMENT_ISSUE", "INTERNATIONAL_PAYMENT_ISSUE",
+    "ACCOUNT_ACCESS_ISSUE", "PROFILE_UPDATE_ISSUE", "DOCUMENT_STATEMENT_ISSUE",
+    "UNAUTHORIZED_ACTIVITY", "OTHER",
+  ]),
+  linkedType: z.enum([
+    "WALLET_TRANSACTION", "P2P_PAYMENT", "MERCHANT_ORDER", "SUBSCRIPTION_INVOICE",
+    "BILL_PAYMENT", "TRAVEL_BOOKING", "INVESTMENT_CONNECTION", "TAX_DOCUMENT",
+    "INTERNATIONAL_TRANSFER", "GENERAL",
+  ]).default("GENERAL"),
+  linkedReference: z.string().trim().min(2).max(160).optional(),
+  description: z.string().trim().min(10).max(5000),
+  guidedAnswers: z.record(z.string().trim().max(500)).default({}),
+  idempotencyKey: z.string().trim().min(8).max(80).regex(/^[A-Za-z0-9][A-Za-z0-9_.:-]{7,79}$/),
+});
+
+export const supportMessageSchema = z.object({
+  body: z.string().trim().min(1).max(5000),
+  idempotencyKey: z.string().trim().min(8).max(80).regex(/^[A-Za-z0-9][A-Za-z0-9_.:-]{7,79}$/).optional(),
+});
+
+export const supportInternalNoteSchema = z.object({
+  body: z.string().trim().min(2).max(5000),
+  idempotencyKey: z.string().trim().min(8).max(80).regex(/^[A-Za-z0-9][A-Za-z0-9_.:-]{7,79}$/).optional(),
+});
+
+export const supportStatusSchema = z.object({
+  status: z.enum([
+    "OPEN", "TRIAGED", "IN_PROGRESS", "WAITING_FOR_USER", "WAITING_FOR_PROVIDER",
+    "ESCALATED", "RESOLUTION_PROPOSED", "RESOLVED", "CLOSED", "REOPENED",
+  ]),
+  note: z.string().trim().max(500).optional(),
+});
+
+export const supportPrioritySchema = z.object({
+  priority: z.enum(["LOW", "NORMAL", "HIGH", "URGENT"]),
+  reason: z.string().trim().min(3).max(500),
+});
+
+export const supportAssignSchema = z.object({
+  assigneeId: z.string().trim().min(2).max(80).nullable(),
+});
+
+export const supportEscalateSchema = z.object({
+  reason: z.string().trim().min(3).max(500),
+  signal: z.string().trim().min(2).max(80),
+});
+
+export const supportResolveSchema = z.object({
+  summary: z.string().trim().min(10).max(5000),
+  outcome: z.enum(["RESOLVED", "NO_ACTION_REQUIRED", "REFERRED_TO_PROVIDER_WORKFLOW"]),
+  providerReference: z.string().trim().max(160).optional(),
+});
+
+export const supportAttachmentSchema = z.object({
+  fileName: z.string().trim().min(1).max(200),
+  contentType: z.string().trim().min(3).max(120),
+  sizeBytes: z.number().int().min(1).max(25 * 1024 * 1024),
+});
+
+export const helpFeedbackSchema = z.object({
+  helpful: z.boolean(),
+});
+
+export const helpArticleSchema = z.object({
+  categoryCode: z.string().trim().min(2).max(60),
+  title: z.string().trim().min(3).max(200),
+  body: z.string().trim().min(20).max(20000),
+  status: z.enum(["DRAFT", "PUBLISHED", "ARCHIVED"]).default("DRAFT"),
+  relatedSlugs: z.array(z.string().trim().max(120)).max(8).default([]),
+});
+
+export type SupportCaseCreateInput = z.infer<typeof supportCaseCreateSchema>;
+export type SupportMessageInput = z.infer<typeof supportMessageSchema>;
+export type SupportInternalNoteInput = z.infer<typeof supportInternalNoteSchema>;
+export type SupportStatusInput = z.infer<typeof supportStatusSchema>;
+export type SupportPriorityInput = z.infer<typeof supportPrioritySchema>;
+export type SupportAssignInput = z.infer<typeof supportAssignSchema>;
+export type SupportEscalateInput = z.infer<typeof supportEscalateSchema>;
+export type SupportResolveInput = z.infer<typeof supportResolveSchema>;
+export type SupportAttachmentInput = z.infer<typeof supportAttachmentSchema>;
+export type HelpFeedbackInput = z.infer<typeof helpFeedbackSchema>;
+export type HelpArticleInput = z.infer<typeof helpArticleSchema>;
+

@@ -194,6 +194,7 @@ pnpm exec playwright test --config playwright.prod.config.ts
 - Investments: [Architecture](nexus-pay/docs/investment-architecture.md) · [Provider guide](nexus-pay/docs/investment-provider-guide.md) · [Release report](nexus-pay/docs/release-16-report.md)
 - Tax: [Architecture](nexus-pay/docs/tax-architecture.md) · [Rule sources](nexus-pay/docs/tax-rule-sources.md) · [Release report](nexus-pay/docs/release-17-report.md)
 - Global Finance: [Assessment](nexus-pay/docs/release-18-assessment.md) / [Release report](nexus-pay/docs/release-18-report.md) — tracking and valuation only; INR remains the sole transactable wallet currency.
+- Customer Support: [Assessment](nexus-pay/docs/release-19-assessment.md) / [Release report](nexus-pay/docs/release-19-report.md) — case management only; never changes payment or provider status.
 - Reports: [R2](nexus-pay/docs/release-2-report.md) · [R3](nexus-pay/docs/release-3-report.md) · [R4](nexus-pay/docs/release-4-report.md) · [R5](nexus-pay/docs/release-5-report.md) · [R6](nexus-pay/docs/release-6-report.md) · [R7](nexus-pay/docs/release-7-report.md) · [R8](nexus-pay/docs/release-8-report.md) · [R9](nexus-pay/docs/release-9-report.md) · [R10](nexus-pay/docs/release-10-report.md) · [R11](nexus-pay/docs/release-11-report.md) · [R12](nexus-pay/docs/release-12-report.md) · [R13](nexus-pay/docs/release-13-report.md) · [R14](nexus-pay/docs/release-14-report.md) · [R15](nexus-pay/docs/release-15-report.md) · [R16](nexus-pay/docs/release-16-report.md) · [R17](nexus-pay/docs/release-17-report.md)
 
 

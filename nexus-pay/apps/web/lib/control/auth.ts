@@ -146,13 +146,21 @@ const PERMISSIONS: Record<AdminRole, string[]> = {
     "travel:read", "travel:write", "investments:read", "investments:write",
     "tax:read", "tax:write",
     "global:read", "global:write",
+    "support:read", "support:write", "support:respond", "support:escalate", "support:resolve",
   ],
   VIEWER: [
     "cluster:read", "nodes:read", "leader:read", "metrics:read",
     "payments:read", "reconciliation:read", "chaos:read", "alerts:read", "diagnostics:read",
     "rewards:read", "finance:read", "accounts:read", "credit:read", "insurance:read",
     "fraud:read", "bill-payments:read", "travel:read", "investments:read", "tax:read",
-    "global:read",
+    "global:read", "support:read",
+  ],
+  SUPPORT_AGENT: [
+    "support:read", "support:write", "support:respond", "audit:read",
+  ],
+  SUPPORT_SUPERVISOR: [
+    "support:read", "support:write", "support:respond", "support:escalate",
+    "support:resolve", "support:sensitive", "audit:read",
   ],
   FRAUD_ADMIN: [
     "fraud:read", "fraud:write", "fraud:risk-policies", "fraud:rules", "fraud:cases", "fraud:models",

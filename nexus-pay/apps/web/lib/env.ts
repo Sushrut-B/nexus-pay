@@ -128,6 +128,15 @@ const envSchema = z.object({
     .transform((value) => value === "true"),
   NEXUS_GLOBAL_RATE_STALE_HOURS: z.coerce.number().int().min(1).max(720).default(24),
   NEXUS_GLOBAL_DEFAULT_DISPLAY_CURRENCY: z.string().trim().length(3).regex(/^[A-Z]{3}$/).default("INR"),
+
+  // Release 19 — customer support & resolution centre (case management only).
+  NEXUS_SUPPORT_ENABLED: z
+    .enum(["true", "false"])
+    .default("true")
+    .transform((value) => value === "true"),
+  NEXUS_SUPPORT_ATTACHMENT_MAX_BYTES: z.coerce.number().int().min(1024).max(25 * 1024 * 1024).default(5 * 1024 * 1024),
+  NEXUS_SUPPORT_INACTIVITY_REMINDER_HOURS: z.coerce.number().int().min(1).max(720).default(48),
+  NEXUS_SUPPORT_HELP_REVIEW_DAYS: z.coerce.number().int().min(1).max(365).default(90),
 });
 
 let cached: z.infer<typeof envSchema> | null = null;
